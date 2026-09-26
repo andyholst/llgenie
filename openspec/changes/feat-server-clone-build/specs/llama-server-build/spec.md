@@ -218,3 +218,59 @@ window `llgenie` allocated.
 - **When** `read_model_meta_fast` parses it
 - **Then** those fields are on the meta dict and `serve_context` on a 16 GB card
   returns 262144
+
+### Requirement: MTP (spec-decode) knobs are card-driven
+When a model carries an MTP (multi-token-prediction) draft head — detected as
+`meta["nextn_layers"] > 0` in the GGUF (`nextn_predict_layers`), e.g.
+Ternary-Bonsai-2 MTP / Qwen3.8-27B MTP — the launcher MUST engage `llama-server`'s
+`--spec-type draft-mtp` path and set the community-mapped speed knobs from the
+**card's RAM** (the same `detect_card_ram_bytes()` value that picks the tree),
+never from hard-coded constants. Grounded in the qwen38-mtp community rules:
+
+- **Depth (`--spec-draft-n-max`) is card-class driven.** `mtp_depth_for_card`
+  returns `1` when card RAM `<= 16 GB` (8/12/16 GB — shallow: pays everywhere,
+  no starved depth-2 risk), `2` when `16 GB < card RAM <= 24 GB` (24 GB
+  inclusive), and `3` when card RAM `> 24 GB` (32/48/64/128/… GB). A hermetic
+  unit test asserts each bin boundary against a mocked card-RAM seam (no real
+  GPU required).
+- **`--spec-draft-p-min` is never a default.** Emitted **only** when the seam
+  `LLAMA_SPEC_DRAFT_P_MIN` env is set (community rule 2: it helps starved cards
+  and hurts fast ones — a knob, never a constant). Unset => flag absent.
+- **MTP pins `--parallel` to 1 regardless of model size.** When the MTP head is
+  engaged, `-np 1` even for a small model (the size-based `-np 2` for models
+  `< 10 GB` must NOT apply). When MTP is absent, the size-based rule stands:
+  2 slots for models `< 10 GB`, 1 slot for `>= 10 GB`. (Community rule 5:
+  speculative decode is a single-stream optimisation; `--parallel > 1` kills the
+  gain and inflates the baseline.)
+
+#### Scenario: a 24 GB card with an MTP model gets n-max 2
+- **Given** a model with `nextn_layers > 0` served on a 24 GB card
+- **When** `build_command` runs with `card_bytes = 24 * GiB`
+- **Then** the argv contains `--spec-type draft-mtp`,
+  `--spec-draft-n-max 2`, and `-np 1`
+
+#### Scenario: a small MTP model still pins -np 1 (rule 5)
+- **Given** a model with `nextn_layers > 0` and `size_gb < 10` on a small card
+- **When** `build_command` runs
+- **Then** `-np 1` is emitted (the size-based `-np 2` for small models is
+  suppressed because MTP is a single-stream path)
+
+#### Scenario: p-min is off by default, on only via the seam
+- **Given** an MTP model with `LLAMA_SPEC_DRAFT_P_MIN` unset
+- **When** `mtp_spec_flags` runs
+- **Then** no `--spec-draft-p-min` flag is present; with the seam set (e.g.
+  `0.7`) the flag is emitted with that value
+
+#### Scenario: a model without an MTP head emits no spec flags
+- **Given** a model with `nextn_layers == 0`
+- **When** `build_command` runs
+- **Then** the argv contains no `--spec-type` / `--spec-draft-n-max` /
+  `--spec-draft-p-min` flags, and the size-based `-np` rule (2 slots `< 10 GB`)
+  applies
+
+#### Scenario: depth follows the same card RAM that picks the tree
+- **Given** the same MTP model on an 8 GB card vs a 64 GB card
+- **When** `build_command` runs for each card (card_bytes passed or detected via
+  `detect_card_ram_bytes`)
+- **Then** `--spec-draft-n-max 1` on the small card and `--spec-draft-n-max 3`
+  on the large card — the knob is a function of the card, not a constant

@@ -460,6 +460,146 @@ def test_build_command_reasoning_and_slots(server_on_path):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# MTP (spec-decode) card-driven flags (issue #84: n-max / p-min / -np)
+#
+# Grounded in the qwen38-mtp community rules:
+#   * rule 1: depth (n-max) sweet-spot is card/bandwidth dependent -> derive it
+#     from the card's RAM (8/12/16 GB -> 1, 24 GB inclusive -> 2, >24 GB -> 3).
+#   * rule 2: --spec-draft-p-min helps starved cards and hurts fast ones ->
+#     never a default; opt-in via the LLAMA_SPEC_DRAFT_P_MIN env seam.
+#   * rule 5: speculative decode is a single-stream optimisation -> when MTP is
+#     engaged, -np is pinned to 1 regardless of model size (--parallel > 1
+#     kills the gain and inflates the baseline).
+# ---------------------------------------------------------------------------
+_GB = 1024 ** 3  # GiB
+
+
+def _mtp_meta(size_gb, nextn=1):
+    """MTP model metadata (nextn_layers>0) sized `size_gb` GB."""
+    return {
+        "file": f"/models/mtp-{int(size_gb)}.gguf",
+        "name": f"mtp-{int(size_gb)}",
+        "arch": "qwen2",
+        "n_layer": 28,
+        "n_embd": 3584,
+        "n_head": 28,
+        "n_head_kv": 4,
+        "ctx_train": 32768,
+        "chat_template": "llama3",
+        "size_gb": size_gb,
+        "nextn_layers": nextn,
+    }
+
+
+def test_mtp_depth_for_card_16_gb_or_less_is_1():
+    """8/12/16 GB cards (<=16 GB) get depth 1 (shallow: pays everywhere)."""
+    for gb in (8, 12, 16):
+        assert llama_ai.mtp_depth_for_card(gb * _GB) == 1
+
+
+def test_mtp_depth_for_card_24_gb_is_2():
+    """20/24 GB cards get depth 2 (24 GB is the inclusive boundary)."""
+    assert llama_ai.mtp_depth_for_card(24 * _GB) == 2
+    assert llama_ai.mtp_depth_for_card(20 * _GB) == 2
+
+
+def test_mtp_depth_for_card_above_24_gb_is_3():
+    """>24 GB cards (32/48/64/128/...) get depth 3."""
+    for gb in (32, 48, 64, 128):
+        assert llama_ai.mtp_depth_for_card(gb * _GB) == 3
+
+
+def test_mtp_depth_for_card_falls_back_to_card_ram_seam(monkeypatch):
+    """card_bytes=None reads the card-RAM seam (mocked, hermetic)."""
+    monkeypatch.setattr(llama_ai, "read_total_ram_bytes", lambda: 32 * _GB)
+    assert llama_ai.mtp_depth_for_card(None) == 3
+
+
+def test_mtp_spec_flags_empty_when_no_nextn():
+    """A model without an MTP head (nextn_layers=0) emits no spec flags."""
+    meta = _mtp_meta(24.0, nextn=0)
+    assert llama_ai.mtp_spec_flags(meta, 24 * _GB, env={}) == []
+
+
+def test_mtp_spec_flags_emits_type_and_card_driven_depth():
+    """nextn_layers>0 => --spec-type draft-mtp; n-max follows the card."""
+    meta = _mtp_meta(24.0)
+    flags = llama_ai.mtp_spec_flags(meta, 24 * _GB, env={})
+    assert flags[:4] == ["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+    # depth follows the card, not a hard-coded constant
+    assert llama_ai.mtp_spec_flags(_mtp_meta(8.0), 8 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "1"]
+    assert llama_ai.mtp_spec_flags(_mtp_meta(48.0), 48 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "3"]
+
+
+def test_mtp_spec_flags_p_min_off_by_default():
+    """Rule 2: p-min is a knob, never a default (absent when env unset)."""
+    meta = _mtp_meta(24.0)
+    flags = llama_ai.mtp_spec_flags(meta, 24 * _GB, env={})
+    assert "--spec-draft-p-min" not in flags
+
+
+def test_mtp_spec_flags_p_min_emitted_only_when_env_set():
+    """p-min is emitted only when LLAMA_SPEC_DRAFT_P_MIN is set (opt-in)."""
+    meta = _mtp_meta(24.0)
+    flags = llama_ai.mtp_spec_flags(
+        meta, 24 * _GB, env={"LLAMA_SPEC_DRAFT_P_MIN": "0.7"})
+    i = flags.index("--spec-draft-p-min")
+    assert flags[i + 1] == "0.7"
+
+
+def test_build_command_mtp_emits_spec_flags_and_pins_np_1(server_on_path):
+    """MTP model => spec flags present and -np 1 regardless of model size
+    (rule 5: spec decode is single-stream; --parallel > 1 kills the gain)."""
+    meta = _mtp_meta(24.0)
+    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=24 * _GB)
+    assert "--spec-type" in cmd and "draft-mtp" in cmd
+    assert cmd[cmd.index("--spec-draft-n-max") + 1] == "2"
+    assert cmd[cmd.index("-np") + 1] == "1"
+
+
+def test_build_command_mtp_pins_np_1_even_on_small_card(server_on_path):
+    """Rule 5 holds for a small MTP model: the size-based -np 2 must not win."""
+    meta = _mtp_meta(4.0)
+    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=4 * _GB)
+    assert "--spec-type" in cmd
+    assert cmd[cmd.index("-np") + 1] == "1"
+    # depth follows the 4 GB card (<=16 GB -> depth 1)
+    assert cmd[cmd.index("--spec-draft-n-max") + 1] == "1"
+
+
+def test_build_command_mtp_card_bytes_drives_depth(server_on_path):
+    """The same MTP model on a bigger card gets a deeper n-max (card-driven)."""
+    meta = _mtp_meta(24.0)
+    small = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
+    big = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=64 * _GB)
+    assert small[small.index("--spec-draft-n-max") + 1] == "1"
+    assert big[big.index("--spec-draft-n-max") + 1] == "3"
+
+
+def test_build_command_no_mtp_keeps_normal_slots_and_no_spec_flags(server_on_path):
+    """Non-MTP model => no spec flags and size-based -np slots unchanged
+    (2 slots when the model is <10 GB)."""
+    meta = {
+        "file": "/models/plain.gguf", "name": "plain", "arch": "qwen2",
+        "n_layer": 28, "n_embd": 3584, "n_head": 28, "n_head_kv": 4,
+        "ctx_train": 32768, "chat_template": "llama3", "size_gb": 4.0,
+        "nextn_layers": 0,
+    }
+    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
+    assert "--spec-type" not in cmd
+    assert "--spec-draft-n-max" not in cmd
+    assert cmd[cmd.index("-np") + 1] == "2"
+
+
+def test_build_command_mtp_auto_detects_card_when_card_bytes_none(server_on_path, monkeypatch):
+    """card_bytes=None => build_command reads
+    detect_server.detect_card_ram_bytes() and derives depth from the real card."""
+    meta = _mtp_meta(24.0)
+    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes",
+                        lambda: 48 * _GB)
+    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    assert cmd[cmd.index("--spec-draft-n-max") + 1] == "3"
 # author-recommended sampling defaults (general.sampling.*)
 # ---------------------------------------------------------------------------
 def test_build_command_uses_model_sampling_when_present(server_on_path):

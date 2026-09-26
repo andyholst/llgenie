@@ -187,6 +187,19 @@ The launcher will:
   launch. Default port `11434`, override with `--port`.
 - Serve under a **stable alias `llm-local`** (`--alias llm-local`) so OpenAI-compatible
   clients can pin one endpoint name regardless of which model is loaded.
+- Engage **MTP (multi-token-prediction)** spec-decode when the model carries a
+  draft head (`nextn_layers` in the GGUF, e.g. Ternary-Bonsai-2 MTP /
+  Qwen3.8-27B MTP), with the speed knobs **derived from the card's RAM** (the
+  same card RAM that picks Prism-vs-upstream, via `detect_card_ram_bytes`), per
+  the [qwen38-mtp](https://github.com/sudoingX/qwen38-mtp) community rules:
+  - `--spec-draft-n-max` (depth) **card-class driven, never hard-coded**: card
+    RAM `<= 16 GB` -> `1`, `16 < RAM <= 24 GB` -> `2`, `> 24 GB` -> `3`.
+  - `--spec-draft-p-min` **never a default** (rule 2: helps starved cards, hurts
+    fast ones) — emitted only when the seam `LLAMA_SPEC_DRAFT_P_MIN` is set.
+  - `--parallel` **pinned to `-np 1` when MTP is engaged**, regardless of model
+    size (rule 5: spec decode is a single-stream optimisation; `--parallel > 1`
+    kills the gain). Without MTP, the size-based rule stands (`-np 2` for models
+    `< 10 GB`).
 - Write the exact command to `<model-dir>/.run.log` for audit/replay.
 
 You can customize `TOTAL_RAM_BYTES`, `OS_OVERHEAD`, `KV_QUANT`, and `SAMPLING` at the top

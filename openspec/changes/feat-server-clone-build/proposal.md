@@ -57,6 +57,14 @@ is the runtime `n_ctx` a client compacts against before the window fills.
   `upstream+cpu`, `upstream+cuda`, `prism+cpu`, `prism+cuda`, and on a
   **`macos-14`** runner builds `upstream+metal`, `upstream+cpu`, `prism+metal`,
   `prism+cpu`, verifying each binary exists, links, and `--help`/`--version` work.
+- **Card-driven MTP spec-decode knobs** in `scripts/llama_serve.py` (issue #84,
+  qwen38-mtp): `mtp_depth_for_card()` + `mtp_spec_flags()` set `--spec-type
+  draft-mtp` (engaged iff the GGUF has `nextn_layers > 0`), `--spec-draft-n-max`
+  card-class driven (`<=16` GB → 1, `16 < RAM <= 24` GB → 2, `>24` GB → 3), and
+  pin `--parallel` to 1 when MTP is engaged (community rule 5). `--spec-draft-p-min`
+  is never a default; emitted only when `LLAMA_SPEC_DRAFT_P_MIN` is set. 13
+  hermetic mocked unit tests in `tests/test_llama_ai.py` cover every bin
+  boundary and the p-min seam.
 - README: document `make install` auto-detect, the explicit variant targets,
   the env seams, and the CI matrix.
 

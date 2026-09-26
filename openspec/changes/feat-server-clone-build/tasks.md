@@ -106,6 +106,28 @@ Ticked the moment the work is verified with real tool output.
 - [x] 8.5 README launch section documents that `-c` follows the selected model's
       trained context, lowered only when the KV cache does not fit the card.
 
+
+## MTP card-driven spec flags (`scripts/llama_serve.py`, issue #84 qwen38-mtp)
+
+- [x] 9.1 Card-driven depth: `mtp_depth_for_card(card_bytes)` (8/12/16 GB -> 1,
+      `<=24` GB -> 2, >24 GB -> 3; `<=16` / `<=24` inclusive bins, fallback to
+      the largest bin) + `mtp_spec_flags(meta, card_bytes)` engaged iff
+      `meta["nextn_layers"] > 0`, emitting `--spec-type draft-mtp` +
+      `--spec-draft-n-max <card_depth>` and `--spec-draft-p-min` **only** via the
+      `LLAMA_SPEC_DRAFT_P_MIN` seam (never a default).
+- [x] 9.2 Wire into `build_command`: new `card_bytes=None` param (reads
+      `detect_server.detect_card_ram_bytes()` when absent), call `mtp_spec_flags`,
+      and pin `-np 1` when MTP is engaged (rule 5) — the size-based `-np`
+      (2 slots `< 10 GB`) applies only when MTP is **absent**.
+- [x] 9.3 13 hermetic mocked unit tests in `tests/test_llama_ai.py` (MTP
+      card-driven spec flags section): depth per card bin, `card_bytes=None`
+      falling back to the card-RAM seam, no spec flags when `nextn_layers == 0`,
+      card-driven `n-max` in `build_command`, `p-min` absent by default / emitted
+      only via `LLAMA_SPEC_DRAFT_P_MIN`, `-np 1` pinned for MTP even at small
+      size, size-based `-np` retained for non-MTP, and `card_bytes=None`
+      auto-detecting via `detect_card_ram_bytes`.
+- [x] 9.4 Document the card-driven MTP rules in the OpenSpec
+      `feat-server-clone-build` spec + proposal + README.
 ## Verification (final)
 
 - [x] 7.1 All 4 host-buildable variants (upstream/cpu, upstream/cuda, prism/cpu,
