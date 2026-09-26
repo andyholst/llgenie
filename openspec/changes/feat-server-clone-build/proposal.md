@@ -13,6 +13,11 @@ makes `make install` (host) and the CI pipeline (all variants, in parallel) do
 that selection and build the correct binary, cloning/pulling to the latest commit
 and verifying it serves a real model.
 
+The same change also sets the server context from the model that was loaded.
+`-c` is that GGUF's `context_length` (Ternary Bonsai 2 is 262144), lowered
+only when the q4_0 KV cache does not fit the card. The number passed as `-c`
+is the runtime `n_ctx` a client compacts against before the window fills.
+
 ## What Changes
 
 - Size `llama-server` `-c` from the selected GGUF's trained `context_length`,

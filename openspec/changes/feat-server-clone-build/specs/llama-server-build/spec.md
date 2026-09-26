@@ -166,18 +166,34 @@ symlinks) without deleting repo source.
   `make install` works
 
 ### Requirement: the selected model's trained context is the server window
-When `llgenie` starts `llama-server`, `-c` MUST be derived from the selected
-GGUF. The ceiling is that file's `<arch>.context_length`. The window is the
-minimum of that ceiling and the q4_0 KV cache that fits in card RAM (NVIDIA
-VRAM when a GPU is present, otherwise system RAM; `LLAMA_RAM_BYTES` overrides)
-after the model weights and a 3 GB reserve. Hybrid models that publish
+When `llgenie` starts `llama-server` for the model the user selected, `-c`
+MUST be that model's maximum context, reduced only when the card cannot hold
+the KV cache for it.
+
+The ceiling is the selected GGUF's `<arch>.context_length`. Ternary Bonsai 2
+(`sudoingx/Ternary-Bonsai-2-27B-PTQ1_0-MTP-GGUF`, architecture `qwen35`)
+publishes `context_length` **262144**. On a 16 GB card the KV cache for that
+window fits, so `-c` is **262144**. On an 8 GB card the same file does not
+fit at 262144, so `-c` is **30720**.
+
+The budget is card RAM from `detect_server.detect_card_ram_bytes()` (NVIDIA
+VRAM when a GPU is present, otherwise system RAM; `LLAMA_RAM_BYTES`
+overrides), minus the weight file and a 3 GB reserve. It is not the hardcoded
+48 GB `TOTAL_RAM_BYTES` constant. Hybrid models that publish
 `<arch>.full_attention_interval` charge KV only for the full-attention layers
 (language blocks divided by the interval, plus `<arch>.nextn_predict_layers`
 when the file has an MTP block) and use `<arch>.attention.key_length` /
-`value_length` as the head dimension. The result is rounded down to a multiple
-of 1024 and is never below 2048. A missing `context_length` caps the window
-at 32768. Both the interactive launch path and `_serve_chosen` use this same
-function. The value is passed to `llama-server` as `-c`.
+`value_length` as the head dimension. A dense model with no interval counts
+every block, with head dim `n_embd // n_head`. The result is rounded down to
+a multiple of 1024 and is never below 2048. A missing `context_length` caps
+the window at 32768.
+
+`main` and `_serve_chosen` both call `serve_context` and pass the result to
+`llama-server` as `-c`. That `-c` is the runtime window (`n_ctx` on
+`/props`). A client of this server, including the Hermes `local-llm` profile,
+compacts against that runtime window: the profile's Jev engine threshold is
+0.60 of the probed `n_ctx`, so compression runs before the prompt fills the
+window `llgenie` allocated.
 
 #### Scenario: Bonsai on a 16 GB card gets its trained 262144 window
 - **Given** a GGUF shaped like Ternary-Bonsai-2-27B-PTQ1_0-mtp
