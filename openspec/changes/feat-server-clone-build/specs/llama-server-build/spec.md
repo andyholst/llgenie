@@ -164,3 +164,41 @@ symlinks) without deleting repo source.
 - **Then** `~/bin/llgenie`, `~/bin/llgenie.py`, and `~/bin/llama-server` are
   removed, the venv and repo source files are untouched, and a fresh
   `make install` works
+
+### Requirement: the selected model's trained context is the server window
+When `llgenie` starts `llama-server`, `-c` MUST be derived from the selected
+GGUF. The ceiling is that file's `<arch>.context_length`. The window is the
+minimum of that ceiling and the q4_0 KV cache that fits in card RAM (NVIDIA
+VRAM when a GPU is present, otherwise system RAM; `LLAMA_RAM_BYTES` overrides)
+after the model weights and a 3 GB reserve. Hybrid models that publish
+`<arch>.full_attention_interval` charge KV only for the full-attention layers
+(language blocks divided by the interval, plus `<arch>.nextn_predict_layers`
+when the file has an MTP block) and use `<arch>.attention.key_length` /
+`value_length` as the head dimension. The result is rounded down to a multiple
+of 1024 and is never below 2048. A missing `context_length` caps the window
+at 32768. Both the interactive launch path and `_serve_chosen` use this same
+function. The value is passed to `llama-server` as `-c`.
+
+#### Scenario: Bonsai on a 16 GB card gets its trained 262144 window
+- **Given** a GGUF shaped like Ternary-Bonsai-2-27B-PTQ1_0-mtp
+  (`context_length` 262144, 65 blocks, `full_attention_interval` 4,
+  `nextn_predict_layers` 1, key and value length 256, 4 KV heads, about 6.5 GB)
+- **When** it is served on a 16 GB card
+- **Then** `-c` is 262144
+
+#### Scenario: a card that cannot hold the trained window gets a smaller context
+- **Given** the same Bonsai-shaped model
+- **When** it is served on an 8 GB card
+- **Then** `-c` is 30720, which is below 262144, a multiple of 1024, and at least 2048
+
+#### Scenario: a missing context_length caps at 32768
+- **Given** a dense model whose header has no `context_length`
+- **When** it is served on a 48 GB card
+- **Then** `-c` is 32768
+
+#### Scenario: the header reader keeps the hybrid fields
+- **Given** a qwen35 GGUF header with `context_length` 262144, `key_length` 256,
+  `value_length` 256, `full_attention_interval` 4, and `nextn_predict_layers` 1
+- **When** `read_model_meta_fast` parses it
+- **Then** those fields are on the meta dict and `serve_context` on a 16 GB card
+  returns 262144

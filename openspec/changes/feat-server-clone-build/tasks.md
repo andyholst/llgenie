@@ -87,6 +87,24 @@ Ticked the moment the work is verified with real tool output.
       rule)" section with the card-size table, backend matrix, variant targets,
       env seams, and CI matrix.
 
+## Model context window (`scripts/llama_serve.py`)
+
+- [x] 8.1 Read `context_length`, `attention.key_length`, `attention.value_length`,
+      `full_attention_interval`, and `nextn_predict_layers` in both GGUF readers.
+- [x] 8.2 `kv_bytes_per_token` charges only full-attention layers (interval + MTP
+      block) and uses the header head dim. Dense models stay on `n_embd // n_head`
+      for every block.
+- [x] 8.3 `serve_context(meta, card_bytes)` is the only launch path for `-c`
+      (`main` and `_serve_chosen`). Card RAM comes from
+      `detect_server.detect_card_ram_bytes()` (VRAM when an NVIDIA card is
+      present), not the hardcoded 48 GB constant.
+- [x] 8.4 Unit tests in `tests/test_llama_ai.py` lock: Bonsai-shaped model on
+      16 GB → 262144; same model on 8 GB → 30720; missing context_length →
+      32768; fast reader keeps the hybrid fields. They run under `make test-unit`
+      (CI job `unit`).
+- [x] 8.5 README launch section documents that `-c` follows the selected model's
+      trained context, lowered only when the KV cache does not fit the card.
+
 ## Verification (final)
 
 - [x] 7.1 All 4 host-buildable variants (upstream/cpu, upstream/cuda, prism/cpu,

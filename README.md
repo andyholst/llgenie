@@ -173,9 +173,14 @@ Run with the tooling venv's Python so `gguf`/`numpy` are importable:
 The launcher will:
 
 - Scan `~/models/**/*.gguf` (fast header-only metadata read for large files).
-- Auto-tune the server: context sized to RAM budget minus KV-cache/OS overhead, `-ngl 99`
-  (all layers to Metal), `-fa` flash attention, q4_0 KV cache, `--cont-batching`,
-  `--metrics`.
+- Auto-tune the server context (`-c`) from the **selected model**. The ceiling is
+  that GGUF's `context_length` (Ternary Bonsai 2 is 262144). The window is lowered
+  only when the q4_0 KV cache for that context does not fit in card RAM (NVIDIA
+  VRAM when a GPU is present, otherwise system RAM) after the weights and a 3 GB
+  reserve. Hybrid models (a `full_attention_interval` in the header) count only
+  the full-attention layers, plus an MTP block when the file has one. The result
+  is a multiple of 1024 and is never below 2048. `-ngl 99` (all layers to the
+  GPU), `-fa` flash attention, q4_0 KV cache, `--cont-batching`, `--metrics`.
 - Detect reasoning-capable models from the chat template and enable `--reasoning` /
   `--reasoning-format deepseek` so thoughts are preserved in `message.reasoning_content`.
 - Serve **one model at a time**: any existing `llama-server` on the port is stopped before

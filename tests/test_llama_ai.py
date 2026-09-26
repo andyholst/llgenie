@@ -164,18 +164,174 @@ def test_kv_bytes_per_token_positive():
 
 
 def test_tuned_context_capped_by_train_ctx():
+    """A model's trained context is the ceiling, and a tiny budget floors at 2048."""
+
+    # Given a dense model trained to 4096 tokens
     meta = {
         "ctx_train": 4096, "n_embd": 3584, "n_head": 28,
         "n_head_kv": 4, "n_layer": 28,
     }
-    # tiny budget => kv/token is positive and 1/that -> tiny ctx, floored at 2048
+
+    # When the KV budget cannot hold even one token, and when it is huge
     assert llama_ai.kv_bytes_per_token(meta) > 0
     ctx = llama_ai.tuned_context(meta, 1)
-    assert ctx == 2048
-    # huge budget => capped at train ctx (and rounded to a 1024 multiple)
     ctx2 = llama_ai.tuned_context(meta, 10 ** 18)
+
+    # Then the tiny budget floors at 2048 and the huge budget stays at the train ctx
+    assert ctx == 2048
     assert ctx2 <= 4096
     assert ctx2 % 1024 == 0
+
+
+def _bonsai_mtp_meta(size_gb=6.5):
+    """Shape of Ternary-Bonsai-2-27B-PTQ1_0-mtp.gguf (qwen35 hybrid, 262144 train ctx)."""
+    return {
+        "file": "/models/Ternary-Bonsai-2-27B-PTQ1_0-mtp.gguf",
+        "name": "bonsai",
+        "arch": "qwen35",
+        "n_layer": 65,
+        "n_embd": 5120,
+        "n_head": 24,
+        "n_head_kv": 4,
+        "ctx_train": 262144,
+        "key_length": 256,
+        "value_length": 256,
+        "full_attention_interval": 4,
+        "nextn_layers": 1,
+        "chat_template": "qwen",
+        "size_gb": size_gb,
+    }
+
+
+def test_hybrid_kv_counts_full_attention_layers_only():
+    """Hybrid models must not price every block as full attention."""
+
+    # Given a Bonsai-shaped hybrid (interval 4, key/value length 256, one MTP block)
+    meta = _bonsai_mtp_meta()
+
+    # When KV bytes/token are estimated
+    per = llama_ai.kv_bytes_per_token(meta)
+    dense = {
+        **meta,
+        "full_attention_interval": 0,
+        "key_length": 0,
+        "value_length": 0,
+    }
+    dense_per = llama_ai.kv_bytes_per_token(dense)
+
+    # Then only the full-attention layers are charged, using the real head dim
+    # 16 language layers (64 // 4) + 1 MTP block, q4_0, key=value=256, 4 KV heads
+    assert per == 17 * 4 * (256 + 256) * 0.5
+    assert per < dense_per
+
+
+def test_serve_context_uses_model_max_when_the_card_fits():
+    """Selecting Bonsai on a 16 GB card serves its trained 262144 context."""
+
+    # Given the Bonsai MTP metadata and a 16 GB card
+    meta = _bonsai_mtp_meta()
+    card = 16 * 1024 ** 3
+
+    # When the launch context is tuned
+    ctx = llama_ai.serve_context(meta, card)
+
+    # Then -c is the model's trained maximum
+    assert ctx == 262144
+
+
+def test_serve_context_shrinks_when_the_card_cannot_hold_the_train_ctx():
+    """A card that cannot hold the trained window gets a smaller multiple of 1024."""
+
+    # Given the same Bonsai file on an 8 GB card
+    meta = _bonsai_mtp_meta()
+    card = 8 * 1024 ** 3
+
+    # When the launch context is tuned
+    ctx = llama_ai.serve_context(meta, card)
+
+    # Then the window stays under the trained maximum and above the floor
+    assert ctx == 30720
+    assert ctx < meta["ctx_train"]
+    assert ctx % 1024 == 0
+
+
+def test_serve_context_missing_train_ctx_caps_at_32768():
+    """A GGUF with no context_length is capped at 32768 even on a huge card."""
+
+    # Given a dense model whose header omitted context_length
+    meta = {
+        "ctx_train": 0, "n_embd": 3584, "n_head": 28,
+        "n_head_kv": 4, "n_layer": 28, "size_gb": 1.0,
+    }
+
+    # When it is served on a 48 GB card
+    ctx = llama_ai.serve_context(meta, 48 * 1024 ** 3)
+
+    # Then the fallback ceiling is 32768
+    assert ctx == 32768
+
+
+def test_launch_context_reads_card_ram_not_the_48gb_constant(monkeypatch):
+    """The serve path asks the card detector, not TOTAL_RAM_BYTES."""
+
+    # Given a card detector that reports 16 GB
+    monkeypatch.setattr(
+        llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3,
+    )
+    meta = _bonsai_mtp_meta()
+
+    # When the launcher resolves the context the way main() does
+    card = llama_ai.detect_server.detect_card_ram_bytes()
+    ctx = llama_ai.serve_context(meta, card)
+
+    # Then the result matches the 16 GB card, which holds this model's full window
+    assert card == 16 * 1024 ** 3
+    assert ctx == 262144
+    assert llama_ai.TOTAL_RAM_BYTES == 48 * 1024 ** 3
+
+
+def test_fast_reader_captures_hybrid_context_fields(tmp_path):
+    """The header reader keeps the fields serve_context needs for a hybrid model."""
+
+    # Given a qwen35 header with a 262144 context and a full-attention interval
+    def s(v: str) -> bytes:
+        b = v.encode("utf-8")
+        return struct.pack("<Q", len(b)) + b
+
+    def kv(key: str, vtype: int, val: bytes) -> bytes:
+        return struct.pack("<Q", len(key)) + key.encode() + struct.pack("<I", vtype) + val
+
+    pairs = [
+        kv("general.architecture", 8, s("qwen35")),
+        kv("general.name", 8, s("bonsai")),
+        kv("qwen35.block_count", 4, struct.pack("<I", 65)),
+        kv("qwen35.embedding_length", 4, struct.pack("<I", 5120)),
+        kv("qwen35.attention.head_count", 4, struct.pack("<I", 24)),
+        kv("qwen35.attention.head_count_kv", 4, struct.pack("<I", 4)),
+        kv("qwen35.attention.key_length", 4, struct.pack("<I", 256)),
+        kv("qwen35.attention.value_length", 4, struct.pack("<I", 256)),
+        kv("qwen35.context_length", 4, struct.pack("<I", 262144)),
+        kv("qwen35.full_attention_interval", 4, struct.pack("<I", 4)),
+        kv("qwen35.nextn_predict_layers", 4, struct.pack("<I", 1)),
+        kv("tokenizer.chat_template", 8, s("chat")),
+    ]
+    buf = bytearray(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0))
+    buf += struct.pack("<Q", len(pairs))
+    for x in pairs:
+        buf += x
+    p = tmp_path / "bonsai.gguf"
+    p.write_bytes(bytes(buf))
+
+    # When the fast reader parses it
+    m = llama_ai.read_model_meta_fast(str(p))
+
+    # Then the trained context and the hybrid KV fields are present
+    assert m["ctx_train"] == 262144
+    assert m["key_length"] == 256
+    assert m["value_length"] == 256
+    assert m["full_attention_interval"] == 4
+    assert m["nextn_layers"] == 1
+    assert llama_ai.serve_context(m, 16 * 1024 ** 3) == 262144
 
 
 # ---------------------------------------------------------------------------

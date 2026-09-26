@@ -10,10 +10,13 @@ is read by the `gguf` package from the 3.10 venv set up by ~/llama-gguf-tools
 
 - Scans ~/models/**/*.gguf
 - Lets you pick a model from a numbered list (or pass substring/alias as argv)
-- Auto-tunes llama-server flags to fit 48 GB unified memory:
+- Auto-tunes llama-server flags to fit the card's memory:
     * KV cache sized to target context (q4_0 K+V, FlashAttention, all layers to GPU)
-    * context = min(train-ctx, bytes-available / kv-bytes-per-token) with margin
-    * -np slots: 2 for small (<10 GB) models, 1 for large
+    * context = min(the selected GGUF's context_length, KV tokens that fit the card)
+    * -np slots: 2 for small models / 1 for big, pinned to 1 when MTP is engaged
+    * MTP (multi-token-prediction): engage when the GGUF has nextn layers, with
+      --spec-draft-n-max derived from the card's VRAM (<=16GB->1, <=24GB->2,
+      >24GB->3) and --spec-draft-p-min only when set via LLAMA_SPEC_DRAFT_P_MIN
 - Writes the exact command to <dest>/.run.log and launches llama-server
 
 Usage:
@@ -62,6 +65,15 @@ except ImportError:
 from gguf import GGUFReader
 import numpy as np
 
+# scripts/detect_server provides the canonical, GPU-VRAM-aware "card RAM"
+# (VRAM when an NVIDIA card is present, else system RAM) plus its env seam.
+# Tried two ways so it works both when the launcher runs the file directly
+# (scripts/ is on sys.path) and when tests import it as the `scripts` package.
+try:
+    import detect_server  # noqa: F401  (module import, scripts/ on sys.path)
+except ImportError:  # type: ignore[unreachable]
+    from . import detect_server  # noqa: F401  (imported as scripts.detect_server)
+
 HOME = os.path.expanduser("~")
 # MODELS_ROOT overridable for hermetic tests (and for custom model dirs).
 # Falls back to ~/models so local host behaviour is unchanged.
@@ -106,6 +118,23 @@ HF_GET_BASE_PAUSE = float(os.environ.get("HF_GET_BASE_PAUSE", "1.0"))  # seconds
 LLAMA_RAM_ENV = "LLAMA_RAM_BYTES"
 LLAMA_HEADROOM_ENV = "LLAMA_HEADROOM_BYTES"
 LLAMA_HEADROOM_MAX_FRAC = 0.45   # max OS reserve as a fraction of total RAM
+LLAMA_SPEC_DRAFT_P_MIN_ENV = "LLAMA_SPEC_DRAFT_P_MIN"  # optional MTP confidence gate (rule 2)
+
+# Card-VRAM -> --spec-draft-n-max (MTP depth), grounded in the qwen38-mtp
+# community rules (https://github.com/sudoingX/qwen38-mtp): the depth sweet
+# spot depends on the card and its bandwidth. Small/bandwidth-starved cards
+# favour shallow drafts (depth 1 never hurts and pays at every context depth);
+# 24 GB-class cards generally hold depth 2; big (>24 GB, e.g. 32/48/64 GB)
+# cards can run depth 3 where the extra draft tokens amortise. This is a
+# deterministic card-class heuristic — it re-derives the knob per card at serve
+# time rather than hard-coding it — and is the value the spec calls for.
+#
+# Bins are (max_gb_inclusive, n_max) checked in order (first match wins).
+MTP_DEPTH_BINS = (
+    (16, 1),   # 8/12/16 GB: shallow — depth 1 pays everywhere, no starved depth-2 risk
+    (24, 2),   # 24 GB (inclusive boundary, matches PRISM_THRESHOLD_GB)
+    (999, 3),  # >24 GB: 32/48/64/128/... — depth 3
+)
 # sampling defaults from user's usual invocation (fallback preset when a model
 # supplies no author-recommended defaults). Kept as the fallback default.
 SAMPLING = ["--temp", "0.6", "--top-p", "0.9", "--top-k", "40", "--min-p", "0.05",
@@ -235,6 +264,9 @@ def read_model_meta_fast(path):
         "n_head": n_head,
         "n_head_kv": n_head_kv,
         "ctx_train": int(kv.get(f"{arch}.context_length", 0) or 0),
+        "key_length": int(kv.get(f"{arch}.attention.key_length", 0) or 0),
+        "value_length": int(kv.get(f"{arch}.attention.value_length", 0) or 0),
+        "full_attention_interval": int(kv.get(f"{arch}.full_attention_interval", 0) or 0),
         "nextn_layers": int(kv.get(f"{arch}.nextn_predict_layers", 0) or 0),
         "chat_template": str(kv.get("tokenizer.chat_template", "") or ""),
         "sampling": _extract_sampling_from_kv(kv),
@@ -268,6 +300,9 @@ def read_model_meta(path):
         "n_head": n_head,
         "n_head_kv": n_head_kv,
         "ctx_train": int(_gget(f.get(f"{arch}.context_length", "0")) or 0),
+        "key_length": int(_gget(f.get(f"{arch}.attention.key_length", "0")) or 0),
+        "value_length": int(_gget(f.get(f"{arch}.attention.value_length", "0")) or 0),
+        "full_attention_interval": int(_gget(f.get(f"{arch}.full_attention_interval", "0")) or 0),
         "nextn_layers": int(_gget(f.get(f"{arch}.nextn_predict_layers", "0")) or 0),
         "chat_template": str(_gget(f.get("tokenizer.chat_template", "0")) or ""),
         "sampling": _extract_sampling_from_fields(f),
@@ -315,19 +350,64 @@ def scan_models():
 # ----------------------------------------------------------------------------
 # Auto-tuning
 # ----------------------------------------------------------------------------
+# Floor for the KV budget when the weights already fill the card. 512 MiB still
+# yields a small but usable context instead of a zero or negative window.
+MIN_KV_BUDGET = 512 * 1024 * 1024
+
+
+def _kv_cache_layers(meta):
+    """Layers that store a per-token KV cache.
+
+    Hybrid models (Qwen3.5 / Ternary Bonsai) set ``full_attention_interval``:
+    only every Nth language layer is full attention. Linear/SSM layers keep a
+    fixed state and do not grow with context. The MTP ``nextn`` block is a
+    full attention layer and is counted when present. Dense models (no
+    interval) count every block.
+    """
+    n_layer = int(meta.get("n_layer") or 0)
+    nextn = max(0, int(meta.get("nextn_layers") or 0))
+    interval = int(meta.get("full_attention_interval") or 0)
+    if interval > 1 and n_layer > 0:
+        language = max(0, n_layer - nextn)
+        full = language // interval
+        return max(1, full + nextn)
+    return max(1, n_layer)
+
+
+def _head_dim_pair(meta):
+    """(key_dim, value_dim) from GGUF, else n_embd // n_head."""
+    key = int(meta.get("key_length") or 0)
+    val = int(meta.get("value_length") or 0)
+    if key <= 0:
+        n_embd = int(meta.get("n_embd") or 0)
+        n_head = int(meta.get("n_head") or 0)
+        key = (n_embd // n_head) if n_head else 128
+    if val <= 0:
+        val = key
+    return key, val
+
+
 def kv_bytes_per_token(meta, quant=KV_QUANT):
-    """Approx K+V cache bytes/token. head_dim = n_embd/n_head."""
-    head_dim = (meta["n_embd"] // meta["n_head"]) if meta["n_head"] else 128
-    f16_bytes = 2.0 * meta["n_layer"] * meta["n_head_kv"] * head_dim * 2.0
-    # q4_0 KV is ~0.5 byte per element vs 2 for fp16 => ~4x smaller; be conservative
+    """Approx K+V cache bytes/token for the layers that actually grow with context."""
+    key_len, val_len = _head_dim_pair(meta)
+    n_kv = int(meta.get("n_head_kv") or 0) or int(meta.get("n_head") or 0) or 1
+    layers = _kv_cache_layers(meta)
+    # fp16 is 2 bytes per element; K and V are separate.
+    f16_bytes = 2.0 * layers * n_kv * (key_len + val_len)
+    # q4_0 KV is ~0.5 byte per element vs 2 for fp16 => ~4x smaller
     if quant in ("q4_0", "q4_1", "q5_0", "q5_1"):
         return f16_bytes / 4.0
     return f16_bytes
 
 
 def tuned_context(meta, target_bytes):
-    """Context that fits in `target_bytes` of KV, capped by train ctx."""
-    if meta["ctx_train"]:
+    """Context that fits in `target_bytes` of KV, capped by the model's train ctx.
+
+    The ceiling is the selected GGUF's ``context_length``. A missing field
+    falls back to 32768. The result is never above that ceiling, is rounded
+    down to a multiple of 1024, and is never below 2048.
+    """
+    if meta.get("ctx_train"):
         hard = int(meta["ctx_train"])
     else:
         hard = 32768
@@ -337,9 +417,61 @@ def tuned_context(meta, target_bytes):
     else:
         by_budget = hard
     ctx = min(hard, by_budget)
-    # nice round number, power-of-two-ish
     ctx = max(2048, (ctx // 1024) * 1024)
     return ctx
+
+
+def context_kv_budget_bytes(meta, card_bytes):
+    """Bytes left for the KV cache on `card_bytes` after weights and OS reserve."""
+    weights = int(float(meta.get("size_gb") or 0) * (1024 ** 3))
+    budget = int(card_bytes) - OS_OVERHEAD - weights
+    if budget < MIN_KV_BUDGET:
+        return MIN_KV_BUDGET
+    return budget
+
+
+def serve_context(meta, card_bytes):
+    """`-c` for this model on this card: min(trained context, what the KV cache fits)."""
+    return tuned_context(meta, context_kv_budget_bytes(meta, card_bytes))
+
+
+def mtp_depth_for_card(card_bytes, env=None):
+    """Card-VRAM -> --spec-draft-n-max (MTP depth).
+
+    Deterministic card-class heuristic (first matching bin wins). `card_bytes`
+    is the card's real RAM in bytes (GPU VRAM when an NVIDIA card is present,
+    else system RAM — i.e. `read_total_ram_bytes()`) or any positive byte count.
+    The env (opt-in `LLAMA_SPEC_DRAFT_P_MIN` knob) is NOT used here: the depth
+    is purely a function of the card. Returns an int >= 1.
+    """
+    if card_bytes is None:
+        card_bytes = read_total_ram_bytes()
+    card_gb = card_bytes / (1024 ** 3)
+    for max_gb, n_max in MTP_DEPTH_BINS:
+        if card_gb <= max_gb:
+            return int(n_max)
+    return int(MTP_DEPTH_BINS[-1][1])
+
+
+def mtp_spec_flags(meta, card_bytes, env=None):
+    """MTP flags for `meta` on a card of `card_bytes` bytes.
+
+    Returns a list of argv elements (flag, value) or [] when the model has no
+    MTP head. Engaged iff `meta["nextn_layers"] > 0` (the GGUF carries draft
+    layers, e.g. Qwen3.8-27B MTP / Ternary-Bonsai MTP). Depth is derived from
+    the card (`mtp_depth_for_card`). The optional `LLAMA_SPEC_DRAFT_P_MIN`
+    gate is emitted only when set (rule 2: helps starved cards, hurts fast ones —
+    a knob, never a default). `env` is the env dict (os.environ by default).
+    """
+    if not meta.get("nextn_layers", 0):
+        return []
+    env = env or os.environ
+    out = ["--spec-type", "draft-mtp",
+           "--spec-draft-n-max", str(mtp_depth_for_card(card_bytes, env))]
+    pmin_env = (env.get(LLAMA_SPEC_DRAFT_P_MIN_ENV) or "").strip()
+    if pmin_env:
+        out += ["--spec-draft-p-min", pmin_env]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -880,7 +1012,15 @@ def download_top_tier_candidate(cand, models_root=None):
     return final
 
 
-def build_command(meta, ctx, port):
+def build_command(meta, ctx, port, card_bytes=None):
+    """Build the llama-server argv for `meta`.
+
+    `card_bytes` is the card's real RAM in bytes (GPU VRAM when an NVIDIA card
+    is present, else system RAM — the #84 "card RAM", via
+    `detect_server.detect_card_ram_bytes()` and its LLAMA_RAM_BYTES seam). If
+    omitted it is resolved at call time. MTP depth is derived from this value,
+    never hard-coded.
+    """
     global LLAMA_SERVER
     cmd = [LLAMA_SERVER,
            "-m", meta["file"],
@@ -894,6 +1034,8 @@ def build_command(meta, ctx, port):
            "-b", "2048", "-ub", "512",
            "--cont-batching",
            "--metrics"]
+    if card_bytes is None:
+        card_bytes = detect_server.detect_card_ram_bytes()
     # Sampling flags: use the model's author-recommended defaults
     # (general.sampling.*) when present, else fall back to the global preset.
     # Each flag and value is a SEPARATE argv element (llama.cpp treats one
@@ -912,15 +1054,18 @@ def build_command(meta, ctx, port):
     # `message.reasoning_content` (deepseek format) so thinking is preserved.
     if is_reasoning_model(meta):
         cmd += ["--reasoning", "on", "--reasoning-format", "deepseek"]
-    # MTP (multi-token-prediction) head: only on Prism-fork models that carry
-    # nextn layers (e.g. Ternary-Bonsai-2-27B-PTQ1_0-MTP). Engage the draft head
-    # with n-max 1 (best on small cards at every context depth per the model
-    # card; n-max 2 only pays on a fresh context). The Prism fork ships the
-    # draft-mtp spec-decode path, so no extra build flag is needed.
-    if meta.get("nextn_layers", 0) > 0:
-        cmd += ["--spec-type", "draft-mtp", "--spec-draft-n-max", "1"]
-    # parallel slots: 2 for small models, 1 for big
-    np_slots = 2 if meta["size_gb"] < 10 else 1
+    # MTP (multi-token-prediction) head: engage when the GGUF carries nextn
+    # layers (e.g. Qwen3.8-27B MTP / Ternary-Bonsai MTP). The depth
+    # (--spec-draft-n-max) is derived from the card's VRAM, not hard-coded
+    # (qwen38-mtp community rules: depth sweet-spot is card/bandwidth dependent).
+    # The opt-in LLAMA_SPEC_DRAFT_P_MIN gate is emitted only when explicitly set.
+    cmd += mtp_spec_flags(meta, card_bytes)
+
+    # parallel slots: 2 for small models, 1 for big. MTP is a single-stream
+    # optimisation, so when it is engaged the parallel slots are pinned to 1
+    # (rule 5: --parallel > 1 kills the gain; a --parallel 2 baseline reads low
+    # and inflates the claim).
+    np_slots = 1 if meta.get("nextn_layers", 0) else (2 if meta["size_gb"] < 10 else 1)
     cmd += ["-np", str(np_slots)]
     # FIXED alias so the serving endpoint keeps the SAME name across model
     # switches. Clients (Hermes server, agent CLIs) pin one name and keep
@@ -1088,13 +1233,11 @@ def _skip_summary_line(skip_summary):
 
 def _serve_chosen(chosen, args):
     """Tune + print + optionally launch llama-server for a chosen local meta dict."""
-    kv_budget = read_total_ram_bytes() - OS_OVERHEAD - int(chosen["size_gb"] * 1024 ** 3)
-    if kv_budget < 0:
-        kv_budget = 512 * 1024 * 1024
-    ctx = tuned_context(chosen, kv_budget)
+    card_bytes = detect_server.detect_card_ram_bytes()
+    ctx = serve_context(chosen, card_bytes)
     global LLAMA_SERVER
     LLAMA_SERVER = resolve_llama_server()
-    cmd = build_command(chosen, ctx, args.port)
+    cmd = build_command(chosen, ctx, args.port, card_bytes=card_bytes)
 
     print(f"\nModel : {chosen['name']} ({chosen['arch']})")
     print(f"File  : {chosen['file']}")
@@ -1201,16 +1344,15 @@ def main():
             print("cancel"); sys.exit(2)
         chosen = models[sel - 1]
 
-    # tune
-    kv_budget = TOTAL_RAM_BYTES - OS_OVERHEAD - int(chosen["size_gb"] * 1024 ** 3)
-    if kv_budget < 0:
-        kv_budget = 512 * 1024 * 1024
-    ctx = tuned_context(chosen, kv_budget)
+    # tune: the selected model's trained context is the ceiling; the card's RAM
+    # (GPU VRAM when an NVIDIA card is present) is the budget.
+    card_bytes = detect_server.detect_card_ram_bytes()
+    ctx = serve_context(chosen, card_bytes)
     # resolve llama-server (LLAMA_SERVER override, then PATH) BEFORE building the
     # command — terminates with a clear error if the binary is missing.
     global LLAMA_SERVER
     LLAMA_SERVER = resolve_llama_server()
-    cmd = build_command(chosen, ctx, args.port)
+    cmd = build_command(chosen, ctx, args.port, card_bytes=card_bytes)
 
     print(f"\nModel : {chosen['name']} ({chosen['arch']})")
     print(f"File  : {chosen['file']}")

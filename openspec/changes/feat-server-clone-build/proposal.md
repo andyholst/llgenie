@@ -15,6 +15,11 @@ and verifying it serves a real model.
 
 ## What Changes
 
+- Size `llama-server` `-c` from the selected GGUF's trained `context_length`,
+  lowered only when the q4_0 KV cache does not fit card RAM. Hybrid models
+  (Ternary Bonsai 2, `context_length` 262144) count full-attention layers only,
+  so a 16 GB card keeps the full trained window. Unit tests cover this and run
+  in the CI `unit` job (`make test-unit`).
 - Add `scripts/detect_server.py` — a hermetic, mockable detector that calls the
   **real** system tools (`nvidia-smi`, `sysctl`, `/proc/meminfo`, `uname -m`,
   `shutil.which`) to pick (a) the **tree** from card RAM and (b) the **backend**
