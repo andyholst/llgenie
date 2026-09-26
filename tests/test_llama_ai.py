@@ -7,6 +7,7 @@ exercise the pure functions in scripts/llama_serve.py and the on-disk model scan
 from __future__ import annotations
 
 import struct
+import sys
 from pathlib import Path
 
 import io
@@ -332,6 +333,81 @@ def test_fast_reader_captures_hybrid_context_fields(tmp_path):
     assert m["full_attention_interval"] == 4
     assert m["nextn_layers"] == 1
     assert llama_ai.serve_context(m, 16 * 1024 ** 3) == 262144
+
+
+def test_serve_chosen_dry_run_passes_ctx_flag(server_on_path, monkeypatch, capsys):
+    """The launch path prints llama-server -c from serve_context, and does not start the server."""
+
+    # Given Bonsai on a mocked 16 GB card, and the same file on an 8 GB card
+    meta = _bonsai_mtp_meta()
+    monkeypatch.setattr(llama_ai, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
+    args = type("Args", (), {"port": 11434, "dry": True})()
+
+    # When the dry launch runs on 16 GB
+    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
+    llama_ai._serve_chosen(meta, args)
+    out_16 = capsys.readouterr().out
+
+    # Then the command carries -c 262144 and the process returns without serving
+    assert "-c \\\n  262144" in out_16
+    assert "context = 262144 tokens" in out_16
+
+    # When the same dry launch runs on 8 GB
+    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 8 * 1024 ** 3)
+    llama_ai._serve_chosen(meta, args)
+    out_8 = capsys.readouterr().out
+
+    # Then -c is the reduced window
+    assert "-c \\\n  30720" in out_8
+    assert "context = 30720 tokens" in out_8
+
+
+def test_main_dry_run_uses_selected_gguf_context(server_on_path, monkeypatch, capsys, tmp_path):
+    """`llgenie <name> --dry` sets -c from the file that was selected."""
+
+    # Given one hybrid GGUF under the model root and a 16 GB card
+    models = tmp_path / "models"
+    models.mkdir()
+    def s(v: str) -> bytes:
+        b = v.encode("utf-8")
+        return struct.pack("<Q", len(b)) + b
+
+    def kv(key: str, vtype: int, val: bytes) -> bytes:
+        return struct.pack("<Q", len(key)) + key.encode() + struct.pack("<I", vtype) + val
+
+    pairs = [
+        kv("general.architecture", 8, s("qwen35")),
+        kv("general.name", 8, s("bonsai")),
+        kv("qwen35.block_count", 4, struct.pack("<I", 65)),
+        kv("qwen35.embedding_length", 4, struct.pack("<I", 5120)),
+        kv("qwen35.attention.head_count", 4, struct.pack("<I", 24)),
+        kv("qwen35.attention.head_count_kv", 4, struct.pack("<I", 4)),
+        kv("qwen35.attention.key_length", 4, struct.pack("<I", 256)),
+        kv("qwen35.attention.value_length", 4, struct.pack("<I", 256)),
+        kv("qwen35.context_length", 4, struct.pack("<I", 262144)),
+        kv("qwen35.full_attention_interval", 4, struct.pack("<I", 4)),
+        kv("qwen35.nextn_predict_layers", 4, struct.pack("<I", 1)),
+        kv("tokenizer.chat_template", 8, s("chat")),
+    ]
+    buf = bytearray(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0))
+    buf += struct.pack("<Q", len(pairs))
+    for x in pairs:
+        buf += x
+    gguf = models / "Ternary-Bonsai-2-27B-PTQ1_0-mtp.gguf"
+    gguf.write_bytes(bytes(buf))
+    monkeypatch.setattr(llama_ai, "MODELS_ROOT", str(models))
+    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
+    monkeypatch.setattr(llama_ai, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
+    monkeypatch.setattr(sys, "argv", ["llgenie", "bonsai", "--dry"])
+
+    # When main selects that file and stops at --dry
+    llama_ai.main()
+    out = capsys.readouterr().out
+
+    # Then the printed server command uses the model's trained context
+    assert "context = 262144 tokens" in out
+    assert "-c \\\n  262144" in out
+    assert str(gguf) in out or "Ternary-Bonsai-2-27B-PTQ1_0-mtp.gguf" in out
 
 
 # ---------------------------------------------------------------------------

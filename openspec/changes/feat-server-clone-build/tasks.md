@@ -100,8 +100,9 @@ Ticked the moment the work is verified with real tool output.
       present), not the hardcoded 48 GB constant.
 - [x] 8.4 Unit tests in `tests/test_llama_ai.py` lock: Bonsai-shaped model on
       16 GB → 262144; same model on 8 GB → 30720; missing context_length →
-      32768; fast reader keeps the hybrid fields. They run under `make test-unit`
-      (CI job `unit`).
+      32768; fast reader keeps the hybrid fields. `_serve_chosen --dry` and
+      `main --dry` print `-c` with that value. They run under `make test-unit`
+      (CI job `unit` in `.github/workflows/ci.yml`).
 - [x] 8.5 README launch section documents that `-c` follows the selected model's
       trained context, lowered only when the KV cache does not fit the card.
 
