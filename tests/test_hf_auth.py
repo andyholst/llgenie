@@ -5,6 +5,7 @@ CI injects the Actions secret as HF_TOKEN. A non-Hub URL never receives it.
 """
 from __future__ import annotations
 
+import ast
 import urllib.request
 from pathlib import Path
 
@@ -126,6 +127,63 @@ def test_rate_limit_wait_caps_at_ten_minutes():
 
     # Then the wait is capped at 10 minutes
     assert wait == 600
+
+
+def test_top_tier_dry_run_budget_is_one_window_plus_discovery():
+    """The CI dry run stays up for one capped 429 and the listing after it."""
+
+    # Given the shared cap of one Hub window
+    cap = auth.RATE_LIMIT_WAIT_CAP
+
+    # When the dry-run process budget is read
+    budget = auth.TOP_TIER_DRY_RUN_TIMEOUT
+
+    # Then it is that cap plus the 180 seconds the detailed dry run had for discovery
+    assert cap == 600
+    assert budget == cap + 180
+
+
+# Local-file pickers never call the Hub, so a short process limit stays.
+_LOCAL_ONLY = {
+    "test_local_flag_keeps_the_local_picker",
+    "test_ambiguous_local_model_with_engine_is_rejected",
+}
+
+
+def _short_hub_process_limits() -> list[tuple[str, str, int]]:
+    """Numeric subprocess limits under one Hub window, on launcher or download calls."""
+    short = []
+    for path in sorted((REPO / "tests").glob("test_*.py")):
+        tree = ast.parse(path.read_text())
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            if fn.name in _LOCAL_ONLY:
+                continue
+            for call in ast.walk(fn):
+                if not isinstance(call, ast.Call):
+                    continue
+                func = call.func
+                if not isinstance(func, ast.Attribute) or func.attr != "run":
+                    continue
+                blob = ast.dump(call)
+                if "llama_serve.py" not in blob and "hf_download.py" not in blob:
+                    continue
+                for kw in call.keywords:
+                    if kw.arg != "timeout" or not isinstance(kw.value, ast.Constant):
+                        continue
+                    if isinstance(kw.value.value, (int, float)) and kw.value.value < auth.TOP_TIER_DRY_RUN_TIMEOUT:
+                        short.append((path.name, fn.name, kw.value.value))
+    return short
+
+
+def test_hub_launcher_processes_use_the_dry_run_budget():
+    """A launcher or real download subprocess outlives one capped Hub 429."""
+
+    # Given every test that starts llama_serve or hf_download
+    short = _short_hub_process_limits()
+
+    # When its subprocess timeout is a number
+    # Then none of those numbers is shorter than one window plus discovery
+    assert short == []
 
 
 def test_workflows_pass_the_secret_into_reusable_workflows():
