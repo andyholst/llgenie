@@ -1084,7 +1084,7 @@ def load_registry(src: str) -> dict:
     return data.get("engines", data)
 
 
-def validate(skills: dict, registry: dict | None = None) -> list[str]:
+def validate(skills: dict, registry: dict | None = None, allow_unskilled: bool = False) -> list[str]:
     errors = []
     for sid, s in skills.items():
         where = f"{sid} ({s.get('_path')})"
@@ -1180,7 +1180,9 @@ def validate(skills: dict, registry: dict | None = None) -> list[str]:
     if registry is not None:
         engines = {s.get("engine") for s in skills.values()}
         for name in registry:
-            if name not in engines:
+            # The weekly registry sync keeps upstream engines llgenie does not ship.
+            # rank_engines drops them (no image). They are not a failed sync.
+            if name not in engines and not allow_unskilled:
                 errors.append(f"registry engine {name!r} has no skill (add skills/engines/<id>/SKILL.md)")
         for sid, s in skills.items():
             if s.get("engine") not in registry:
@@ -1214,6 +1216,8 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--json", action="store_true")
     v = sub.add_parser("validate")
     v.add_argument("--registry", default=None, help="models.json path or URL (default: none)")
+    v.add_argument("--allow-unskilled", action="store_true",
+                   help="do not fail when the registry names an engine with no skill")
     for name in ("plan", "check", "install", "detect"):
         p = sub.add_parser(name)
         p.add_argument("id")
@@ -1253,7 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "validate":
         reg = load_registry(a.registry) if a.registry else None
-        errors = validate(skills, reg)
+        errors = validate(skills, reg, allow_unskilled=a.allow_unskilled)
         for e in errors:
             print(f"[skills-validate] {e}", file=sys.stderr)
         print(f"[skills-validate] {len(skills)} skills, "

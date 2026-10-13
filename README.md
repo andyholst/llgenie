@@ -220,11 +220,21 @@ make sync-quant-catalog   # regenerate the HF class table data/trending-quant-ca
                           # fixture (model -> engine -> arch + real quant plans with per-quant links)
                           # from the registry + live Hub; validates the newly-added links vs the prior table
 make check-quant-catalog  # CI: fail if the committed quant catalog differs from the generator's output
+make render-trend-list-matrix  # rewrite tests/fixtures/trend-list-matrix.json: the trending
+                              # list for every arch x vram x ram, from `llgenie --matrix`
+make check-trend-list-matrix   # CI: fail if that file differs from a fresh matrix() call
 ```
 
-The `registry-sync` workflow runs `make sync-registry` daily (cron `17 5 * * *`),
-regenerates the quant catalog (`make sync-quant-catalog`), and opens a PR when
-either changed. The `engine-bump` workflow runs on its **own** cron (weekly,
+The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
+Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`) and
+the trend-list matrix (`make render-trend-list-matrix`), and opens a PR when any
+of those files changed. The matrix fixture is the review of the new list: one
+block per architecture, card size, and RAM size, in README order, with the
+server `llgenie --matrix` would put first. A sync that updates `data/models.json`
+and leaves the fixture stale fails `make test-unit`. An upstream engine with no llgenie skill is
+left out of the startup list (no image) and does not fail that job
+(`make skills-validate REGISTRY=data/models.json ALLOW_UNSKILLED=1`). The
+`engine-bump` workflow runs on its **own** cron (weekly,
 Monday `23 6 * * 1`, separate from the registry sync) and pins every engine skill
 to the latest upstream commit, opening a PR per changed engine (issue #107):
 
@@ -1070,7 +1080,7 @@ llgenie/
 │   └── conftest.py / ptydrive.py / fixtures/   # shared test helpers
 ├── .github/workflows/
 │   ├── ci.yml              # parallel per-stage CI (all branches/PRs)
-│   ├── registry-sync.yml   # daily sync-registry + quant catalog (cron 17 5), opens a PR when changed
+│   ├── registry-sync.yml   # weekly sync-registry + quant catalog (cron 17 5 * * 1), opens a PR when changed
 │   ├── engine-bump.yml     # weekly engine pin bumps (cron 23 6 * * 1, separate), opens a PR per changed engine
 │   └── engine-bump-rebase.yml  # daily: rebase open engine-bump PRs onto the latest main (issue #208)
 ├── openspec/changes/    # OpenSpec change tracking (spec-driven; proposal/spec/tasks)
