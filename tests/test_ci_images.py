@@ -559,3 +559,21 @@ def test_the_publish_workflow_uses_the_default_token_and_proves_push_first():
     assert "github.token" in wf and "docker login ghcr.io" in wf
     assert wf.index("make agent-image-push-check") < wf.index("make publish-agent-image"), \
         "the push pre-flight must run before the build"
+
+
+def test_every_workflow_file_parses():
+    """A workflow that does not parse does not fail loudly in CI - GitHub creates a run with NO
+    JOBS and marks it failed, which reads as "the workflow did nothing". That is exactly how a
+    colon-space inside a step name (`name: Log in to GHCR (the default token: the credential ...)`)
+    shipped a broken publish workflow. Parse them all."""
+    files = sorted(WF.glob("*.yml"))
+    assert files, "no workflows found"
+    for f in files:
+        doc = yaml.safe_load(f.read_text())
+        assert isinstance(doc, dict), f"{f.name} is not a mapping"
+        assert "jobs" in doc, f"{f.name} has no jobs"
+        for job, spec in (doc["jobs"] or {}).items():
+            assert spec.get("runs-on") or spec.get("uses"), f"{f.name}:{job} runs nowhere"
+            for step in spec.get("steps") or []:
+                assert step.get("name") or step.get("uses") or step.get("run"), \
+                    f"{f.name}:{job} has a nameless step"
