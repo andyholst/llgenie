@@ -126,7 +126,7 @@ CMake builds its default arch list. `GGML_NATIVE=OFF` keeps the binary portable.
 `llama-server -m <gguf> --host 127.0.0.1 --port 11434 --alias llm-local --jinja`.
 `GET /health`. OpenAI routes: `/v1/models`, `/v1/chat/completions`,
 `/v1/completions`, `/v1/embeddings`, `/v1/responses`. The tuned serving flags
-(`-c`, `-ngl`, `-ctk/-ctv`, MTP) come from `scripts/llama_serve.py`
+(`-c`, `-ngl`, `-ctk/-ctv`, MTP) come from `scripts/llgenie_serve.py`
 `build_command()` (issue #91).
 
 ## Container images

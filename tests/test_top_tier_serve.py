@@ -27,7 +27,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-import scripts.llama_serve as llama_ai  # noqa: E402
+import scripts.llgenie_serve as llgenie_serve  # noqa: E402
 
 pytestmark = pytest.mark.acceptance
 
@@ -51,8 +51,8 @@ def _real_hf() -> str:
 def _resolve_model_file(tmp_root) -> str:
     """Download the lightweight top-tier model for real (idempotent) into tmp_root."""
     _real_hf()
-    real = next(f for f in llama_ai._repo_gguf_files(REPO_ID) if f["path"] == FILENAME)
-    tier = llama_ai.pick_tier_folder(real["size_bytes"], 16 * 1024 ** 3)  # small-model tier
+    real = next(f for f in llgenie_serve._repo_gguf_files(REPO_ID) if f["path"] == FILENAME)
+    tier = llgenie_serve.pick_tier_folder(real["size_bytes"], 16 * 1024 ** 3)  # small-model tier
     cand = {
         "repo": REPO_ID,
         "filename": FILENAME,
@@ -61,7 +61,7 @@ def _resolve_model_file(tmp_root) -> str:
         "tier_folder": tier,
         "dest_path": f"{tmp_root}/Qwen/Qwen2.5-0.5B-Instruct-GGUF/{tier}/{FILENAME}",
     }
-    final = llama_ai.download_top_tier_candidate(dict(cand), models_root=tmp_root)
+    final = llgenie_serve.download_top_tier_candidate(dict(cand), models_root=tmp_root)
     assert Path(final).is_file(), f"downloaded model missing: {final}"
     return final
 

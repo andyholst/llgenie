@@ -35,7 +35,7 @@ sys.path.insert(0, str(REPO / "tests"))
 import engine_skills as es  # noqa: E402
 from ptydrive import Pty  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 PINNED = es.pinned_version(es.get_skill("tensorfold"))
 MODEL = "Qwen3.8-27B"
 ENGINE = "TensorFold"

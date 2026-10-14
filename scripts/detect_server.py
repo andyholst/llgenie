@@ -37,6 +37,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+try:
+    from .env_seam import env_seam  # noqa: F401
+except ImportError:  # scripts/ on sys.path
+    from env_seam import env_seam  # type: ignore
 import platform
 import re
 import shutil
@@ -201,12 +205,12 @@ def detect_backend() -> str:
     """Return 'metal' | 'cuda' | 'cpu'.
 
     Resolution order:
-      1. $LLAMA_BACKEND override (CI / test mock)
+      1. $LLGENIE_BACKEND override (CI / test mock; $LLAMA_BACKEND still accepted)
       2. macOS + Apple Silicon  -> 'metal'
       3. nvidia-smi lists a GPU AND nvcc present -> 'cuda'
       4. otherwise -> 'cpu'
     """
-    env_backend = (os.environ.get("LLAMA_BACKEND") or "").strip()
+    env_backend = (env_seam("LLGENIE_BACKEND", "LLAMA_BACKEND") or "").strip()
     if env_backend in ("metal", "cuda", "rocm", "vulkan", "cpu"):
         return env_backend
 
@@ -230,13 +234,13 @@ def detect_card_ram_bytes() -> int:
     The 'card' RAM is the GPU's VRAM when an NVIDIA GPU is present
     (the hardware spec the build decision is made against), otherwise the
     system RAM. Resolution order:
-      1. $LLAMA_RAM_BYTES override (CI / test mock)
+      1. $LLGENIE_RAM_BYTES override (CI / test mock; $LLAMA_RAM_BYTES still accepted)
       2. NVIDIA GPU present -> nvidia-smi memory.total (summed across GPUs)
       3. macOS: sysctl -n hw.memsize
       4. Linux: /proc/meminfo MemTotal
       5. fallback: 48 GB
     """
-    env = (os.environ.get("LLAMA_RAM_BYTES") or "").strip()
+    env = (env_seam("LLGENIE_RAM_BYTES", "LLAMA_RAM_BYTES") or "").strip()
     if env.isdigit() and int(env) > 0:
         return int(env)
 
@@ -349,9 +353,9 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.backend:
-        os.environ["LLAMA_BACKEND"] = args.backend
+        os.environ["LLGENIE_BACKEND"] = args.backend
     if args.ram_gb is not None:
-        os.environ["LLAMA_RAM_BYTES"] = str(int(args.ram_gb * 1024 ** 3))
+        os.environ["LLGENIE_RAM_BYTES"] = str(int(args.ram_gb * 1024 ** 3))
 
     result = detect_all()
     if args.tree:

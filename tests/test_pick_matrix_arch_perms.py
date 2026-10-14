@@ -233,7 +233,7 @@ def test_llgenie_matrix_arch_override_in_header(matrix_env, arch, tmp_path):
     env = {**os.environ, "LLGENIE_REGISTRY_SRC": str(smoke),
            "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": "cpu"}
     import subprocess
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"),
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"),
                         "--matrix", "24", "32", arch],
                        capture_output=True, text=True, env=env, timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT, input="")
     # Then it exits 0 and prints the architecture it computed the permutations for
@@ -252,7 +252,7 @@ def test_llgenie_matrix_explicit_flags(matrix_env, arch, tmp_path):
            "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": "cpu"}
     import subprocess
     # Given the explicit --vram/--ram/--arch form (the flagship smoke model fits 24 GB)
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"),
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"),
                         "--matrix", "--vram", "24", "--ram", "32", "--arch", arch],
                        capture_output=True, text=True, env=env, timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT, input="")
     # Then it exits 0 and the header echoes exactly the flags that were set
@@ -269,7 +269,7 @@ def test_llgenie_matrix_flag_wins_over_positional(matrix_env, tmp_path):
            "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": "cpu"}
     import subprocess
     # Given BOTH a positional GB (99) and an explicit --vram (24), RAM via --ram
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"),
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"),
                         "--matrix", "99", "--vram", "24", "--ram", "32"],
                        capture_output=True, text=True, env=env, timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT, input="")
     # Then the flag wins: the header shows 24, never 99

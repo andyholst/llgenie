@@ -1651,7 +1651,7 @@ def test_ensure_pulls_one_engine_on_first_use(tmp_path, monkeypatch):
     assert il.ensure(tmp_path, "vllm", "cpu", build=False) == 0
     assert [p.name for p in tmp_path.glob("llgenie-engine-*")] == ["llgenie-engine-vllm"]
     assert asked == [il.ei.resolve("vllm", None, "cpu")["tag"]]
-    src = (REPO / "scripts" / "llama_serve.py").read_text()
+    src = (REPO / "scripts" / "llgenie_serve.py").read_text()
     assert '"--ensure", eng["id"], "--arch", eng["variant"]' in src
 
 

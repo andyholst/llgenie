@@ -213,7 +213,7 @@ def test_llgenie_matrix_prints_urls(tmp_path):
     env = {**os.environ, "LLGENIE_REGISTRY_SRC": str(smoke),
            "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": "cpu"}
     # Given --matrix 24 32 on stdin that is not a tty
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"),
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"),
                         "--matrix", "24", "32"],
                        capture_output=True, text=True, env=env,
                        timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT,

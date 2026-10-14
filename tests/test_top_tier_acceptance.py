@@ -23,7 +23,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 import scripts.hf_auth as hf_auth  # noqa: E402
-import scripts.llama_serve as llama_ai  # noqa: E402
+import scripts.llgenie_serve as llgenie_serve  # noqa: E402
 
 pytestmark = pytest.mark.acceptance
 
@@ -62,16 +62,16 @@ def test_real_hf_small_models_placed_in_right_tier():
     # EXACT small-card tier (smallest available bucket >= size, bounded by the 8 GB card)
     # and that the dest_path embeds that same tier folder.
     for repo in repos:
-        files = llama_ai._repo_gguf_files(repo)  # REAL HF listing
+        files = llgenie_serve._repo_gguf_files(repo)  # REAL HF listing
         singles = [f for f in files if ".gguf" in f["path"] and "-0000" not in f["path"]]
         assert singles, f"real HF returned no single-file model for {repo}"
         for f in singles:
-            got_tier = llama_ai.pick_tier_folder(f["size_bytes"], small_card)
+            got_tier = llgenie_serve.pick_tier_folder(f["size_bytes"], small_card)
             # the exact tier must be a real small bucket (<= 8GB) — i.e. truthful
             assert got_tier in ("1GB", "2GB", "4GB", "8GB"), (
                 f"{f['path']} ({f['size_gb']:.1f}GB) on 8GB card -> {got_tier} not small")
             # the dest_path must embed the same small tier folder (card it fits)
-            p = llama_ai.provider_dest_path(repo, f["path"], f["size_bytes"],
+            p = llgenie_serve.provider_dest_path(repo, f["path"], f["size_bytes"],
                                             models_root="/m", total_ram_bytes=small_card)
             assert f"/{got_tier}/" in p, f"{f['path']} dest_path missing tier {got_tier}: {p}"
 
@@ -86,12 +86,12 @@ def test_real_trending_query_and_dynamic_ram():
            and the machine must report a sensible amount of memory (more than 1 GB)
            with a positive amount of spare room.
     """
-    total = llama_ai.read_total_ram_bytes()
+    total = llgenie_serve.read_total_ram_bytes()
     assert total > 1024 ** 3, "total RAM must be > 1 GB"
-    headroom = llama_ai.read_current_headroom_bytes(total)
+    headroom = llgenie_serve.read_current_headroom_bytes(total)
     assert headroom > 0, "headroom must be positive"
 
-    repos = llama_ai._trending_gguf_repos(limit=25)
+    repos = llgenie_serve._trending_gguf_repos(limit=25)
     assert isinstance(repos, list)
     assert len(repos) > 0, "expected at least one trending GGUF model on Hugging Face"
     for r in repos:
@@ -111,9 +111,9 @@ def test_discover_top_tier_fit_gate():
            (owner or company name first), and
            no toy-sized tiny model is offered as "top tier".
     """
-    total = llama_ai.read_total_ram_bytes()
-    head = llama_ai.read_current_headroom_bytes(total)
-    cands = llama_ai.discover_top_tier(limit=4, total_ram_bytes=total, headroom_bytes=head)
+    total = llgenie_serve.read_total_ram_bytes()
+    head = llgenie_serve.read_current_headroom_bytes(total)
+    cands = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=total, headroom_bytes=head)
     assert cands, "expected at least one top-tier model to fit this machine"
     for c in cands:
         # fit: size + headroom + KV reserve <= total
@@ -121,9 +121,9 @@ def test_discover_top_tier_fit_gate():
             f"{c['repo']}::{c['filename']} does NOT fit this machine's memory"
         # owner/family first in the destination path
         owner, family = c["repo"].split("/", 1)
-        assert c["dest_path"].startswith(str(Path(llama_ai.MODELS_ROOT) / owner / family))
+        assert c["dest_path"].startswith(str(Path(llgenie_serve.MODELS_ROOT) / owner / family))
         assert c["filename"] == Path(c["dest_path"]).name
-        assert c["size_gb"] >= llama_ai.MIN_TOP_TIER_GB, "a toy model is not 'top tier'"
+        assert c["size_gb"] >= llgenie_serve.MIN_TOP_TIER_GB, "a toy model is not 'top tier'"
 
 
 def test_provider_placement_specific():
@@ -139,11 +139,11 @@ def test_provider_placement_specific():
     fn = "Qwen3.8-27B-Q8_0.gguf"
     root = "/tmp/llama-models-test"
     _48 = 48 * 1024 ** 3  # deterministic card; placement must not depend on the runner's RAM
-    p = llama_ai.provider_dest_path(repo, fn, 29 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
+    p = llgenie_serve.provider_dest_path(repo, fn, 29 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
     assert p == "/tmp/llama-models-test/unsloth/Qwen3.8-27B-GGUF/48GB/Qwen3.8-27B-Q8_0.gguf"
-    p2 = llama_ai.provider_dest_path(repo, fn, 15 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
+    p2 = llgenie_serve.provider_dest_path(repo, fn, 15 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
     assert p2.endswith("/16GB/Qwen3.8-27B-Q8_0.gguf")
-    p3 = llama_ai.provider_dest_path(repo, fn, 22.5 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
+    p3 = llgenie_serve.provider_dest_path(repo, fn, 22.5 * 1024 ** 3, models_root=root, total_ram_bytes=_48)
     assert p3.endswith("/24GB/Qwen3.8-27B-Q8_0.gguf")
 
 
@@ -158,9 +158,9 @@ def _lightweight_candidate(tmp_root, total_ram_bytes=None):
     """
     repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
     fn = "qwen2.5-0.5b-instruct-q4_0.gguf"
-    real = next(f for f in llama_ai._repo_gguf_files(repo) if f["path"] == fn)
+    real = next(f for f in llgenie_serve._repo_gguf_files(repo) if f["path"] == fn)
     total = total_ram_bytes if total_ram_bytes is not None else 16 * 1024 ** 3
-    tier = llama_ai.pick_tier_folder(real["size_bytes"], total)
+    tier = llgenie_serve.pick_tier_folder(real["size_bytes"], total)
     return {
         "repo": repo,
         "filename": fn,
@@ -181,7 +181,7 @@ def test_real_probe_ok_on_public_downloadable_repo():
            HTML/error shell), proving auth-ok and real downloadability.
     """
     _real_hf()
-    result = llama_ai._probe_file_downloadable(
+    result = llgenie_serve._probe_file_downloadable(
         "unsloth/Qwen3.8-27B-GGUF", "Qwen3.8-27B-UD-Q8_K_XL.gguf")
     assert result == "ok", f"public downloadable repo must probe 'ok', got {result}"
 
@@ -195,7 +195,7 @@ def test_real_probe_gated_repo_is_access_denied():
     Then   the probe returns "access-denied" (401/403), so the batch skips it once.
     """
     _real_hf()
-    result = llama_ai._probe_file_downloadable(
+    result = llgenie_serve._probe_file_downloadable(
         "orcarouter/Qwen3.8-27B-Uncensored-GGUF", "Qwen3.8-27B-Uncensored-Q8_0.gguf")
     assert result == "access-denied", f"gated repo must probe 'access-denied', got {result}"
 
@@ -203,7 +203,7 @@ def test_real_probe_gated_repo_is_access_denied():
 def test_real_probe_dead_file_is_dead():
     """Story: the pre-flight probe catches a 404-dead file so it's skipped."""
     _real_hf()
-    result = llama_ai._probe_file_downloadable(
+    result = llgenie_serve._probe_file_downloadable(
         "unsloth/Qwen3.8-27B-GGUF", "totally-missing-xyz-abcdef.gguf")
     assert result == "dead", f"dead file must probe 'dead', got {result}"
 
@@ -225,7 +225,7 @@ def test_real_download_then_repeat_is_fast_and_safe():
     try:
         cand = _lightweight_candidate(tf)
         dest = str(Path(cand["dest_path"]))
-        final = llama_ai.download_top_tier_candidate(
+        final = llgenie_serve.download_top_tier_candidate(
             dict(cand, dest_path=dest), models_root=tf)
         assert Path(final).is_file(), f"downloaded file missing: {final}"
         size = Path(final).stat().st_size
@@ -233,7 +233,7 @@ def test_real_download_then_repeat_is_fast_and_safe():
             f"file incomplete: {size/1e9:.2f} GB vs expected {cand['size_bytes']/1e9:.2f} GB"
         assert str(Path(final)) == dest, "file must land in the by-owner/by-size folder"
 
-        final2 = llama_ai.download_top_tier_candidate(
+        final2 = llgenie_serve.download_top_tier_candidate(
             dict(cand, dest_path=dest), models_root=tf)
         assert final2 == final, "second run must end up at the same file (no error, no clobber)"
     finally:
@@ -257,7 +257,7 @@ def test_same_name_updated_model_is_redownloaded():
     repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
     fn = "qwen2.5-0.5b-instruct-q4_0.gguf"
     # Ask Hugging Face for this file's real size.
-    real = next(f for f in llama_ai._repo_gguf_files(repo) if f["path"] == fn)
+    real = next(f for f in llgenie_serve._repo_gguf_files(repo) if f["path"] == fn)
     cand = {
         "repo": repo,
         "filename": fn,
@@ -269,12 +269,12 @@ def test_same_name_updated_model_is_redownloaded():
     Path(f"/tmp/{TF}").mkdir(parents=True, exist_ok=True)
     try:
         # 1. real download
-        final = llama_ai.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
+        final = llgenie_serve.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
         assert os.path.isfile(final)
         good_bytes = open(final, "rb").read()
 
         # 2. idempotent re-run: same place, no error
-        final2 = llama_ai.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
+        final2 = llgenie_serve.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
         assert final2 == final
 
         # 3. damage the file "in place": same name, same size, scrambled contents
@@ -285,7 +285,7 @@ def test_same_name_updated_model_is_redownloaded():
         assert open(final, "rb").read() != good_bytes        # ...but it is wrong
 
         # 4. asking again must restore the correct contents
-        recovered = llama_ai.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
+        recovered = llgenie_serve.download_top_tier_candidate(cand, models_root=f"/tmp/{TF}")
         assert recovered == final
         assert open(final, "rb").read() == good_bytes, \
             ("the downloader must re-fetch and restore the real file after a "
@@ -305,9 +305,9 @@ def test_discover_high_and_lower_quants_per_provider():
            only the largest Q8 of each provider (which would barely fit and give no
            quantization variety).
     """
-    total = llama_ai.read_total_ram_bytes()
-    head = llama_ai.read_current_headroom_bytes(total)
-    cands = llama_ai.discover_top_tier(limit=4, total_ram_bytes=total, headroom_bytes=head,
+    total = llgenie_serve.read_total_ram_bytes()
+    head = llgenie_serve.read_current_headroom_bytes(total)
+    cands = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=total, headroom_bytes=head,
                                        per_provider=2)
     assert cands, "expected top-tier candidates to fit"
     # For each provider, its picks must be a HIGH quant plus a clearly-LOWER quant:
@@ -336,7 +336,7 @@ def test_default_count_is_five():
     """
     # Read the launcher's own help and confirm --count's default is 5, tolerating
     # the argparse line-wrap of "default 5" (which may split across lines).
-    out = subprocess.run([sys.executable, str(REPO / "scripts/llama_serve.py"),
+    out = subprocess.run([sys.executable, str(REPO / "scripts/llgenie_serve.py"),
                           "--help"], capture_output=True, text=True).stdout
     assert "--count" in out, "--help must document --count"
     # "default 5" may wrap:  "--count COUNT ... default\n                       5 = ..."
@@ -358,7 +358,7 @@ def test_download_progress_shows_percentage():
     tmp = tempfile.mkdtemp(prefix="pcttest")
     try:
         # get real expected bytes from HF tree API
-        real = next(f for f in llama_ai._repo_gguf_files("Qwen/Qwen2.5-0.5B-Instruct-GGUF")
+        real = next(f for f in llgenie_serve._repo_gguf_files("Qwen/Qwen2.5-0.5B-Instruct-GGUF")
                     if f["path"] == "qwen2.5-0.5b-instruct-q4_0.gguf")
         dl = str(REPO / "scripts" / "hf_download.py")
         out = subprocess.run(
@@ -390,14 +390,14 @@ def test_cli_download_top_tier_dry_run_detailed():
            its provider, filename, size, and tier folder — and it must NOT start a
            server or download anything.
     """
-    total = llama_ai.read_total_ram_bytes()
-    head = llama_ai.read_current_headroom_bytes(total)
+    total = llgenie_serve.read_total_ram_bytes()
+    head = llgenie_serve.read_current_headroom_bytes(total)
     # run the REAL binary via subprocess (the CLI entry point, real argv -> main).
     # Pin a 48 GB card via LLAMA_RAM_BYTES so a top-tier model reliably fits on ANY
     # host/CI-runner, exercising the ranked-preview branch (not the no-fit branch).
     env = dict(os.environ)
     env["LLAMA_RAM_BYTES"] = str(48 * 1024 ** 3)
-    out = subprocess.run([sys.executable, str(REPO / "scripts/llama_serve.py"),
+    out = subprocess.run([sys.executable, str(REPO / "scripts/llgenie_serve.py"),
                           "--download-top-tier", "--dry", "--count", "2"],
                          capture_output=True, text=True,
                          timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT, env=env)
@@ -446,7 +446,7 @@ def test_family_dry_run_known_lowend_one_provider():
     env = dict(os.environ)
     env["LLAMA_RAM_BYTES"] = str(8 * 1024 ** 3)
     env["LLAMA_HEADROOM_BYTES"] = str(1 * 1024 ** 3)
-    out = subprocess.run([sys.executable, str(REPO / "scripts/llama_serve.py"),
+    out = subprocess.run([sys.executable, str(REPO / "scripts/llgenie_serve.py"),
                           "--download-top-tier", "--family", "qwen",
                           "--count", "1", "--dry"],
                          capture_output=True, text=True,
@@ -494,7 +494,7 @@ def test_family_real_known_lowend_one_provider(tmp_path):
     _2 = 2 * 1024 ** 3
 
     # Given the live qwen family search (loud failure if HF is unreachable)
-    family_repos = llama_ai._family_gguf_repos("qwen", limit=300)
+    family_repos = llgenie_serve._family_gguf_repos("qwen", limit=300)
     assert family_repos, "live qwen family search returned NO repos — HF unreachable or family vanished"
 
     # When we scan the family for the smallest qualifying low-end file
@@ -506,7 +506,7 @@ def test_family_real_known_lowend_one_provider(tmp_path):
     for r in family_repos:
         repo = r["repo"]
         try:
-            files = llama_ai._repo_gguf_files(repo)
+            files = llgenie_serve._repo_gguf_files(repo)
         except SystemExit:
             continue  # unlistable repo: discovery would skip it too
         for f in files:
@@ -531,7 +531,7 @@ def test_family_real_known_lowend_one_provider(tmp_path):
 
     # When the family path's own downloader fetches it into a tmp models root
     total = 16 * 1024 ** 3  # deterministic small card (the CI pin)
-    tier = llama_ai.pick_tier_folder(size_bytes, total)
+    tier = llgenie_serve.pick_tier_folder(size_bytes, total)
     tf = str(tmp_path / "models")
     cand = {
         "repo": repo,
@@ -541,7 +541,7 @@ def test_family_real_known_lowend_one_provider(tmp_path):
         "tier_folder": tier,
         "dest_path": f"{tf}/{owner}/{fam}/{tier}/{fn}",
     }
-    final = llama_ai.download_top_tier_candidate(dict(cand), models_root=tf)
+    final = llgenie_serve.download_top_tier_candidate(dict(cand), models_root=tf)
 
     # Then the file lands at the provider-aware path with the small tier folder
     assert Path(final).is_file(), f"downloaded file missing: {final}"
@@ -554,11 +554,11 @@ def test_family_real_known_lowend_one_provider(tmp_path):
     assert got <= size_bytes + (64 * 1024 * 1024), \
         f"file larger than the real HF size: {got/1e9:.3f} GB vs {size_bytes/1e9:.3f} GB"
     # and its GGUF metadata verifies (the download path already verified; re-check)
-    meta = llama_ai.read_model_meta_fast(final) or llama_ai.read_model_meta(final)
+    meta = llgenie_serve.read_model_meta_fast(final) or llgenie_serve.read_model_meta(final)
     assert meta is not None, "the downloaded file must verify as a real GGUF model"
 
     # When the same model is requested again
-    final2 = llama_ai.download_top_tier_candidate(dict(cand), models_root=tf)
+    final2 = llgenie_serve.download_top_tier_candidate(dict(cand), models_root=tf)
 
     # Then it is idempotent: same path, no clobber, no error
     assert final2 == final, "second run must end up at the same file (idempotent)"

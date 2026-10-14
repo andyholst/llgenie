@@ -26,7 +26,7 @@ import engine_skills as es  # noqa: E402
 import hf_auth  # noqa: E402
 import install_engine_launchers as iel  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 PINNED = es.pinned_version(es.get_skill("tensorfold"))
 HUB_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
 

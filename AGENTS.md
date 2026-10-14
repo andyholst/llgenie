@@ -743,7 +743,7 @@ scenario is the contract the tests are written against, so it must read like an 
       _real_hf()
 
       # When  we pre-flight it with the probe
-      result = llama_ai._probe_file_downloadable(...)
+      result = llgenie_serve._probe_file_downloadable(...)
 
       # Then  it returns 'ok' (real GGUF chunk over an authenticated 200)
       assert result == "ok"

@@ -20,7 +20,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import hf_auth  # noqa: E402
 import hf_download  # noqa: E402
-import llama_serve  # noqa: E402
+import llgenie_serve  # noqa: E402
 import model_engine_pick as mp  # noqa: E402
 
 
@@ -115,11 +115,11 @@ def test_preflight_probe_waits_out_a_429(monkeypatch):
     monkeypatch.setattr(hf_auth.time, "sleep", lambda s: slept.append(s))
 
     # When the preflight probe runs
-    result = llama_serve._probe_file_downloadable("org/repo", "model.gguf")
+    result = llgenie_serve._probe_file_downloadable("org/repo", "model.gguf")
 
     # Then the sleep is the shared wait and the file is downloadable
     assert result == "ok"
-    assert slept == [llama_serve.rate_limit_wait(err)]
+    assert slept == [llgenie_serve.rate_limit_wait(err)]
 
 
 def test_hub_open_fails_on_the_third_429(monkeypatch):

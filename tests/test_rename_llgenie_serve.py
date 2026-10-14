@@ -1,0 +1,150 @@
+"""The CLI is named after the project, and the old name stays a working alias (#251).
+
+Two things this pins:
+
+1. **The rename guard.** The CLI module is `scripts/llgenie_serve.py`; no live file
+   may mention the old module name again. `llama-server` (upstream's binary), its
+   shim, `build_llama_server.sh`, `LLAMA_SERVER*`/`LLAMA_CUBLAS`/`LLAMA_HOST` and
+   the dated history under `agent-wiki/` and merged `openspec/changes/` are NOT
+   what this guards — they are upstream's names and the record of what happened.
+2. **The seam split.** llgenie's own knobs carry llgenie's name
+   (`LLGENIE_BACKEND`, `LLGENIE_RAM_BYTES`, …) and the old `LLAMA_*` names keep
+   working as deprecated aliases, so no host or CI job breaks on the rename.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+
+import env_seam  # noqa: E402
+import detect_server  # noqa: E402
+
+# The old module name, but NOT `llama_server`/`llama-server` (llama.cpp's binary).
+OLD_MODULE = re.compile(r"\bllama_serve\b")
+SKIP_DIRS = {".git", "__pycache__", "node_modules", ".ci-home", ".venv"}
+# The shim keeps the old name on purpose; history keeps whatever was true then.
+ALLOWED_PREFIXES = ("scripts/llama_serve.py", "agent-wiki/", "openspec/changes/")
+
+
+def live_files():
+    """Every live text file, minus the shim, history, and this guard itself.
+
+    This file is the one place that *must* spell out the old name (it is what it
+    forbids), so it excludes itself rather than special-casing its own text.
+    """
+    me = Path(__file__).resolve()
+    for p in sorted(REPO.rglob("*")):
+        if not p.is_file() or set(p.parts) & SKIP_DIRS or p.resolve() == me:
+            continue
+        rel = str(p.relative_to(REPO))
+        if any(rel.startswith(pre) for pre in ALLOWED_PREFIXES):
+            continue
+        if p.suffix in {".pyc", ".png", ".jpg", ".gif", ".woff", ".woff2", ".gz", ".bin"}:
+            continue
+        try:
+            yield rel, p.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+
+
+def test_no_live_file_mentions_the_old_module_name():
+    hits = [rel for rel, text in live_files() if OLD_MODULE.search(text)]
+    assert not hits, (
+        "the CLI module is scripts/llgenie_serve.py (#251); these files still name it "
+        f"llama_serve: {hits}"
+    )
+
+
+def test_the_binary_and_upstream_names_are_untouched():
+    """The guard is about the module, not about llama.cpp — those names must survive."""
+    joined = "\n".join(text for _, text in live_files())
+    for keep in ("llama-server", "build_llama_server.sh", "LLAMA_SERVER", "LLAMA_CUBLAS"):
+        assert keep in joined, f"{keep} is upstream's name and must not be renamed away"
+    assert (REPO / "scripts" / "build_llama_server.sh").exists()
+
+
+def test_the_shim_is_the_same_module_object():
+    """`import scripts.llama_serve` must hand back llgenie_serve, not a copy."""
+    code = (
+        "import sys; sys.path.insert(0, 'scripts')\n"
+        "import llama_serve, llgenie_serve\n"
+        "print(llama_serve is llgenie_serve)\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO), capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "True", r.stdout + r.stderr
+
+
+def test_the_shim_runs_the_cli_when_executed_directly():
+    src = (REPO / "scripts" / "llama_serve.py").read_text()
+    assert "__main__" in src and ".main()" in src, "the shim must still run the CLI"
+    assert "llgenie_serve" in src, "the shim must point at the new module"
+    # running the old path must actually reach the CLI: prove it end to end
+    r = subprocess.run([sys.executable, "scripts/llama_serve.py", "--help"],
+                       cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert "usage" in (r.stdout + r.stderr).lower()
+
+
+def test_the_installed_artifacts_point_at_the_new_module():
+    mk = (REPO / "Makefile").read_text()
+    assert "scripts/llgenie_serve.py" in mk
+    assert OLD_MODULE.search(mk) is None, "the Makefile must name the module by its new name"
+
+
+# --------------------------------------------------------------------------
+# the seams: llgenie's name wins, the old name still works
+# --------------------------------------------------------------------------
+
+def test_every_recorded_seam_is_actually_read_by_the_code():
+    """No aspirational aliases: each SEAMS row must appear in the sources."""
+    sources = "\n".join(text for rel, text in live_files() if rel.startswith(("scripts/", "Makefile")))
+    for new, old in env_seam.SEAMS.items():
+        assert new in sources, f"{new} is in the seam table but nothing reads it"
+        assert old in sources, f"{old} (the deprecated alias) is not read anywhere"
+
+
+def test_the_new_name_wins_and_the_old_one_still_works():
+    env = {"LLGENIE_BACKEND": "cuda", "LLAMA_BACKEND": "cpu"}
+    assert env_seam.env_seam("LLGENIE_BACKEND", "LLAMA_BACKEND", env) == "cuda"
+    assert env_seam.env_seam("LLGENIE_BACKEND", "LLAMA_BACKEND", {"LLAMA_BACKEND": "cpu"}) == "cpu"
+    assert env_seam.env_seam("LLGENIE_BACKEND", "LLAMA_BACKEND", {}) is None
+    # an empty new value is "unset", so the alias is still honoured
+    assert env_seam.env_seam("LLGENIE_BACKEND", "LLAMA_BACKEND",
+                             {"LLGENIE_BACKEND": "", "LLAMA_BACKEND": "metal"}) == "metal"
+
+
+def test_seam_lookup_accepts_either_name_and_refuses_a_stranger():
+    assert env_seam.seam("LLGENIE_RAM_BYTES", {"LLGENIE_RAM_BYTES": "12"}) == "12"
+    assert env_seam.seam("LLAMA_RAM_BYTES", {"LLAMA_RAM_BYTES": "12"}) == "12"
+    with pytest.raises(KeyError):
+        env_seam.seam("LLAMA_SERVER")
+
+
+def test_detect_server_honours_both_spellings(monkeypatch):
+    monkeypatch.setenv("LLGENIE_BACKEND", "cpu")
+    monkeypatch.delenv("LLAMA_BACKEND", raising=False)
+    assert detect_server.detect_backend() == "cpu"
+    monkeypatch.delenv("LLGENIE_BACKEND", raising=False)
+    monkeypatch.setenv("LLAMA_BACKEND", "cpu")
+    assert detect_server.detect_backend() == "cpu"
+
+
+def test_detect_server_prefers_the_new_spelling(monkeypatch):
+    monkeypatch.setenv("LLGENIE_RAM_BYTES", str(8 * 1024 ** 3))
+    monkeypatch.setenv("LLAMA_RAM_BYTES", str(99 * 1024 ** 3))
+    assert detect_server.detect_card_ram_bytes() == 8 * 1024 ** 3
+
+
+def test_detect_server_writes_the_new_spelling_for_its_children():
+    """--backend/--ram-gb export the new names, so child processes see one convention."""
+    src = (REPO / "scripts" / "detect_server.py").read_text()
+    assert 'os.environ["LLGENIE_BACKEND"]' in src and 'os.environ["LLGENIE_RAM_BYTES"]' in src

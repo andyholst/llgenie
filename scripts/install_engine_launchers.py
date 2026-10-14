@@ -273,7 +273,7 @@ def install(bindir: Path, arch: str, build: bool, only: list[str] | None = None)
     # one shim per llama.cpp tree, named after its server (issue #98):
     #   ~/bin/llama-server  -> stock llama.cpp image (ggml-org, /app/llama-server)
     #   ~/bin/prism-server  -> Prism llama.cpp image (its build-<arch>/bin/llama-server)
-    # llama_serve.resolve_llama_server picks one by the card's tree.
+    # llgenie_serve.resolve_llama_server picks one by the card's tree.
     for engine, name in SERVER_SHIMS.items():
         hit = written.get(engine)
         if not hit:

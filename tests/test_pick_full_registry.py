@@ -49,7 +49,7 @@ import model_engine_pick as mp  # noqa: E402
 
 REGISTRY = REPO / "data" / "models.json"
 GB = 2**30
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 
 ARCHES = ("cuda", "rocm", "vulkan", "cpu", "metal")
 VRAMS = (8, 16, 32, 64)
@@ -272,7 +272,7 @@ _UC_IDS = [f"{p[0]}::{p[1]}::{p[2]}" for p in _UC_PERMS]
 @pytest.mark.parametrize("p", _UC_PERMS, ids=_UC_IDS)
 def test_pick_matrix_llgenie_cli_agrees_with_business_logic(p, tmp_path):
     """The whole system through the REAL `llgenie` CLI, only the engine start mocked:
-    `llgenie --pick <model> --engine <engine> --dry` (scripts/llama_serve.py, the launcher
+    `llgenie --pick <model> --engine <engine> --dry` (scripts/llgenie_serve.py, the launcher
     the user runs) must agree with matrix() — for every offered (model x engine x arch)
     it resolves to that engine on the architecture's image variant, plans a real HF
     download, and prints the start-script command, all BEFORE any engine starts
@@ -900,7 +900,7 @@ _EDGE_IDS = [f"{a}::{m}::v{v}::r{r}->{x}" for a, m, v, r, x, e in _EDGE_CASES]
 @pytest.mark.parametrize("arch,model_id,vram,ram,expected,engine", _EDGE_CASES, ids=_EDGE_IDS)
 def test_pick_matrix_edge_case_golden(arch, model_id, vram, ram, expected, engine, tmp_path):
     """GOLDEN edge-case test with NO GAPS, through the REAL wired `llgenie` CLI
-    (scripts/llama_serve.py main, the launcher the user runs): for every trending
+    (scripts/llgenie_serve.py main, the launcher the user runs): for every trending
     model x engine x architecture x VRAM ladder, `llgenie --matrix --vram V --ram R
     --arch A` MUST print exactly the EXPECTED quantized HF model (the largest that
     fits) or the skip reason. The parametrize id shows inputs -> expected, so the

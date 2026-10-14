@@ -34,7 +34,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import engine_skills as es  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 INST = REPO / "scripts" / "install_engine_launchers.py"
 SKILL = es.get_skill("tensorfold")
 PINNED = es.pinned_version(SKILL)
@@ -83,7 +83,7 @@ def _uv_install(mac, ver):
 
 
 def _ensure(mac):
-    """What llgenie runs on the pick (llama_serve._ensure_and_exec)."""
+    """What llgenie runs on the pick (llgenie_serve._ensure_and_exec)."""
     return _run(mac, sys.executable, INST, "--bin", mac["bindir"], "--ensure", "tensorfold", "--arch", "metal")
 
 

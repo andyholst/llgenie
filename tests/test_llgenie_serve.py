@@ -1,8 +1,8 @@
-"""Unit tests for scripts/llama_serve.py (the GGUF launcher).
+"""Unit tests for scripts/llgenie_serve.py (the GGUF launcher).
 
 Run under the gguf venv python (`make test-unit`). These are hermetic:
 they do NOT launch llama-server or require installed ~/bin artifacts — they
-exercise the pure functions in scripts/llama_serve.py and the on-disk model scan.
+exercise the pure functions in scripts/llgenie_serve.py and the on-disk model scan.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import urllib.error
 
 import pytest
 
-import scripts.llama_serve as llama_ai  # noqa: E402  (relocated from root llgenie.py; importable: gguf+numpy come from the venv)
+import scripts.llgenie_serve as llgenie_serve  # noqa: E402  (relocated from root llgenie.py; importable: gguf+numpy come from the venv)
 
 
 def _minimal_gguf(tmp_path: Path, filename: str = "mini.gguf") -> Path:
@@ -61,7 +61,7 @@ def _minimal_gguf(tmp_path: Path, filename: str = "mini.gguf") -> Path:
 # ---------------------------------------------------------------------------
 def test_fast_reader_parses_minimal_gguf(tmp_path):
     p = _minimal_gguf(tmp_path)
-    m = llama_ai.read_model_meta_fast(str(p))
+    m = llgenie_serve.read_model_meta_fast(str(p))
     assert m is not None
     assert m["arch"] == "qwen2"
     assert m["name"] == "mini-model"
@@ -76,14 +76,14 @@ def test_fast_reader_parses_minimal_gguf(tmp_path):
 def test_fast_reader_returns_none_on_non_gguf(tmp_path):
     p = tmp_path / "junk.bin"
     p.write_bytes(b"NOTAGGUFFILE" * 16)
-    assert llama_ai.read_model_meta_fast(str(p)) is None
+    assert llgenie_serve.read_model_meta_fast(str(p)) is None
 
 
 def test_download_metadata_verification_accepts_real_gguf(tmp_path):
     """The post-download metadata verification (download_top_tier_candidate) accepts a
     genuine GGUF model file — proves the right model was downloaded (by its GGUF header)."""
     p = _minimal_gguf(tmp_path)
-    meta = llama_ai.read_model_meta_fast(str(p)) or llama_ai.read_model_meta(str(p))
+    meta = llgenie_serve.read_model_meta_fast(str(p)) or llgenie_serve.read_model_meta(str(p))
     assert meta is not None, "a real GGUF model must be verifiable by its metadata"
     # the exact metadata that identifies which model it is:
     assert meta["name"] == "mini-model"
@@ -98,10 +98,10 @@ def test_download_metadata_verification_rejects_html_error_page(tmp_path):
     # fast reader returns None, full reader raises, and the result is REJECTED.
     p = tmp_path / "model.gguf"
     p.write_bytes(b"<html><body>404: Model Not Found</body></html>")
-    meta = llama_ai.read_model_meta_fast(str(p))
+    meta = llgenie_serve.read_model_meta_fast(str(p))
     if meta is None:
         try:
-            meta = llama_ai.read_model_meta(str(p))
+            meta = llgenie_serve.read_model_meta(str(p))
         except Exception:
             meta = None
     assert meta is None, "an HTML error page is not a valid GGUF model and must be rejected"
@@ -128,18 +128,18 @@ def test_unreadable_gguf_is_removed_and_refetched(tmp_path, monkeypatch):
             dest.write_bytes(good.read_bytes())
         return 0
 
-    monkeypatch.setattr(llama_ai.subprocess, "call", fake_download)
-    monkeypatch.setattr(llama_ai.shutil, "which", lambda name: "/usr/bin/hf")
+    monkeypatch.setattr(llgenie_serve.subprocess, "call", fake_download)
+    monkeypatch.setattr(llgenie_serve.shutil, "which", lambda name: "/usr/bin/hf")
     cand = {"repo": "Qwen/x", "filename": "model.gguf", "dest_path": str(dest),
             "size_gb": 0.1, "size_bytes": dest.stat().st_size, "tier_folder": "1GB"}
 
     # When the candidate is downloaded
-    got = llama_ai.download_top_tier_candidate(cand)
+    got = llgenie_serve.download_top_tier_candidate(cand)
 
     # Then the damaged copy was removed and the second fetch restored a real GGUF
     assert calls["n"] == 2
     assert got == str(dest)
-    assert llama_ai.read_model_meta_fast(got)["name"] == "mini-model"
+    assert llgenie_serve.read_model_meta_fast(got)["name"] == "mini-model"
 
 
 def dest_size(path):
@@ -152,27 +152,27 @@ def dest_size(path):
 @pytest.fixture
 def hermetic_models_dir(tmp_path, monkeypatch):
     """Seed a temp models dir with two mini GGUFs of different sizes and point
-    llama_ai.MODELS_ROOT at it, so the scan tests run hermetically — no host
+    llgenie_serve.MODELS_ROOT at it, so the scan tests run hermetically — no host
     ~/models dependency, no skips."""
     models = tmp_path / "models"
     models.mkdir()
     _minimal_gguf(models, "a-small.gguf")                      # tiny header
     big = _minimal_gguf(models, "z-big.gguf")                  # larger file
     big.write_bytes(big.read_bytes() + b"\x00" * (2048 * 1024))  # ~2 MB
-    monkeypatch.setattr(llama_ai, "MODELS_ROOT", str(models))
+    monkeypatch.setattr(llgenie_serve, "MODELS_ROOT", str(models))
     return models
 
 
 def test_models_root_exists(hermetic_models_dir):
     # MODELS_ROOT points at a real, existing seeded dir — no host dependency.
-    assert llama_ai.MODELS_ROOT == str(hermetic_models_dir)
-    assert Path(llama_ai.MODELS_ROOT).is_dir(), (
+    assert llgenie_serve.MODELS_ROOT == str(hermetic_models_dir)
+    assert Path(llgenie_serve.MODELS_ROOT).is_dir(), (
         "MODELS_ROOT points at a dir that does not exist"
     )
 
 
 def test_scan_models_returns_sorted_list(hermetic_models_dir):
-    models = llama_ai.scan_models()
+    models = llgenie_serve.scan_models()
     assert len(models) == 2, "expected the two seeded ggu files to be scanned"
     for m in models:
         for key in ("file", "name", "arch", "size_gb", "ctx_train"):
@@ -188,10 +188,10 @@ def test_scan_models_returns_sorted_list(hermetic_models_dir):
 # reasoning detection
 # ---------------------------------------------------------------------------
 def test_is_reasoning_model_detects_markers():
-    assert llama_ai.is_reasoning_model({"chat_template": "x<|start_of_fim|>y"})
-    assert llama_ai.is_reasoning_model({"chat_template": "deepseek reasoning cot"})
-    assert not llama_ai.is_reasoning_model({"chat_template": "llama3 meta"})
-    assert not llama_ai.is_reasoning_model({"chat_template": ""})
+    assert llgenie_serve.is_reasoning_model({"chat_template": "x<|start_of_fim|>y"})
+    assert llgenie_serve.is_reasoning_model({"chat_template": "deepseek reasoning cot"})
+    assert not llgenie_serve.is_reasoning_model({"chat_template": "llama3 meta"})
+    assert not llgenie_serve.is_reasoning_model({"chat_template": ""})
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +199,9 @@ def test_is_reasoning_model_detects_markers():
 # ---------------------------------------------------------------------------
 def test_kv_bytes_per_token_positive():
     meta = {"n_embd": 3584, "n_head": 28, "n_head_kv": 4, "n_layer": 28}
-    assert llama_ai.kv_bytes_per_token(meta) > 0
+    assert llgenie_serve.kv_bytes_per_token(meta) > 0
     # q4_0 (default) is ~4x smaller than fp16
-    assert llama_ai.kv_bytes_per_token(meta, "q4_0") < llama_ai.kv_bytes_per_token(meta, "f16")
+    assert llgenie_serve.kv_bytes_per_token(meta, "q4_0") < llgenie_serve.kv_bytes_per_token(meta, "f16")
 
 
 def test_tuned_context_capped_by_train_ctx():
@@ -214,9 +214,9 @@ def test_tuned_context_capped_by_train_ctx():
     }
 
     # When the KV budget cannot hold even one token, and when it is huge
-    assert llama_ai.kv_bytes_per_token(meta) > 0
-    ctx = llama_ai.tuned_context(meta, 1)
-    ctx2 = llama_ai.tuned_context(meta, 10 ** 18)
+    assert llgenie_serve.kv_bytes_per_token(meta) > 0
+    ctx = llgenie_serve.tuned_context(meta, 1)
+    ctx2 = llgenie_serve.tuned_context(meta, 10 ** 18)
 
     # Then the tiny budget floors at 2048 and the huge budget stays at the train ctx
     assert ctx == 2048
@@ -251,14 +251,14 @@ def test_hybrid_kv_counts_full_attention_layers_only():
     meta = _bonsai_mtp_meta()
 
     # When KV bytes/token are estimated
-    per = llama_ai.kv_bytes_per_token(meta)
+    per = llgenie_serve.kv_bytes_per_token(meta)
     dense = {
         **meta,
         "full_attention_interval": 0,
         "key_length": 0,
         "value_length": 0,
     }
-    dense_per = llama_ai.kv_bytes_per_token(dense)
+    dense_per = llgenie_serve.kv_bytes_per_token(dense)
 
     # Then only the full-attention layers are charged, using the real head dim
     # 16 language layers (64 // 4) + 1 MTP block, q4_0, key=value=256, 4 KV heads
@@ -274,8 +274,8 @@ def test_build_command_offloads_every_layer_when_the_card_fits(server_on_path):
     card = 16 * 1024 ** 3
 
     # When the launch command is built
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
 
     # Then context stays at the trained max and every layer goes to the GPU
     assert cmd[cmd.index("-c") + 1] == "262144"
@@ -297,8 +297,8 @@ def test_build_command_offloads_fewer_layers_when_the_weights_do_not_fit(server_
     card = 8 * 1024 ** 3
 
     # When the launch command is built
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
 
     # Then -c is the reduced window and -ngl is only the layers that fit
     assert cmd[cmd.index("-c") + 1] == "30720"
@@ -315,8 +315,8 @@ def test_build_command_cpu_backend_skips_gpu_flags(server_on_path):
     card = 16 * 1024 ** 3
 
     # When the launch command is built
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cpu")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cpu")
 
     # Then GPU-only flags are absent and the context flag remains
     assert "-ngl" not in cmd
@@ -336,7 +336,7 @@ def test_build_command_omits_flags_the_model_does_not_support(server_on_path):
     }
 
     # When the launch command is built for a CUDA card
-    cmd = llama_ai.build_command(
+    cmd = llgenie_serve.build_command(
         meta, ctx=8192, port=11434, card_bytes=16 * 1024 ** 3, backend="cuda",
     )
 
@@ -356,9 +356,9 @@ def test_batch_grows_with_the_card():
 
     # When the batch is chosen
     # Then it steps up with the card
-    assert llama_ai.batch_for_card(small) == (512, 256)
-    assert llama_ai.batch_for_card(mid) == (2048, 512)
-    assert llama_ai.batch_for_card(big) == (4096, 1024)
+    assert llgenie_serve.batch_for_card(small) == (512, 256)
+    assert llgenie_serve.batch_for_card(mid) == (2048, 512)
+    assert llgenie_serve.batch_for_card(big) == (4096, 1024)
 
 
 def _prism_ptq_meta(quant="PTQ1_0", size_gb=5.93):
@@ -377,8 +377,8 @@ def test_ptq1_0_on_16gb_keeps_full_context_and_bonsai_sampling(server_on_path):
     card = 16 * 1024 ** 3
 
     # When llgenie builds the server command
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
 
     # Then the trained context, full offload, and Bonsai sampling are set
     assert cmd[cmd.index("-c") + 1] == "262144"
@@ -401,8 +401,8 @@ def test_ptq1_0_on_8gb_shrinks_context_and_offload(server_on_path):
     card = 8 * 1024 ** 3
 
     # When llgenie builds the server command
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
 
     # Then context and GPU layers both shrink
     assert cmd[cmd.index("-c") + 1] == "30720"
@@ -417,8 +417,8 @@ def test_pq2_0_on_8gb_offloads_fewer_layers_than_ptq1_0(server_on_path):
     card = 8 * 1024 ** 3
 
     # When llgenie builds the server command
-    ctx = llama_ai.serve_context(meta, card)
-    cmd = llama_ai.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
+    ctx = llgenie_serve.serve_context(meta, card)
+    cmd = llgenie_serve.build_command(meta, ctx, 11434, card_bytes=card, backend="cuda")
 
     # Then context matches the card and fewer layers are offloaded than PTQ1_0
     assert cmd[cmd.index("-c") + 1] == "30720"
@@ -434,7 +434,7 @@ def test_prism_file_keeps_author_sampling_when_present(server_on_path):
     meta["sampling"] = {"temperature": "0.7"}
 
     # When llgenie builds the server command
-    cmd = llama_ai.build_command(
+    cmd = llgenie_serve.build_command(
         meta, ctx=4096, port=11434, card_bytes=16 * 1024 ** 3, backend="cuda",
     )
 
@@ -467,7 +467,7 @@ def _read_fake_argv(argv_out):
 
 
 def _run_llgenie(monkeypatch, tmp_path, filename, arch, fields, size_gb, card_bytes, backend, select):
-    """Run llama_serve.main. Only the llama-server binary is fake."""
+    """Run llgenie_serve.main. Only the llama-server binary is fake."""
     models = tmp_path / "models"
     models.mkdir()
     _gguf_file(
@@ -478,7 +478,7 @@ def _run_llgenie(monkeypatch, tmp_path, filename, arch, fields, size_gb, card_by
     _binary, argv_out = _install_fake_llama_server(monkeypatch, tmp_path, card_bytes, backend)
     monkeypatch.setenv("LLAMA_MODELS_ROOT", str(models))
     monkeypatch.setattr(sys, "argv", ["llgenie", select, "--port", "45119"])
-    llama_ai.main()
+    llgenie_serve.main()
     return _read_fake_argv(argv_out)
 
 
@@ -538,7 +538,7 @@ def _run_llgenie(monkeypatch, tmp_path, filename, arch, fields, size_gb, card_by
     binary, argv_out = _install_fake_llama_server(monkeypatch, tmp_path, card_bytes, backend)
     monkeypatch.setenv("LLAMA_MODELS_ROOT", str(models))
     monkeypatch.setattr(sys, "argv", ["llgenie", select, "--port", "45119"])
-    llama_ai.main()
+    llgenie_serve.main()
     cmd = _read_fake_argv(argv_out)
     assert cmd[0] == str(binary)
     return cmd
@@ -821,13 +821,13 @@ def test_dry_llgenie_call_prints_ptq_command_for_16gb(server_on_path, monkeypatc
 
     # Given a PTQ1_0 model and a mocked 16 GB CUDA card
     meta = _prism_ptq_meta("PTQ1_0", 5.93)
-    monkeypatch.setattr(llama_ai, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
-    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
-    monkeypatch.setattr(llama_ai.detect_server, "detect_backend", lambda: "cuda")
+    monkeypatch.setattr(llgenie_serve, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_backend", lambda: "cuda")
     args = type("Args", (), {"port": 11434, "dry": True})()
 
     # When the dry launch runs
-    llama_ai._serve_chosen(meta, args)
+    llgenie_serve._serve_chosen(meta, args)
     out = capsys.readouterr().out
 
     # Then the printed command has the trained context, full offload, and Bonsai sampling
@@ -845,7 +845,7 @@ def test_serve_context_uses_model_max_when_the_card_fits():
     card = 16 * 1024 ** 3
 
     # When the launch context is tuned
-    ctx = llama_ai.serve_context(meta, card)
+    ctx = llgenie_serve.serve_context(meta, card)
 
     # Then -c is the model's trained maximum
     assert ctx == 262144
@@ -859,7 +859,7 @@ def test_serve_context_shrinks_when_the_card_cannot_hold_the_train_ctx():
     card = 8 * 1024 ** 3
 
     # When the launch context is tuned
-    ctx = llama_ai.serve_context(meta, card)
+    ctx = llgenie_serve.serve_context(meta, card)
 
     # Then the window stays under the trained maximum and above the floor
     assert ctx == 30720
@@ -877,7 +877,7 @@ def test_serve_context_missing_train_ctx_caps_at_32768():
     }
 
     # When it is served on a 48 GB card
-    ctx = llama_ai.serve_context(meta, 48 * 1024 ** 3)
+    ctx = llgenie_serve.serve_context(meta, 48 * 1024 ** 3)
 
     # Then the fallback ceiling is 32768
     assert ctx == 32768
@@ -888,18 +888,18 @@ def test_launch_context_reads_card_ram_not_the_48gb_constant(monkeypatch):
 
     # Given a card detector that reports 16 GB
     monkeypatch.setattr(
-        llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3,
+        llgenie_serve.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3,
     )
     meta = _bonsai_mtp_meta()
 
     # When the launcher resolves the context the way main() does
-    card = llama_ai.detect_server.detect_card_ram_bytes()
-    ctx = llama_ai.serve_context(meta, card)
+    card = llgenie_serve.detect_server.detect_card_ram_bytes()
+    ctx = llgenie_serve.serve_context(meta, card)
 
     # Then the result matches the 16 GB card, which holds this model's full window
     assert card == 16 * 1024 ** 3
     assert ctx == 262144
-    assert llama_ai.TOTAL_RAM_BYTES == 48 * 1024 ** 3
+    assert llgenie_serve.TOTAL_RAM_BYTES == 48 * 1024 ** 3
 
 
 def test_fast_reader_captures_hybrid_context_fields(tmp_path):
@@ -935,7 +935,7 @@ def test_fast_reader_captures_hybrid_context_fields(tmp_path):
     p.write_bytes(bytes(buf))
 
     # When the fast reader parses it
-    m = llama_ai.read_model_meta_fast(str(p))
+    m = llgenie_serve.read_model_meta_fast(str(p))
 
     # Then the trained context and the hybrid KV fields are present
     assert m["ctx_train"] == 262144
@@ -943,7 +943,7 @@ def test_fast_reader_captures_hybrid_context_fields(tmp_path):
     assert m["value_length"] == 256
     assert m["full_attention_interval"] == 4
     assert m["nextn_layers"] == 1
-    assert llama_ai.serve_context(m, 16 * 1024 ** 3) == 262144
+    assert llgenie_serve.serve_context(m, 16 * 1024 ** 3) == 262144
 
 
 def test_serve_chosen_dry_run_passes_ctx_flag(server_on_path, monkeypatch, capsys):
@@ -951,12 +951,12 @@ def test_serve_chosen_dry_run_passes_ctx_flag(server_on_path, monkeypatch, capsy
 
     # Given Bonsai on a mocked 16 GB card, and the same file on an 8 GB card
     meta = _bonsai_mtp_meta()
-    monkeypatch.setattr(llama_ai, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
+    monkeypatch.setattr(llgenie_serve, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
     args = type("Args", (), {"port": 11434, "dry": True})()
 
     # When the dry launch runs on 16 GB
-    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
-    llama_ai._serve_chosen(meta, args)
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
+    llgenie_serve._serve_chosen(meta, args)
     out_16 = capsys.readouterr().out
 
     # Then the command carries -c 262144 and the process returns without serving
@@ -964,8 +964,8 @@ def test_serve_chosen_dry_run_passes_ctx_flag(server_on_path, monkeypatch, capsy
     assert "context = 262144 tokens" in out_16
 
     # When the same dry launch runs on 8 GB
-    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 8 * 1024 ** 3)
-    llama_ai._serve_chosen(meta, args)
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_card_ram_bytes", lambda: 8 * 1024 ** 3)
+    llgenie_serve._serve_chosen(meta, args)
     out_8 = capsys.readouterr().out
 
     # Then -c is the reduced window
@@ -1006,13 +1006,13 @@ def test_main_dry_run_uses_selected_gguf_context(server_on_path, monkeypatch, ca
         buf += x
     gguf = models / "Ternary-Bonsai-2-27B-PTQ1_0-mtp.gguf"
     gguf.write_bytes(bytes(buf))
-    monkeypatch.setattr(llama_ai, "MODELS_ROOT", str(models))
-    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
-    monkeypatch.setattr(llama_ai, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
+    monkeypatch.setattr(llgenie_serve, "MODELS_ROOT", str(models))
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_card_ram_bytes", lambda: 16 * 1024 ** 3)
+    monkeypatch.setattr(llgenie_serve, "resolve_llama_server", lambda: "/usr/local/bin/llama-server")
     monkeypatch.setattr(sys, "argv", ["llgenie", "bonsai", "--dry"])
 
     # When main selects that file and stops at --dry
-    llama_ai.main()
+    llgenie_serve.main()
     out = capsys.readouterr().out
 
     # Then the printed server command uses the model's trained context
@@ -1026,10 +1026,10 @@ def test_main_dry_run_uses_selected_gguf_context(server_on_path, monkeypatch, ca
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def server_on_path(monkeypatch):
-    """Force llama_ai to believe a llama-server exists at a fake path."""
+    """Force llgenie_serve to believe a llama-server exists at a fake path."""
     fake = "/usr/local/bin/llama-server"
     monkeypatch.setenv("LLAMA_SERVER", fake)
-    monkeypatch.setattr(llama_ai, "LLAMA_SERVER", fake, raising=False)
+    monkeypatch.setattr(llgenie_serve, "LLAMA_SERVER", fake, raising=False)
 
 
 def test_build_command_has_core_flags(server_on_path):
@@ -1040,7 +1040,7 @@ def test_build_command_has_core_flags(server_on_path):
         "chat_template": "llama3",   # non-reasoning
         "size_gb": 24.0,
     }
-    cmd = llama_ai.build_command(
+    cmd = llgenie_serve.build_command(
         meta, ctx=4096, port=11434, card_bytes=64 * 1024 ** 3, backend="cuda",
     )
     joined = " ".join(cmd)
@@ -1066,7 +1066,7 @@ def test_build_command_reasoning_and_slots(server_on_path):
         "chat_template": "deepseek cot",  # reasoning
         "size_gb": 4.0,                   # small => 2 slots
     }
-    cmd = llama_ai.build_command(
+    cmd = llgenie_serve.build_command(
         meta, ctx=4096, port=11434, card_bytes=48 * 1024 ** 3, backend="cuda",
     )
     assert "--reasoning" in cmd and "on" in cmd
@@ -1110,54 +1110,54 @@ def _mtp_meta(size_gb, nextn=1):
 def test_mtp_depth_for_card_16_gb_or_less_is_1():
     """8/12/16 GB cards (<=16 GB) get depth 1 (shallow: pays everywhere)."""
     for gb in (8, 12, 16):
-        assert llama_ai.mtp_depth_for_card(gb * _GB) == 1
+        assert llgenie_serve.mtp_depth_for_card(gb * _GB) == 1
 
 
 def test_mtp_depth_for_card_24_gb_is_2():
     """20/24 GB cards get depth 2 (24 GB is the inclusive boundary)."""
-    assert llama_ai.mtp_depth_for_card(24 * _GB) == 2
-    assert llama_ai.mtp_depth_for_card(20 * _GB) == 2
+    assert llgenie_serve.mtp_depth_for_card(24 * _GB) == 2
+    assert llgenie_serve.mtp_depth_for_card(20 * _GB) == 2
 
 
 def test_mtp_depth_for_card_above_24_gb_is_3():
     """>24 GB cards (32/48/64/128/...) get depth 3."""
     for gb in (32, 48, 64, 128):
-        assert llama_ai.mtp_depth_for_card(gb * _GB) == 3
+        assert llgenie_serve.mtp_depth_for_card(gb * _GB) == 3
 
 
 def test_mtp_depth_for_card_falls_back_to_card_ram_seam(monkeypatch):
     """card_bytes=None reads the card-RAM seam (mocked, hermetic)."""
-    monkeypatch.setattr(llama_ai, "read_total_ram_bytes", lambda: 32 * _GB)
-    assert llama_ai.mtp_depth_for_card(None) == 3
+    monkeypatch.setattr(llgenie_serve, "read_total_ram_bytes", lambda: 32 * _GB)
+    assert llgenie_serve.mtp_depth_for_card(None) == 3
 
 
 def test_mtp_spec_flags_empty_when_no_nextn():
     """A model without an MTP head (nextn_layers=0) emits no spec flags."""
     meta = _mtp_meta(24.0, nextn=0)
-    assert llama_ai.mtp_spec_flags(meta, 24 * _GB, env={}) == []
+    assert llgenie_serve.mtp_spec_flags(meta, 24 * _GB, env={}) == []
 
 
 def test_mtp_spec_flags_emits_type_and_card_driven_depth():
     """nextn_layers>0 => --spec-type draft-mtp; n-max follows the card."""
     meta = _mtp_meta(24.0)
-    flags = llama_ai.mtp_spec_flags(meta, 24 * _GB, env={})
+    flags = llgenie_serve.mtp_spec_flags(meta, 24 * _GB, env={})
     assert flags[:4] == ["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
     # depth follows the card, not a hard-coded constant
-    assert llama_ai.mtp_spec_flags(_mtp_meta(8.0), 8 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "1"]
-    assert llama_ai.mtp_spec_flags(_mtp_meta(48.0), 48 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "3"]
+    assert llgenie_serve.mtp_spec_flags(_mtp_meta(8.0), 8 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "1"]
+    assert llgenie_serve.mtp_spec_flags(_mtp_meta(48.0), 48 * _GB, env={})[2:4]         == ["--spec-draft-n-max", "3"]
 
 
 def test_mtp_spec_flags_p_min_off_by_default():
     """Rule 2: p-min is a knob, never a default (absent when env unset)."""
     meta = _mtp_meta(24.0)
-    flags = llama_ai.mtp_spec_flags(meta, 24 * _GB, env={})
+    flags = llgenie_serve.mtp_spec_flags(meta, 24 * _GB, env={})
     assert "--spec-draft-p-min" not in flags
 
 
 def test_mtp_spec_flags_p_min_emitted_only_when_env_set():
     """p-min is emitted only when LLAMA_SPEC_DRAFT_P_MIN is set (opt-in)."""
     meta = _mtp_meta(24.0)
-    flags = llama_ai.mtp_spec_flags(
+    flags = llgenie_serve.mtp_spec_flags(
         meta, 24 * _GB, env={"LLAMA_SPEC_DRAFT_P_MIN": "0.7"})
     i = flags.index("--spec-draft-p-min")
     assert flags[i + 1] == "0.7"
@@ -1167,7 +1167,7 @@ def test_build_command_mtp_emits_spec_flags_and_pins_np_1(server_on_path):
     """MTP model => spec flags present and -np 1 regardless of model size
     (rule 5: spec decode is single-stream; --parallel > 1 kills the gain)."""
     meta = _mtp_meta(24.0)
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=24 * _GB)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434, card_bytes=24 * _GB)
     assert "--spec-type" in cmd and "draft-mtp" in cmd
     assert cmd[cmd.index("--spec-draft-n-max") + 1] == "2"
     assert cmd[cmd.index("-np") + 1] == "1"
@@ -1176,7 +1176,7 @@ def test_build_command_mtp_emits_spec_flags_and_pins_np_1(server_on_path):
 def test_build_command_mtp_pins_np_1_even_on_small_card(server_on_path):
     """Rule 5 holds for a small MTP model: the size-based -np 2 must not win."""
     meta = _mtp_meta(4.0)
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=4 * _GB)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434, card_bytes=4 * _GB)
     assert "--spec-type" in cmd
     assert cmd[cmd.index("-np") + 1] == "1"
     # depth follows the 4 GB card (<=16 GB -> depth 1)
@@ -1186,8 +1186,8 @@ def test_build_command_mtp_pins_np_1_even_on_small_card(server_on_path):
 def test_build_command_mtp_card_bytes_drives_depth(server_on_path):
     """The same MTP model on a bigger card gets a deeper n-max (card-driven)."""
     meta = _mtp_meta(24.0)
-    small = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
-    big = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=64 * _GB)
+    small = llgenie_serve.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
+    big = llgenie_serve.build_command(meta, ctx=4096, port=11434, card_bytes=64 * _GB)
     assert small[small.index("--spec-draft-n-max") + 1] == "1"
     assert big[big.index("--spec-draft-n-max") + 1] == "3"
 
@@ -1201,7 +1201,7 @@ def test_build_command_no_mtp_keeps_normal_slots_and_no_spec_flags(server_on_pat
         "ctx_train": 32768, "chat_template": "llama3", "size_gb": 4.0,
         "nextn_layers": 0,
     }
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434, card_bytes=16 * _GB)
     assert "--spec-type" not in cmd
     assert "--spec-draft-n-max" not in cmd
     assert cmd[cmd.index("-np") + 1] == "2"
@@ -1211,9 +1211,9 @@ def test_build_command_mtp_auto_detects_card_when_card_bytes_none(server_on_path
     """card_bytes=None => build_command reads
     detect_server.detect_card_ram_bytes() and derives depth from the real card."""
     meta = _mtp_meta(24.0)
-    monkeypatch.setattr(llama_ai.detect_server, "detect_card_ram_bytes",
+    monkeypatch.setattr(llgenie_serve.detect_server, "detect_card_ram_bytes",
                         lambda: 48 * _GB)
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434)
     assert cmd[cmd.index("--spec-draft-n-max") + 1] == "3"
 # author-recommended sampling defaults (general.sampling.*)
 # ---------------------------------------------------------------------------
@@ -1225,7 +1225,7 @@ def test_build_command_uses_model_sampling_when_present(server_on_path):
         "ctx_train": 32768, "chat_template": "llama3", "size_gb": 24.0,
         "sampling": {"temperature": "0.7", "top_p": "0.95"},
     }
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434)
     assert "--temp" in cmd and "0.7" in cmd
     assert "--top-p" in cmd and "0.95" in cmd
     # the preset's values must NOT also appear (no double flags)
@@ -1244,7 +1244,7 @@ def test_build_command_falls_back_to_preset_when_no_sampling(server_on_path):
         "ctx_train": 32768, "chat_template": "general", "size_gb": 24.0,
         "sampling": {},
     }
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434)
     joined = " ".join(cmd)
     assert "--temp 0.6" in joined
     assert "--top-p 0.9" in joined
@@ -1263,7 +1263,7 @@ def test_sampling_flag_map_covers_all_keys(server_on_path):
             "min_p": "0.05", "repeat_penalty": "1.1",
         },
     }
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434)
     for flag in ("--temp", "--top-p", "--top-k", "--min-p", "--repeat-penalty"):
         assert flag in cmd, f"missing {flag}"
 
@@ -1276,7 +1276,7 @@ def test_build_command_skips_unknown_sampling_key_no_keyerror(server_on_path):
         "ctx_train": 32768, "chat_template": "llama", "size_gb": 24.0,
         "sampling": {"temperature": "0.7", "nonsense_key": "9.9"},
     }
-    cmd = llama_ai.build_command(meta, ctx=4096, port=11434)
+    cmd = llgenie_serve.build_command(meta, ctx=4096, port=11434)
     assert "--temp" in cmd and "0.7" in cmd
     assert "nonsense_key" not in cmd
     assert "--nonsense-key" not in cmd
@@ -1288,10 +1288,10 @@ def test_extract_sampling_from_kv_picks_present_fields():
         "general.sampling.temperature": 0.7,
         "general.sampling.top_p": 0.95,
     }
-    out = llama_ai._extract_sampling_from_kv(kv)
+    out = llgenie_serve._extract_sampling_from_kv(kv)
     assert out == {"temperature": "0.7", "top_p": "0.95"}
     # absent keys omitted; never raises
-    assert llama_ai._extract_sampling_from_kv({"general.architecture": "qwen2"}) == {}
+    assert llgenie_serve._extract_sampling_from_kv({"general.architecture": "qwen2"}) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -1302,7 +1302,7 @@ def test_resolve_from_env(monkeypatch, tmp_path):
     fake_a.write_bytes(b"binary")
     fake_a.chmod(0o755)
     monkeypatch.setenv("LLAMA_SERVER", str(fake_a))
-    assert llama_ai.resolve_llama_server() == str(fake_a)
+    assert llgenie_serve.resolve_llama_server() == str(fake_a)
 
 
 def test_resolve_from_path(monkeypatch, tmp_path):
@@ -1310,41 +1310,41 @@ def test_resolve_from_path(monkeypatch, tmp_path):
     fake = tmp_path / "llama-server"
     fake.write_bytes(b"binary")
     fake.chmod(0o755)
-    monkeypatch.setattr(llama_ai.shutil, "which", lambda _: str(fake))
-    assert llama_ai.resolve_llama_server() == str(fake)
+    monkeypatch.setattr(llgenie_serve.shutil, "which", lambda _: str(fake))
+    assert llgenie_serve.resolve_llama_server() == str(fake)
 
 
 def test_resolve_missing_raises_systemexit(monkeypatch, tmp_path):
     monkeypatch.delenv("LLAMA_SERVER", raising=False)
-    monkeypatch.setattr(llama_ai.shutil, "which", lambda _: None)
+    monkeypatch.setattr(llgenie_serve.shutil, "which", lambda _: None)
     # Redirect the ~/bin/llama-server fallback to an empty tmp dir so the
     # "missing" path is genuinely exercised even on hosts with make-installed
     # ~/bin/llama-server symlinks.
     empty = tmp_path / "fakehome"
     empty.mkdir()
-    monkeypatch.setattr(llama_ai.os.path, "expanduser", lambda _: str(empty))
+    monkeypatch.setattr(llgenie_serve.os.path, "expanduser", lambda _: str(empty))
     with pytest.raises(SystemExit) as e:
-        llama_ai.resolve_llama_server()
+        llgenie_serve.resolve_llama_server()
     assert e.value.code != 0
     assert "llama-server" in str(e.value)
 
 
 def test_resolve_falls_back_to_home_bin(monkeypatch, tmp_path):
     monkeypatch.delenv("LLAMA_SERVER", raising=False)
-    monkeypatch.setattr(llama_ai.shutil, "which", lambda _: None)
+    monkeypatch.setattr(llgenie_serve.shutil, "which", lambda _: None)
     home = tmp_path / "fakehome"
     srv = home / "bin" / "llama-server"
     srv.parent.mkdir(parents=True)
     srv.write_bytes(b"binary")
     srv.chmod(0o755)
-    monkeypatch.setattr(llama_ai.os.path, "expanduser", lambda _: str(home))
-    assert llama_ai.resolve_llama_server() == str(srv)
+    monkeypatch.setattr(llgenie_serve.os.path, "expanduser", lambda _: str(home))
+    assert llgenie_serve.resolve_llama_server() == str(srv)
 
 
 def test_resolve_bad_env_raises_systemexit(monkeypatch, tmp_path):
     monkeypatch.setenv("LLAMA_SERVER", str(tmp_path / "does-not-exist"))
     with pytest.raises(SystemExit):
-        llama_ai.resolve_llama_server()
+        llgenie_serve.resolve_llama_server()
 
 
 # ---------------------------------------------------------------------------
@@ -1365,23 +1365,23 @@ def test_discover_top_tier_min_trending_score_filters(monkeypatch):
         return [{"path": f"{repo.split('/')[-1]}-Q8_0.gguf", "size_bytes": 5 * 1024 ** 3,
                  "size_gb": 5.0}]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
     # no floor -> both fit and are returned, sorted by size (tie -> trend desc)
-    all = llama_ai.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
+    all = llgenie_serve.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
                                      headroom_bytes=3 * 1024 ** 3, min_trending_score=0)
     assert len(all) == 2
 
     # floor 200 -> only the 300-rated repo survives
-    rated = llama_ai.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
+    rated = llgenie_serve.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
                                        headroom_bytes=3 * 1024 ** 3, min_trending_score=200)
     assert [c["repo"] for c in rated] == ["unsloth/Qwen3.8-27B-GGUF"]
 
     # floor 400 -> nothing survives
-    none = llama_ai.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
+    none = llgenie_serve.discover_top_tier(limit=5, total_ram_bytes=48 * 1024 ** 3,
                                       headroom_bytes=3 * 1024 ** 3, min_trending_score=400)
     assert none == []
 
@@ -1418,13 +1418,13 @@ def test_discover_top_tier_high_and_lower_per_provider(monkeypatch):
     def fake_files(repo):
         return files_by_repo[repo]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
     # 3 providers x 2 quants (high+lower), ordered by TRENDING (not by file size)
-    result = llama_ai.discover_top_tier(limit=6, total_ram_bytes=48 * 1024 ** 3,
+    result = llgenie_serve.discover_top_tier(limit=6, total_ram_bytes=48 * 1024 ** 3,
                                         headroom_bytes=3 * 1024 ** 3, min_trending_score=0,
                                         per_provider=2)
     # grouped per provider(repo), ordered by trendingScore desc, high->lower each
@@ -1461,12 +1461,12 @@ def test_discover_drops_low_fidelity_iq_quants(monkeypatch):
         return [{"path": "model-Q8_0.gguf", "size_bytes": 28 * 1024 ** 3, "size_gb": 28.0},
                 {"path": "model-Q6_K.gguf", "size_bytes": 21 * 1024 ** 3, "size_gb": 21.0}]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
-    result = llama_ai.discover_top_tier(limit=4, total_ram_bytes=48 * 1024 ** 3,
+    result = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=48 * 1024 ** 3,
                                         headroom_bytes=3 * 1024 ** 3, min_trending_score=0,
                                         per_provider=2)
     repos_out = [c["repo"] for c in result]
@@ -1497,12 +1497,12 @@ def test_discover_drops_mtp_companion_files(monkeypatch):
              "size_gb": 4.0},
         ]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
-    result = llama_ai.discover_top_tier(limit=4, total_ram_bytes=48 * 1024 ** 3,
+    result = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=48 * 1024 ** 3,
                                         headroom_bytes=3 * 1024 ** 3, min_trending_score=0,
                                         per_provider=2)
     assert result == [], "an MTP-companion-only repo must not produce any top-tier pick"
@@ -1531,12 +1531,12 @@ def test_fit_gate_rejects_too_big_model(monkeypatch):
     def fake_files(repo):
         return [{"path": "model-Q8_0.gguf", "size_bytes": 29 * 1024 ** 3, "size_gb": 29.0}]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
-    result = llama_ai.discover_top_tier(limit=2, total_ram_bytes=total_small,
+    result = llgenie_serve.discover_top_tier(limit=2, total_ram_bytes=total_small,
                                         headroom_bytes=head, min_trending_score=0, per_provider=2)
     assert result == [], \
         "fit gate must REJECT a 29 GB model on a 12 GB card (budget {budget/1e9:.0f}GB), got {result}"
@@ -1561,12 +1561,12 @@ def test_lower_quant_keeps_comfortable_headroom(monkeypatch):
                 {"path": "model-Q4_K_M.gguf", "size_bytes": 12 * 1024 ** 3, "size_gb": 12.0},
                 {"path": "model-Q3_K_M.gguf", "size_bytes": 9 * 1024 ** 3, "size_gb": 9.0}]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
-    result = llama_ai.discover_top_tier(limit=4, total_ram_bytes=total,
+    result = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=total,
                                         headroom_bytes=head, min_trending_score=0, per_provider=2)
     sizes = sorted([c["size_bytes"] for c in result], reverse=True)
     assert len(sizes) == 2, f"expected high + lower, got {sizes}"
@@ -1585,7 +1585,7 @@ def test_argparse_recognizes_all_top_tier_flags_with_defaults(monkeypatch):
     defaults (hermetic wiring test — no network).
     """
     import argparse as _argparse
-    import scripts.llama_serve as _ls
+    import scripts.llgenie_serve as _ls
 
     # Rebuild the parser exactly as main() does and parse a representative argv.
     ap = _argparse.ArgumentParser()
@@ -1637,19 +1637,19 @@ def test_trending_gguf_repos_queries_rank_and_filters(monkeypatch):
              "likes": 354, "trendingScore": 320},
         ]
 
-    monkeypatch.setattr(llama_ai, "_hf_get", fake_hf_get)
-    result = llama_ai._trending_gguf_repos(limit=25)
+    monkeypatch.setattr(llgenie_serve, "_hf_get", fake_hf_get)
+    result = llgenie_serve._trending_gguf_repos(limit=25)
     # exact descending trendingScore order (matches the live ranked table shape)
     assert [r["trendingScore"] for r in result] == [320, 284, 123]
     # popular trending LLMs in the broadened allow-list are KEPT (not dropped):
-    assert llama_ai._is_top_tier_repo("ornith-ai/Ornith-1.5-9B-GGUF") is True
-    assert llama_ai._is_top_tier_repo("Jackrong/Qwopus3.8-27B-Flash-GGUF") is True
-    assert llama_ai._is_top_tier_repo("IFM/K2-Horizon-MoVA-36B-A4B-GGUF") is True
-    assert llama_ai._is_top_tier_repo("peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF") is True
+    assert llgenie_serve._is_top_tier_repo("ornith-ai/Ornith-1.5-9B-GGUF") is True
+    assert llgenie_serve._is_top_tier_repo("Jackrong/Qwopus3.8-27B-Flash-GGUF") is True
+    assert llgenie_serve._is_top_tier_repo("IFM/K2-Horizon-MoVA-36B-A4B-GGUF") is True
+    assert llgenie_serve._is_top_tier_repo("peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF") is True
     # non-LLM / TTS / image repos must stay DROPPED (the whole reason the list exists):
-    assert llama_ai._is_top_tier_repo("nvidia/parakeet-tdt-0.6b-v3") is False
-    assert llama_ai._is_top_tier_repo("ampixa/sanoTTS") is False
-    assert llama_ai._is_top_tier_repo("ponpoke/flux2-klein-9b-uncensored-text-encoder") is False
+    assert llgenie_serve._is_top_tier_repo("nvidia/parakeet-tdt-0.6b-v3") is False
+    assert llgenie_serve._is_top_tier_repo("ampixa/sanoTTS") is False
+    assert llgenie_serve._is_top_tier_repo("ponpoke/flux2-klein-9b-uncensored-text-encoder") is False
     # the non-top-tier repo (podcast-clip-audio) is dropped
     assert all("podcast" not in r["repo"] for r in result)
     # each carries downloads/likes/trendingScore and is a top-tier family
@@ -1688,30 +1688,30 @@ def test_pick_tier_folder_small_card_unchanged():
     are added below 8 so small models get truthful folders, not a catch-all 8GB."""
     _48 = 48 * 1024 ** 3
     # new small tiers (down-extension) are truthful
-    assert llama_ai.pick_tier_folder(int(0.43 * 1024 ** 3), _48) == "1GB"
-    assert llama_ai.pick_tier_folder(int(7 * 1024 ** 3), _48) == "8GB"
+    assert llgenie_serve.pick_tier_folder(int(0.43 * 1024 ** 3), _48) == "1GB"
+    assert llgenie_serve.pick_tier_folder(int(7 * 1024 ** 3), _48) == "8GB"
     # mid/large buckets unchanged
-    assert llama_ai.pick_tier_folder(int(15 * 1024 ** 3), _48) == "16GB"
-    assert llama_ai.pick_tier_folder(int(22 * 1024 ** 3), _48) == "24GB"
-    assert llama_ai.pick_tier_folder(int(29 * 1024 ** 3), _48) == "48GB"
-    assert llama_ai.pick_tier_folder(int(47 * 1024 ** 3), _48) == "48GB"
+    assert llgenie_serve.pick_tier_folder(int(15 * 1024 ** 3), _48) == "16GB"
+    assert llgenie_serve.pick_tier_folder(int(22 * 1024 ** 3), _48) == "24GB"
+    assert llgenie_serve.pick_tier_folder(int(29 * 1024 ** 3), _48) == "48GB"
+    assert llgenie_serve.pick_tier_folder(int(47 * 1024 ** 3), _48) == "48GB"
 
 
 def test_pick_tier_folder_big_card_gets_truthful_tiers():
     """On a 512 GB card a large model is labelled by a large tier, NEVER 48GB/."""
     _512 = 512 * 1024 ** 3
     # small/mid models still use the small buckets on the big card
-    assert llama_ai.pick_tier_folder(int(29 * 1024 ** 3), _512) == "48GB"
-    assert llama_ai.pick_tier_folder(int(7 * 1024 ** 3), _512) == "8GB"
+    assert llgenie_serve.pick_tier_folder(int(29 * 1024 ** 3), _512) == "48GB"
+    assert llgenie_serve.pick_tier_folder(int(7 * 1024 ** 3), _512) == "8GB"
     # large models get tiers that grow past 48
-    assert llama_ai.pick_tier_folder(int(60 * 1024 ** 3), _512) == "96GB"
-    assert llama_ai.pick_tier_folder(int(100 * 1024 ** 3), _512) == "128GB"
-    assert llama_ai.pick_tier_folder(int(256 * 1024 ** 3), _512) == "256GB"
-    assert llama_ai.pick_tier_folder(int(400 * 1024 ** 3), _512) == "512GB"
-    assert llama_ai.pick_tier_folder(int(512 * 1024 ** 3), _512) == "512GB"
+    assert llgenie_serve.pick_tier_folder(int(60 * 1024 ** 3), _512) == "96GB"
+    assert llgenie_serve.pick_tier_folder(int(100 * 1024 ** 3), _512) == "128GB"
+    assert llgenie_serve.pick_tier_folder(int(256 * 1024 ** 3), _512) == "256GB"
+    assert llgenie_serve.pick_tier_folder(int(400 * 1024 ** 3), _512) == "512GB"
+    assert llgenie_serve.pick_tier_folder(int(512 * 1024 ** 3), _512) == "512GB"
     # a model bigger than the card falls back to the largest available bucket
-    assert "48GB" != llama_ai.pick_tier_folder(int(400 * 1024 ** 3), _512)
-    assert llama_ai.pick_tier_folder(int(700 * 1024 ** 3), _512) == "512GB"
+    assert "48GB" != llgenie_serve.pick_tier_folder(int(400 * 1024 ** 3), _512)
+    assert llgenie_serve.pick_tier_folder(int(700 * 1024 ** 3), _512) == "512GB"
 
 
 def test_pick_tier_folder_deterministic_with_total_argument():
@@ -1719,8 +1719,8 @@ def test_pick_tier_folder_deterministic_with_total_argument():
     _512 = 512 * 1024 ** 3
     _48 = 48 * 1024 ** 3
     # same 60 GB model, two cards -> two different truthful tiers
-    assert llama_ai.pick_tier_folder(int(60 * 1024 ** 3), _48) == "48GB"
-    assert llama_ai.pick_tier_folder(int(60 * 1024 ** 3), _512) == "96GB"
+    assert llgenie_serve.pick_tier_folder(int(60 * 1024 ** 3), _48) == "48GB"
+    assert llgenie_serve.pick_tier_folder(int(60 * 1024 ** 3), _512) == "96GB"
 
 
 def test_discover_top_tier_offers_and_places_large_model_on_big_card(monkeypatch):
@@ -1740,14 +1740,14 @@ def test_discover_top_tier_offers_and_places_large_model_on_big_card(monkeypatch
     def fake_files(r):
         return files_by_repo[r]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
     _512 = 512 * 1024 ** 3
     _1 = 1024 ** 3
-    result = llama_ai.discover_top_tier(limit=4, total_ram_bytes=_512,
+    result = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=_512,
                                         headroom_bytes=_1, min_trending_score=0,
                                         per_provider=2)
     # both quants are offered (each fits 512 GB with the 1 GiB headroom)
@@ -1769,7 +1769,7 @@ def test_discover_top_tier_offers_and_places_large_model_on_big_card(monkeypatch
 def _expected_tier(model_gb, card_gb):
     """Reference impl: smallest TIER_LADDER_GB entry <= card_gb (available buckets),
     and within those the smallest bucket >= model_gb, else the largest."""
-    avail = [b for b in llama_ai.TIER_LADDER_GB if b <= card_gb]
+    avail = [b for b in llgenie_serve.TIER_LADDER_GB if b <= card_gb]
     assert avail, "card too small for any bucket"
     for b in avail:
         if model_gb <= b:
@@ -1779,19 +1779,19 @@ def _expected_tier(model_gb, card_gb):
 
 def test_placement_parametrized_over_all_card_sizes():
     """Every ladder card size x a model sweep -> correct TierGB folder (full dest_path)."""
-    ALL_LADDER = llama_ai.TIER_LADDER_GB
+    ALL_LADDER = llgenie_serve.TIER_LADDER_GB
     # one representative model per tier (fits comfortably on cards >= that tier)
     model_sizes_gb = [5, 12, 20, 29, 60, 100, 200, 400, 500, 1000]
     for card_gb in ALL_LADDER:
         total = int(card_gb * (1024 ** 3))
         for mgb in model_sizes_gb:
             want = _expected_tier(mgb, card_gb)
-            got = llama_ai.pick_tier_folder(int(mgb * 1024 ** 3), total)
+            got = llgenie_serve.pick_tier_folder(int(mgb * 1024 ** 3), total)
             assert got == want, (
                 f"{mgb} GB model on {card_gb} GB card: expected {want}, got {got}")
 
             # also verify the full placement path embeds the same tier
-            p = llama_ai.provider_dest_path("unsloth/X-GGUF", "x.gguf",
+            p = llgenie_serve.provider_dest_path("unsloth/X-GGUF", "x.gguf",
                                             int(mgb * 1024 ** 3), models_root="/m",
                                             total_ram_bytes=total)
             assert f"/{want}/x.gguf" in p, (
@@ -1817,13 +1817,13 @@ def test_placement_fit_gate_and_folder_agree(monkeypatch):
         return [{"path": f"m{s}.gguf", "size_bytes": int(s * 1024 ** 3), "size_gb": s}
                 for s in sizes]
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", lambda *a, **k: "ok")
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", 1.0)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", lambda *a, **k: "ok")
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", 1.0)
 
     # headroom_bytes is passed separately; the gate uses size+head+kv <= total
-    result = llama_ai.discover_top_tier(limit=10, total_ram_bytes=total,
+    result = llgenie_serve.discover_top_tier(limit=10, total_ram_bytes=total,
                                         headroom_bytes=head, min_trending_score=0,
                                         per_provider=5)
     placed = {c["size_gb"]: c["tier_folder"] for c in result}
@@ -1834,7 +1834,7 @@ def test_placement_fit_gate_and_folder_agree(monkeypatch):
 
     # Now the SAME model on a 48 GB card: 400 GB does NOT fit -> not offered; 40 fits.
     total48 = 48 * 1024 ** 3
-    result48 = llama_ai.discover_top_tier(limit=10, total_ram_bytes=total48,
+    result48 = llgenie_serve.discover_top_tier(limit=10, total_ram_bytes=total48,
                                           headroom_bytes=head, min_trending_score=0,
                                           per_provider=2)
     placed48 = {c["size_gb"]: c["tier_folder"] for c in result48}
@@ -1870,10 +1870,10 @@ def _mock_discovery(monkeypatch, repos_files, min_gb=4.0, probe_result="ok"):
             return probe_result.get(repo, "ok")
         return probe_result
 
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", fake_probe)
-    monkeypatch.setattr(llama_ai, "MIN_TOP_TIER_GB", min_gb)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", fake_probe)
+    monkeypatch.setattr(llgenie_serve, "MIN_TOP_TIER_GB", min_gb)
 
 
 def _mock_download_write_stub(monkeypatch, tmp_path):
@@ -1890,7 +1890,7 @@ def _mock_download_write_stub(monkeypatch, tmp_path):
         written.append(str(p))
         return str(p)
 
-    monkeypatch.setattr(llama_ai, "download_top_tier_candidate", fake_download)
+    monkeypatch.setattr(llgenie_serve, "download_top_tier_candidate", fake_download)
     return written
 
 
@@ -1913,12 +1913,12 @@ def test_mock_download_places_each_model_in_right_tier_dir(tmp_path, monkeypatch
     # card sizes: the edge cases — big, medium, small
     for card_gb in [512, 256, 128, 96, 64, 48, 32, 16, 8, 2]:
         total = int(card_gb * G)
-        result = llama_ai.discover_top_tier(limit=5, total_ram_bytes=total,
+        result = llgenie_serve.discover_top_tier(limit=5, total_ram_bytes=total,
                                             headroom_bytes=head, min_trending_score=0,
                                             per_provider=2, models_root=str(tmp_path))
         # mock-download every discovered candidate
         for cand in result:
-            ll = llama_ai.download_top_tier_candidate(cand, models_root=str(tmp_path))
+            ll = llgenie_serve.download_top_tier_candidate(cand, models_root=str(tmp_path))
             # the mock actually wrote the file at the right place
             assert Path(ll).is_file(), f"mocked download missing: {ll}"
             # the dest_path's TIER folder == the tier the card-fits logic picked
@@ -1942,7 +1942,7 @@ def test_mock_download_picks_top5_by_trend_and_places(tmp_path, monkeypatch):
 
     total = 512 * G
     head = 3 * G
-    result = llama_ai.discover_top_tier(limit=5, total_ram_bytes=total,
+    result = llgenie_serve.discover_top_tier(limit=5, total_ram_bytes=total,
                                         headroom_bytes=head, min_trending_score=0,
                                         per_provider=1)
     # RANKING is by TRENDING (999 > 500 > 10), not by file size (400 > 100 > 10):
@@ -1956,7 +1956,7 @@ def test_mock_download_picks_top5_by_trend_and_places(tmp_path, monkeypatch):
         f"trend 10 must rank LAST (not ahead of higher-trend models): {placed_repos}")
     # every mocked download lands in the folder for the card it fits
     for cand in result:
-        ll = llama_ai.download_top_tier_candidate(cand, models_root=str(tmp_path))
+        ll = llgenie_serve.download_top_tier_candidate(cand, models_root=str(tmp_path))
         assert Path(ll).is_file()
         assert f"/{cand['tier_folder']}/" in ll
 
@@ -1976,7 +1976,7 @@ def test_discover_skips_gated_repo_and_refills(tmp_path, monkeypatch):
     total = 512 * G
     head = 3 * G
     limit = 2
-    result = llama_ai.discover_top_tier(limit=limit, total_ram_bytes=total,
+    result = llgenie_serve.discover_top_tier(limit=limit, total_ram_bytes=total,
                                         headroom_bytes=head, min_trending_score=0,
                                         per_provider=1)
     placed = [c["repo"] for c in result]
@@ -1995,12 +1995,12 @@ def test_probe_downloadable_verifies_real_gguf_chunk(monkeypatch):
             def __exit__(self, *a): return False
         return lambda *a, **k: Ctx()
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", make_urlopen(b"GGUF" + b"\x00" * 1024))
-    assert llama_ai._probe_file_downloadable("x/repo", "m.gguf") == "ok"
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", make_urlopen(b"GGUF" + b"\x00" * 1024))
+    assert llgenie_serve._probe_file_downloadable("x/repo", "m.gguf") == "ok"
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen",
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen",
                         make_urlopen(b"<html><body>404 Not Found</body></html>"))
-    assert llama_ai._probe_file_downloadable("x/repo", "m.gguf") is None  # 200-but-HTML -> not real
+    assert llgenie_serve._probe_file_downloadable("x/repo", "m.gguf") is None  # 200-but-HTML -> not real
 
 
 def test_skip_summary_line_handles_3tuples_without_crash():
@@ -2015,7 +2015,7 @@ def test_skip_summary_line_handles_3tuples_without_crash():
     ]
 
     # When we format it via _skip_summary_line
-    line = llama_ai._skip_summary_line(skip_summary)
+    line = llgenie_serve._skip_summary_line(skip_summary)
 
     # Then it returns the grouped-by-reason line WITHOUT crashing
     #   (previously 'ValueError: not enough values to unpack (expected 2)')
@@ -2032,8 +2032,8 @@ def test_skip_summary_line_empty_no_suffix():
     # When  we format empty and None skip_summary via _skip_summary_line
 
     # Then  it returns '' (so the completion line has no skip suffix)
-    assert llama_ai._skip_summary_line([]) == ""
-    assert llama_ai._skip_summary_line(None) == ""
+    assert llgenie_serve._skip_summary_line([]) == ""
+    assert llgenie_serve._skip_summary_line(None) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -2107,9 +2107,9 @@ def _install_family_mocks(monkeypatch, repos, files_by_repo,
             return probe_result.get(repo, "ok")
         return probe_result
 
-    monkeypatch.setattr(llama_ai, "_family_gguf_repos", fake_family)
-    monkeypatch.setattr(llama_ai, "_repo_gguf_files", fake_files)
-    monkeypatch.setattr(llama_ai, "_probe_file_downloadable", fake_probe)
+    monkeypatch.setattr(llgenie_serve, "_family_gguf_repos", fake_family)
+    monkeypatch.setattr(llgenie_serve, "_repo_gguf_files", fake_files)
+    monkeypatch.setattr(llgenie_serve, "_probe_file_downloadable", fake_probe)
 
 
 def test_family_keyword_matches_word_boundary():
@@ -2132,11 +2132,11 @@ def test_family_keyword_matches_word_boundary():
 
     # Then members match; traps (and other families) do not
     for rid in qwen_members:
-        assert llama_ai._family_keyword_matches(rid, "qwen"), f"{rid} must match"
+        assert llgenie_serve._family_keyword_matches(rid, "qwen"), f"{rid} must match"
     for rid in traps:
-        assert not llama_ai._family_keyword_matches(rid, "qwen"), \
+        assert not llgenie_serve._family_keyword_matches(rid, "qwen"), \
             f"{rid} must NOT match --family qwen"
-    assert not llama_ai._family_keyword_matches("x/y", ""), "empty kw never matches"
+    assert not llgenie_serve._family_keyword_matches("x/y", ""), "empty kw never matches"
 
 
 def test_family_gguf_repos_word_boundary_and_ranking(monkeypatch):
@@ -2170,10 +2170,10 @@ def test_family_gguf_repos_word_boundary_and_ranking(monkeypatch):
              "likes": 354, "trendingScore": 320},
         ]
 
-    monkeypatch.setattr(llama_ai, "_hf_get", fake_hf_get)
+    monkeypatch.setattr(llgenie_serve, "_hf_get", fake_hf_get)
 
     # When the family repo list is built for keyword `qwen`
-    result = llama_ai._family_gguf_repos("qwen", limit=25)
+    result = llgenie_serve._family_gguf_repos("qwen", limit=25)
 
     # Then the query is the family search (downloads sort, no trending sort)
     assert seen_urls and "filter=gguf" in seen_urls[0], seen_urls
@@ -2231,9 +2231,9 @@ def test_hf_get_retries_transient_and_fails_permanent(monkeypatch):
                                       "err", hdrs, io.BytesIO(b""))
 
     # no real sleeping in CI — drive the budget/pause via module attributes
-    monkeypatch.setattr(llama_ai, "HF_GET_MAX_ATTEMPTS", 8)
-    monkeypatch.setattr(llama_ai, "_rate_limited", 0)
-    monkeypatch.setattr(llama_ai, "HF_GET_BASE_PAUSE", 0.0)
+    monkeypatch.setattr(llgenie_serve, "HF_GET_MAX_ATTEMPTS", 8)
+    monkeypatch.setattr(llgenie_serve, "_rate_limited", 0)
+    monkeypatch.setattr(llgenie_serve, "HF_GET_BASE_PAUSE", 0.0)
 
     # --- Given: a transient 429 (twice) that clears on the 3rd call ---
     calls = {"n": 0}
@@ -2245,17 +2245,17 @@ def test_hf_get_retries_transient_and_fails_permanent(monkeypatch):
             raise _http_error(429, retry_after=None)
         return _FakeResponse(_json.dumps({"ok": True}).encode())
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", flaky_urlopen)
-    monkeypatch.setattr(llama_ai.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(llgenie_serve.time, "sleep", lambda s: slept.append(s))
 
     # When the transient 429s resolve after waiting out the window
-    got = llama_ai._hf_get("https://huggingface.co/api/models?x")
+    got = llgenie_serve._hf_get("https://huggingface.co/api/models?x")
 
     # Then it retried through the 429s and returned the payload on the 3rd call,
     # waiting the shared rate-limit wait (no RateLimit header -> 5 minutes) each time
     assert got == {"ok": True}, got
     assert calls["n"] == 3, f"expected 3 urlopen calls (2 x 429 + 1 ok), got {calls['n']}"
-    assert slept == [llama_ai.rate_limit_wait(_http_error(429))] * 2
+    assert slept == [llgenie_serve.rate_limit_wait(_http_error(429))] * 2
 
     # --- Given: a permanent 404 (a genuinely dead repo/file) ---
     calls2 = {"n": 0}
@@ -2264,11 +2264,11 @@ def test_hf_get_retries_transient_and_fails_permanent(monkeypatch):
         calls2["n"] += 1
         raise _http_error(404)
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", dead_urlopen)
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", dead_urlopen)
 
     # When _hf_get hits a permanent error
     with pytest.raises(SystemExit):
-        llama_ai._hf_get("https://huggingface.co/api/models?dead")
+        llgenie_serve._hf_get("https://huggingface.co/api/models?dead")
 
     # Then it failed FAST — exactly one attempt, never retried (F3/#53 skip path
     # and the F8 "no repos" path rely on permanent errors surfacing immediately)
@@ -2281,11 +2281,11 @@ def test_hf_get_retries_transient_and_fails_permanent(monkeypatch):
         calls3["n"] += 1
         raise _http_error(429, retry_after="0")
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", always429)
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", always429)
 
     # When the 429 retry budget is spent
     with pytest.raises(SystemExit) as e:
-        llama_ai._hf_get("https://huggingface.co/api/models?rate")
+        llgenie_serve._hf_get("https://huggingface.co/api/models?rate")
 
     # Then a third consecutive 429 failed the call, and was not followed by another attempt
     assert calls3["n"] == 3, f"two 429 retries then fail, got {calls3['n']} calls"
@@ -2322,15 +2322,15 @@ def test_hf_get_waits_out_a_429_using_the_shared_wait(monkeypatch):
             raise err
         return _Body(_json.dumps({"ok": True}).encode())
 
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", flaky)
-    monkeypatch.setattr(llama_ai.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(llgenie_serve.time, "sleep", lambda s: slept.append(s))
 
     # When the top-tier GET is retried
-    got = llama_ai._hf_get("https://huggingface.co/api/models?x")
+    got = llgenie_serve._hf_get("https://huggingface.co/api/models?x")
 
     # Then the sleep is the shared wait for that 429, and the body comes back
     assert got == {"ok": True}
-    assert slept == [llama_ai.rate_limit_wait(err)]
+    assert slept == [llgenie_serve.rate_limit_wait(err)]
 
 
 def test_hf_get_waits_out_a_local_429():
@@ -2366,12 +2366,12 @@ def test_hf_get_waits_out_a_local_429():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    llama_ai._rate_limited = 0
+    llgenie_serve._rate_limited = 0
     url = f"http://127.0.0.1:{server.server_address[1]}/models"
 
     try:
         # When the real top-tier GET hits that server
-        got = llama_ai._hf_get(url)
+        got = llgenie_serve._hf_get(url)
     finally:
         server.shutdown()
         server.server_close()
@@ -2413,20 +2413,20 @@ def test_hf_get_resets_the_429_count_after_success(monkeypatch):
                                           "err", hdrs, io.BytesIO(b""))
         return _Body(_json.dumps({"n": seen["n"]}).encode())
 
-    monkeypatch.setattr(llama_ai, "HF_GET_MAX_ATTEMPTS", 8)
-    monkeypatch.setattr(llama_ai, "_rate_limited", 0)
-    monkeypatch.setattr(llama_ai.urllib.request, "urlopen", scripted)
-    monkeypatch.setattr(llama_ai.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(llgenie_serve, "HF_GET_MAX_ATTEMPTS", 8)
+    monkeypatch.setattr(llgenie_serve, "_rate_limited", 0)
+    monkeypatch.setattr(llgenie_serve.urllib.request, "urlopen", scripted)
+    monkeypatch.setattr(llgenie_serve.time, "sleep", lambda _s: None)
 
     # When the first GET returns, then a second GET hits two more 429s
-    first = llama_ai._hf_get("https://huggingface.co/api/models?reset")
-    second = llama_ai._hf_get("https://huggingface.co/api/models?reset")
+    first = llgenie_serve._hf_get("https://huggingface.co/api/models?reset")
+    second = llgenie_serve._hf_get("https://huggingface.co/api/models?reset")
 
     # Then the 200 reset the count, so the second call retried two more 429s
     assert first == {"n": 2}
     assert second == {"n": 5}
     assert seen["n"] == 5
-    assert llama_ai._rate_limited == 0
+    assert llgenie_serve._rate_limited == 0
 
 
 def test_family_scope_mocked(monkeypatch):
@@ -2449,7 +2449,7 @@ def test_family_scope_mocked(monkeypatch):
     skip_summary = []
 
     # When family-mode discovery runs (--family qwen, --count 5, per_provider 2)
-    cands = llama_ai.discover_top_tier(limit=5 * 2, total_ram_bytes=total,
+    cands = llgenie_serve.discover_top_tier(limit=5 * 2, total_ram_bytes=total,
                                        headroom_bytes=head, min_trending_score=0,
                                        per_provider=2, skip_summary=skip_summary,
                                        family="qwen")
@@ -2484,7 +2484,7 @@ def test_family_scope_mocked(monkeypatch):
         owner, fam = c["repo"].split("/", 1)
         assert c["dest_path"].endswith(
             f"/{owner}/{fam}/{c['tier_folder']}/{c['filename']}"), c["dest_path"]
-        assert c["tier_folder"] == llama_ai.pick_tier_folder(c["size_bytes"], total)
+        assert c["tier_folder"] == llgenie_serve.pick_tier_folder(c["size_bytes"], total)
         assert c["tier_folder"] in ("1GB", "2GB", "4GB", "8GB", "16GB", "24GB", "48GB")
     # Then 5. ranking: providers ordered by trendingScore desc, downloads desc
     #        tie-break (200 > 120[1M dl] > 120[400k] > 120[284k gated] > 10).
@@ -2515,7 +2515,7 @@ def test_family_ranking_downloads_tiebreak(monkeypatch):
     _install_family_mocks(monkeypatch, repos, files)
 
     # When family-mode discovery returns them
-    cands = llama_ai.discover_top_tier(limit=4, total_ram_bytes=48 * G,
+    cands = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=48 * G,
                                        headroom_bytes=3 * G, min_trending_score=0,
                                        per_provider=1, family="qwen")
 
@@ -2538,7 +2538,7 @@ def test_family_min_trending_score_ignored(monkeypatch):
     _install_family_mocks(monkeypatch, repos, files)
 
     # When discovery runs in family mode with a high (would-exclude-all) floor
-    cands = llama_ai.discover_top_tier(limit=4, total_ram_bytes=48 * G,
+    cands = llgenie_serve.discover_top_tier(limit=4, total_ram_bytes=48 * G,
                                        headroom_bytes=3 * G, min_trending_score=999,
                                        per_provider=1, family="qwen")
 
@@ -2556,7 +2556,7 @@ def test_family_zero_matches_fails_loudly(monkeypatch, capsys):
     Then   it prints `no GGUF repos found for family '<kw>'` and exits non-zero.
     """
     # Given the family search returns nothing (typo'd / non-GGUF family)
-    monkeypatch.setattr(llama_ai, "_family_gguf_repos", lambda kw, limit=300: [])
+    monkeypatch.setattr(llgenie_serve, "_family_gguf_repos", lambda kw, limit=300: [])
 
     # When the CLI dispatches --download-top-tier --family zzz
     import argparse
@@ -2566,7 +2566,7 @@ def test_family_zero_matches_fails_loudly(monkeypatch, capsys):
 
     # Then it exits non-zero with the clear family message
     with pytest.raises(SystemExit) as e:
-        llama_ai._main_download_top_tier(args)
+        llgenie_serve._main_download_top_tier(args)
     assert e.value.code == 1, f"unknown family must exit 1, got {e.value.code}"
     out = capsys.readouterr()
     assert "no GGUF repos found for family 'zzz'" in (out.out + out.err)
@@ -2582,7 +2582,7 @@ def test_family_one_provider_fewer_than_count_honest(monkeypatch):
     _install_family_mocks(monkeypatch, repos, files)
 
     # When family-mode discovery asks for 5 providers
-    cands = llama_ai.discover_top_tier(limit=5 * 2, total_ram_bytes=48 * G,
+    cands = llgenie_serve.discover_top_tier(limit=5 * 2, total_ram_bytes=48 * G,
                                        headroom_bytes=3 * G, min_trending_score=0,
                                        per_provider=2, family="qwen")
 
@@ -2611,11 +2611,11 @@ def test_discover_family_none_uses_trending(monkeypatch):
 
     files = {"trend/Repo": [("q8.gguf", 10.0)], "fam/Repo": [("q8.gguf", 10.0)]}
     _install_family_mocks(monkeypatch, [], files)  # installs _repo_gguf_files+probe
-    monkeypatch.setattr(llama_ai, "_trending_gguf_repos", fake_trending)
-    monkeypatch.setattr(llama_ai, "_family_gguf_repos", fake_family)
+    monkeypatch.setattr(llgenie_serve, "_trending_gguf_repos", fake_trending)
+    monkeypatch.setattr(llgenie_serve, "_family_gguf_repos", fake_family)
 
     # When discovery runs with family=None (the default, no --family)
-    cands = llama_ai.discover_top_tier(limit=2, total_ram_bytes=48 * G,
+    cands = llgenie_serve.discover_top_tier(limit=2, total_ram_bytes=48 * G,
                                        headroom_bytes=3 * G, min_trending_score=0,
                                        per_provider=1)
 
@@ -2629,14 +2629,14 @@ def test_resolve_picks_prism_server_on_a_prism_card(monkeypatch, tmp_path):
     """Issue #98: make install writes ~/bin/prism-server (Prism image) and
     ~/bin/llama-server (stock image); a <= 24 GB (prism) card uses prism-server."""
     monkeypatch.delenv("LLAMA_SERVER", raising=False)
-    monkeypatch.setattr(llama_ai.shutil, "which", lambda _: None)
+    monkeypatch.setattr(llgenie_serve.shutil, "which", lambda _: None)
     home = tmp_path / "fakehome"
     (home / "bin").mkdir(parents=True)
     for n in ("llama-server", "prism-server"):
         (home / "bin" / n).write_bytes(b"binary")
         (home / "bin" / n).chmod(0o755)
-    monkeypatch.setattr(llama_ai.os.path, "expanduser", lambda _: str(home))
+    monkeypatch.setattr(llgenie_serve.os.path, "expanduser", lambda _: str(home))
     monkeypatch.setenv("LLAMA_SERVER_TREE", "prism")
-    assert llama_ai.resolve_llama_server() == str(home / "bin" / "prism-server")
+    assert llgenie_serve.resolve_llama_server() == str(home / "bin" / "prism-server")
     monkeypatch.setenv("LLAMA_SERVER_TREE", "upstream")
-    assert llama_ai.resolve_llama_server() == str(home / "bin" / "llama-server")
+    assert llgenie_serve.resolve_llama_server() == str(home / "bin" / "llama-server")

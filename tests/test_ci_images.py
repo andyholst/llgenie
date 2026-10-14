@@ -327,7 +327,7 @@ def test_every_pipeline_job_runs_one_ci_make_target():
 
     # And the install job also exercises the INSTALLED launcher's argument surface in dry
     # run (issue #236): bare --dry is not the whole CLI, and every grid dry run in the unit
-    # stage goes through scripts/llama_serve.py, never the wrapper a user runs.
+    # stage goes through scripts/llgenie_serve.py, never the wrapper a user runs.
     assert "$(MAKE) ci-install-dry-args" in recipe
     args = mk.split("\nci-install-dry-args:", 1)[1].split("\n\n", 1)[0]
     assert "tests/test_cli_dry_run_matrix.py" in args

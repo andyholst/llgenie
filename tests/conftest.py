@@ -1,7 +1,7 @@
 """Shared pytest fixtures for the llgenie test suite.
 
 All tests run under the gguf venv python (see Makefile `test` target). We
-expose the repo root so tests can locate scripts/llama_serve.py / Makefile / tools.
+expose the repo root so tests can locate scripts/llgenie_serve.py / Makefile / tools.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import scripts.llama_serve as llama_ai  # noqa: E402  (importable: gguf+numpy come from the venv)
+import scripts.llgenie_serve as llgenie_serve  # noqa: E402  (importable: gguf+numpy come from the venv)
 
 HOME = Path.home()
 MODELS_ROOT = HOME / "models"
@@ -41,7 +41,7 @@ def models_root() -> Path:
 @pytest.fixture(scope="session")
 def server_bin() -> str:
     """llama-server binary (resolved via PATH or LLAMA_SERVER)."""
-    # reads the env the same way llama_ai.resolve_llama_server does, but
+    # reads the env the same way llgenie_serve.resolve_llama_server does, but
     # tolerates absence so we can assert the right error message in tests.
     env = (os.environ.get("LLAMA_SERVER") or "").strip()
     if env and Path(env).is_file():
