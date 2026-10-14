@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Bring ONE pull request back onto `main` (issue #246): rebase, let the agent resolve a conflict,
+# verify the result structurally, push with --force-with-lease to the PR's OWN head remote.
+#
+# It never merges and never leaves the rebase half-done silently: a conflict the agent cannot
+# resolve stops the run with the reason on the PR.
+#
+# Env:
+#   PR            the pull request number (for the comment and the report)
+#   HEAD_BRANCH   the PR's branch
+#   HEAD_REPO     owner of the PR's head repository (the fork, or this repo)
+#   REPO          owner/name of the repository
+#   ORIGIN        git remote for REPO                 (default: origin)
+#   FORK_REMOTE   git remote for HEAD_REPO when it is not REPO (default: fork)
+#   AGENT_CMD     how to ask the agent; the prompt is fed on STDIN (default: make rebase-bot-agent)
+#   GATES         the structural checks after the rebase (default: the repo's fast ones)
+#   DRY=1         print the commands instead of running them (the tests drive this)
+set -uo pipefail
+
+PR="${PR:?PR is required}"
+HEAD_BRANCH="${HEAD_BRANCH:?HEAD_BRANCH is required}"
+HEAD_REPO="${HEAD_REPO:-}"
+REPO="${REPO:?REPO is required}"
+OWNER="${REPO%%/*}"
+ORIGIN="${ORIGIN:-origin}"
+FORK_REMOTE="${FORK_REMOTE:-fork}"
+AGENT_CMD="${AGENT_CMD:-make rebase-bot-agent}"
+GATES="${GATES:-make -n ci-unit; make lint; make check-wiring}"
+MARKER="${MARKER:-rebase-bot}"
+TODAY="${TODAY:-$(date -u +%Y-%m-%d)}"
+DRY="${DRY:-}"
+PROMPT="$(mktemp)"
+LOG="$(mktemp)"
+
+# --- the remote that hosts the PR's head: pushing a fork PR's branch to origin leaves a stray
+# --- branch on the wrong remote, so this follows headRepositoryOwner, not the name "origin".
+if [ -n "$HEAD_REPO" ] && [ "$(printf '%s' "$HEAD_REPO" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')" ]; then
+  REMOTE="$FORK_REMOTE"
+else
+  REMOTE="$ORIGIN"
+fi
+
+run() {
+  if [ -n "$DRY" ]; then echo "[rebase-bot] DRY: $*"; else echo "[rebase-bot] $*"; "$@"; fi
+}
+
+comment() {
+  if [ -n "$DRY" ]; then
+    echo "[rebase-bot] DRY: gh pr comment $PR --body <the outcome>"
+  else
+    gh pr comment "$PR" --repo "$REPO" --body "$1" >/dev/null || echo "[rebase-bot] could not comment" >&2
+  fi
+}
+
+echo "[rebase-bot] PR #$PR: $HEAD_REPO:$HEAD_BRANCH -> main (remote $REMOTE)"
+run git fetch "$ORIGIN" main --quiet
+run git fetch "$REMOTE" "$HEAD_BRANCH" --quiet
+run git checkout -B "$HEAD_BRANCH" "$REMOTE/$HEAD_BRANCH"
+
+# rerere replays its RECORDED resolution, which may be wrong or stale: resolve by hand instead.
+if run git -c rerere.enabled=false rebase "$ORIGIN/main"; then
+  OUTCOME="rebased cleanly onto \`main\`"
+else
+  echo "[rebase-bot] conflict: asking the agent to resolve it"
+  git diff --name-only --diff-filter=U >"$LOG" 2>/dev/null || true
+  {
+    echo "Resolve a git rebase conflict. The branch is rebasing onto origin/main (issues #246)."
+    echo
+    echo "Conflicted files:"; cat "$LOG"
+    echo
+    echo "The rebase stopped here. What each side means:"
+    echo "- HEAD is \`main\`: it may have merged a sibling PR that touched the same lines."
+    echo "- the replayed commit is the PR's own work."
+    echo
+    echo "HARD RULES: preserve BOTH sides' intent (a token-level union that drops one side is wrong);"
+    echo "never weaken, delete or xfail a test to make the rebase apply; keep a Makefile recipe's"
+    echo "leading TAB (\`make -n ci-unit\` must still parse); do not rewrite the PR's history beyond"
+    echo "resolving this conflict; leave no conflict markers anywhere."
+    echo
+    echo "When the resolution is complete, stage the files (\`git add\`) and stop: the rebase is"
+    echo "continued by the caller."
+  } >"$PROMPT"
+  if [ -n "$DRY" ]; then
+    echo "[rebase-bot] DRY: <agent> <$(wc -l <"$PROMPT")-line conflict prompt"
+  elif ! bash -o pipefail -c "$AGENT_CMD" <"$PROMPT"; then
+    comment "The rebase bot could not get the agent to resolve the conflict with \`main\`; leaving it for a human. <!-- $MARKER: $TODAY -->"
+    echo "[rebase-bot] agent failed" >&2; exit 1
+  fi
+  if ! run env GIT_EDITOR=true git -c rerere.enabled=false rebase --continue; then
+    comment "The rebase bot's conflict resolution did not complete; leaving it for a human. <!-- $MARKER: $TODAY -->"
+    echo "[rebase-bot] rebase --continue failed" >&2; exit 1
+  fi
+  if grep -rIl '^<<<<<<< \|^>>>>>>> ' --exclude-dir=.git . >/dev/null 2>&1; then
+    comment "The rebase bot stopped: conflict markers remain. Not pushed. <!-- $MARKER: $TODAY -->"
+    echo "[rebase-bot] conflict markers remain" >&2; exit 1
+  fi
+  OUTCOME="rebased onto \`main\` with \`$(wc -l <"$LOG")\` conflicted file(s) resolved by the agent"
+fi
+
+# The rebase moved code onto a new base: check the structure before publishing it. The full suite
+# belongs to CI, which runs the moment the push lands; these are the checks a broken resolution
+# fails (a recipe's TAB, a dead document, a stale rename).
+echo "[rebase-bot] structural gates: $GATES"
+if [ -n "$DRY" ]; then
+  echo "[rebase-bot] DRY: $GATES"
+elif ! bash -o pipefail -c "$GATES"; then
+  comment "The rebase bot rebased this branch onto \`main\` but the structural checks failed, so nothing was pushed. <!-- $MARKER: $TODAY -->"
+  echo "[rebase-bot] gates failed" >&2; exit 1
+fi
+
+run git push --force-with-lease "$REMOTE" "HEAD:$HEAD_BRANCH"
+comment "$OUTCOME. The structural checks (\`make -n ci-unit\`, \`make lint\`, \`make check-wiring\`) pass on the result; CI runs the full suite on this push. Nothing was merged. <!-- $MARKER: $TODAY -->"
+echo "[rebase-bot] pushed $HEAD_BRANCH to $REMOTE"
