@@ -53,11 +53,21 @@ each reported by name.
   PR's `ci-unit` goes red until someone decides. That is #229's option 2
   ("fail loudly per-engine") without #223's failure mode (a red sync gate that
   stops the data from flowing).
-- **`README` decisions.** `llama.cpp (LlamAmpere fork)` is `not-shipped` (a third
-  llama.cpp fork adds nothing over stock/Prism/LaurentZuijdwijk); the Metal-only
-  ones are `deferred` (they need a native Metal skill, not an image); the
-  auto-registered CUDA servers are `deferred` (no pinned release/verified recipe
-  yet). Each reason is grounded in the registry's own note + the upstream repo.
+- **Actual per-engine reasons.** Each was read from the upstream repository's own
+  README/releases, which corrected three first-pass guesses:
+  - `mlx-serve` is **not** Metal-only (it also ships linux CUDA tarballs) — it is
+    deferred because it is shipped as native binaries with no container image and is an
+    all-in-one app overlapping the `mlx` engine;
+  - `omlx-exl3` is **not a server at all** — it is a one-commit patch set that adds EXL3
+    format support to `oMLX` and rides oMLX's server;
+  - `glm-flash-lite` **does** publish a container (ghcr.io/sybil-solutions/glm53-flash-offload)
+    — it is deferred as a single-model offload engine built on SGLang + ExLlamaV3, both
+    already shipped, not for a missing release.
+  - `MegaCapybara` is closed-source binaries behind a launcher (no source to build from);
+    `ExLlamaV3` upstream is a library whose API server is external (TabbyAPI);
+    `Project Maya` is a single-model engine on top of Strata, native installer, no image;
+    `llama.cpp (LlamAmpere fork)` is `not-shipped` (Ampere-only fork, a third llama.cpp
+    fork to maintain).
 
 ## Can the engine list be generated without an LLM? (question from the user)
 

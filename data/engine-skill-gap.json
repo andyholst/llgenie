@@ -31,56 +31,56 @@
       "engine": "ExLlamaV3",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "The upstream family llgenie already ships, as the ROCm fork skill `exllamav3-rocm`; the upstream CUDA build has no pinned release and no verified install recipe yet.",
+      "reason": "Upstream is a quantization/inference library whose OpenAI API comes from a separate server (TabbyAPI), so there is no first-party server to image; llgenie ships the ExLlamaV3 ROCm-fork engine instead.",
       "issue": 229
     },
     {
       "engine": "MegaCapybara",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "Closed-source binaries (upstream says the source comes later) behind an interactive launcher, scoped to one model on one card (Qwen3.8-27B on an RTX 5090): there is no source, release tree or image to build from.",
       "issue": 229
     },
     {
       "engine": "Project Maya",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "A single-model (GLM-5.3-Flash) engine + dashboard built on Strata, installed by a native setup script with no container image; llgenie already ships the Strata engine for that family.",
       "issue": 229
     },
     {
       "engine": "glm-flash-lite",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "A single-model (GLM-5.3-Flash EXL3) offload engine for one 24 GB card, built on SGLang + ExLlamaV3 - both of which llgenie already ships; a skill for it would duplicate two engines for one model.",
       "issue": 229
     },
     {
       "engine": "llama.cpp (LlamAmpere fork)",
       "decision": "not-shipped",
       "decided": "2026-10-14",
-      "reason": "llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks; a third llama.cpp fork is not added unless it offers something the two shipped forks do not.",
+      "reason": "A llama.cpp fork tuned for Ampere cards only: llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks, and a third fork is a permanent maintenance burden for a per-card gain.",
       "issue": 229
     },
     {
       "engine": "mlx-serve",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon MLX server: Metal cannot run in a container, so it needs a native Metal skill, not an image. llgenie's Metal path already covers MLX with the `mlx` skill.",
+      "reason": "Upstream ships native binaries only (a brew cask plus linux CUDA tarballs), no container image, and it is an all-in-one app overlapping the MLX engine llgenie already serves natively.",
       "issue": 229
     },
     {
       "engine": "oMLX",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon MLX server: Metal-only, so it needs a native Metal skill rather than a container image, and the `mlx` skill already serves MLX natively.",
+      "reason": "Apple-Silicon server delivered as a macOS menu-bar app: Metal cannot run in a container, so it would need a native Metal skill, and llgenie already ships the `mlx` engine for that platform.",
       "issue": 229
     },
     {
       "engine": "omlx-exl3",
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon server for ExL3 quants: Metal-only, so it needs a native Metal skill; the format is not one llgenie ships an image for yet.",
+      "reason": "Not a server at all: a patch set that adds ExLlamaV3's EXL3 format to oMLX (pinned to one commit, single author) and rides oMLX's own server on Apple Silicon.",
       "issue": 229
     }
   ],
@@ -203,7 +203,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "The upstream family llgenie already ships, as the ROCm fork skill `exllamav3-rocm`; the upstream CUDA build has no pinned release and no verified install recipe yet.",
+      "reason": "Upstream is a quantization/inference library whose OpenAI API comes from a separate server (TabbyAPI), so there is no first-party server to image; llgenie ships the ExLlamaV3 ROCm-fork engine instead.",
       "issue": 229
     },
     "ExLlamaV3 (ROCm fork)": {
@@ -381,7 +381,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "Closed-source binaries (upstream says the source comes later) behind an interactive launcher, scoped to one model on one card (Qwen3.8-27B on an RTX 5090): there is no source, release tree or image to build from.",
       "issue": 229
     },
     "Ollama": {
@@ -450,7 +450,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "A single-model (GLM-5.3-Flash) engine + dashboard built on Strata, installed by a native setup script with no container image; llgenie already ships the Strata engine for that family.",
       "issue": 229
     },
     "SGLang": {
@@ -591,7 +591,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "reason": "A single-model (GLM-5.3-Flash EXL3) offload engine for one 24 GB card, built on SGLang + ExLlamaV3 - both of which llgenie already ships; a skill for it would duplicate two engines for one model.",
       "issue": 229
     },
     "llama.cpp": {
@@ -730,7 +730,7 @@
       },
       "decision": "not-shipped",
       "decided": "2026-10-14",
-      "reason": "llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks; a third llama.cpp fork is not added unless it offers something the two shipped forks do not.",
+      "reason": "A llama.cpp fork tuned for Ampere cards only: llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks, and a third fork is a permanent maintenance burden for a per-card gain.",
       "issue": 229
     },
     "llama.cpp (PrismML fork)": {
@@ -789,7 +789,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon MLX server: Metal cannot run in a container, so it needs a native Metal skill, not an image. llgenie's Metal path already covers MLX with the `mlx` skill.",
+      "reason": "Upstream ships native binaries only (a brew cask plus linux CUDA tarballs), no container image, and it is an all-in-one app overlapping the MLX engine llgenie already serves natively.",
       "issue": 229
     },
     "oMLX": {
@@ -813,7 +813,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon MLX server: Metal-only, so it needs a native Metal skill rather than a container image, and the `mlx` skill already serves MLX natively.",
+      "reason": "Apple-Silicon server delivered as a macOS menu-bar app: Metal cannot run in a container, so it would need a native Metal skill, and llgenie already ships the `mlx` engine for that platform.",
       "issue": 229
     },
     "omlx-exl3": {
@@ -836,7 +836,7 @@
       },
       "decision": "deferred",
       "decided": "2026-10-14",
-      "reason": "Apple-Silicon server for ExL3 quants: Metal-only, so it needs a native Metal skill; the format is not one llgenie ships an image for yet.",
+      "reason": "Not a server at all: a patch set that adds ExLlamaV3's EXL3 format to oMLX (pinned to one commit, single author) and rides oMLX's own server on Apple Silicon.",
       "issue": 229
     },
     "vLLM": {
