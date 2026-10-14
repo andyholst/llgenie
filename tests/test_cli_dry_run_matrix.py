@@ -1,10 +1,10 @@
 """The INSTALLED launcher's argument surface, in dry run, over the mocked
 (arch, vram, ram) grid (issue #236).
 
-Every other grid dry run in this repo drives `scripts/llama_serve.py` — the source entry
+Every other grid dry run in this repo drives `scripts/llgenie_serve.py` — the source entry
 point — while the install stage dry-runs the installed `~/bin/llgenie` **bare** (`--dry`,
 no arguments, one invocation). So the wrapper a user actually runs
-(`~/bin/llgenie` -> venv python -> `scripts/llama_serve.py`) had no test that passes it any
+(`~/bin/llgenie` -> venv python -> `scripts/llgenie_serve.py`) had no test that passes it any
 of those arguments: a wrapper that drops or mangles `"$@"` was invisible.
 
 This test runs the INSTALLED launcher with the documented argument surface, over the mocked
@@ -39,7 +39,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 SMOKE = REPO / "tests" / "fixtures" / "matrix-smoke-registry.json"
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 GB = 2**30
 ARCHES = ("cuda", "rocm", "vulkan", "metal", "cpu")
 VRAMS = (8, 24, 48)
@@ -229,7 +229,7 @@ def test_an_invalid_arch_or_vram_fails_loudly_through_the_wrapper(tmp_path):
 # ---------------------------------------------------------------------------
 def test_the_installed_wrapper_agrees_with_the_repo_script(tmp_path):
     """The installed launcher is a generated wrapper around the venv python and
-    `scripts/llama_serve.py`. Broken quoting or a dropped `"$@"` shows up as a DIFFERENT
+    `scripts/llgenie_serve.py`. Broken quoting or a dropped `"$@"` shows up as a DIFFERENT
     answer here, so this is the test that makes a mangling wrapper fail."""
 
     # Given the installed launcher and the same mocked host as the repo script

@@ -185,7 +185,7 @@ def test_uninstall_removes_install_artifacts_and_not_repo_source():
     assert "install_engine_launchers.py --bin \"$(BIN)\" --uninstall" in recipe
     assert "PURGE_IMAGES" in recipe
     assert "rm -rf" not in recipe and "SERVER_ROOT" not in recipe.split("\n\t@", 1)[1]
-    assert "scripts/llama_serve" not in recipe.split("rm -f", 1)[1].split("\n", 1)[0]
+    assert "scripts/llgenie_serve" not in recipe.split("rm -f", 1)[1].split("\n", 1)[0]
 
 
 def test_uninstall_removes_only_what_install_wrote(tmp_path, monkeypatch):
@@ -230,7 +230,7 @@ def test_install_ci_runs_make_install_and_make_uninstall():
     assert "$(ENGINE_TEST_RUN)" in recipe  # python test container + host docker socket
     assert "make install" in recipe and "make test-install-host" in recipe
     assert "make test-health-host" in recipe and "make uninstall" in recipe
-    assert "llgenie-engine-*" in recipe and "scripts/llama_serve.py" in recipe
+    assert "llgenie-engine-*" in recipe and "scripts/llgenie_serve.py" in recipe
     assert "make ci-install" in job and "test-install-ci" not in job
     recipe = text.split("\nci-install:", 1)[1].split("\n\n", 1)[0]
     assert "$(MAKE) test-env" in recipe and "$(MAKE) ci-install-run" in recipe

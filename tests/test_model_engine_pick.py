@@ -88,7 +88,7 @@ def test_llgenie_dry_run_prints_model_engine_and_container_command(tmp_path):
     env = {**os.environ, "LLGENIE_REGISTRY_SRC": str(FIXTURE), "LLAMA_MODELS_ROOT": str(tmp_path),
            "LLAMA_BACKEND": "cpu", "LLAMA_RAM_BYTES": str(8 * 2**30)}
     # When llgenie --pick --auto --dry --engine vllm runs
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"),
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"),
                         "--pick", "--auto", "--dry", "--engine", "vllm"],
                        capture_output=True, text=True, env=env,
                        timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)
@@ -120,7 +120,7 @@ def test_model_file_param_serves_that_exact_file(tmp_path):
     env = {**os.environ, "LLGENIE_REGISTRY_SRC": str(FIXTURE), "LLAMA_MODELS_ROOT": str(tmp_path),
            "LLAMA_BACKEND": "cuda", "LLAMA_RAM_BYTES": str(16 * 2**30)}
     # When llgenie --pick bonsai --engine prism --model-file <f> --dry runs
-    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llama_serve.py"), "--pick", "bonsai",
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"), "--pick", "bonsai",
                         "--engine", "prism", "--model-file", str(f), "--auto", "--dry"],
                        capture_output=True, text=True, env=env,
                        timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)

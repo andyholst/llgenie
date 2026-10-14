@@ -26,7 +26,7 @@ import hf_auth  # noqa: E402
 import model_engine_pick as mp  # noqa: E402
 from ptydrive import Pty  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 HUB_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
 MAC_GB = 48          # the reporter's M5 Pro: 48 GiB unified memory
 BIG_MAC_GB = 128     # a Mac that holds TensorFold's Flash Next 2-bit checkpoint

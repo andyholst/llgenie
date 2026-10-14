@@ -7,7 +7,7 @@ difference between "262,144 tokens does not fit" (6.00 GiB computed) and
 "262,144 fits" (3.00 GiB real, and 3.6 GB as the engine reports it).
 
 These tests are hermetic: they exercise the pure functions of
-`scripts/llama_serve.py` and read the engine skills as data (no server, no
+`scripts/llgenie_serve.py` and read the engine skills as data (no server, no
 container, no Hub).
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-import scripts.llama_serve as llama_ai
+import scripts.llgenie_serve as llama_ai
 
 REPO = Path(__file__).resolve().parents[1]
 SKILLS = sorted((REPO / "skills" / "engines").glob("*/SKILL.md"))

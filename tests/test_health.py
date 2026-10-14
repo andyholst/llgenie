@@ -38,7 +38,7 @@ HEALTH_MODEL = "0.5b"
 HEALTH_TIER = MODELS_ROOT / "Qwen" / "8GB"
 MODEL_FILE = HEALTH_TIER / "qwen2.5-0.5b-instruct-q4_0.gguf"
 
-LAUNCHER = BIN / "llgenie"           # installed wrapper (runs llama_serve.py w/ venv py)
+LAUNCHER = BIN / "llgenie"           # installed wrapper (runs llgenie_serve.py w/ venv py)
 
 
 def _pick_port() -> int:
@@ -118,7 +118,7 @@ def test_health_endpoint_answers_hi():
 
     # Launch the installed `~/bin/llgenie` wrapper when present (the exact host
     # install path the loop cares about). On a bare CI runner with no install we
-    # fall back to running repo scripts/llama_serve.py directly with $LLAMA_SERVER (the
+    # fall back to running repo scripts/llgenie_serve.py directly with $LLAMA_SERVER (the
     # CPU-built binary) — so the SAME health check runs locally and in CI.
     import shutil
     from pathlib import Path as _Path
@@ -127,7 +127,7 @@ def test_health_endpoint_answers_hi():
         argv = [str(LAUNCHER), HEALTH_MODEL, "--port", str(port)]
         cwd = str(BIN)
     else:
-        argv = [sys.executable, str(_repo / "scripts/llama_serve.py"), HEALTH_MODEL, "--port", str(port)]
+        argv = [sys.executable, str(_repo / "scripts/llgenie_serve.py"), HEALTH_MODEL, "--port", str(port)]
         cwd = str(_repo)
     log = MODEL_FILE.parent / ".run.log"
     proc = subprocess.Popen(

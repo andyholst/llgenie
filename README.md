@@ -10,7 +10,7 @@ This repo bundles three pieces that were built and validated together:
 
 | Piece | File | What it does |
 |---|---|---|
-| **GGUF launcher + auto-tuner** | `scripts/llama_serve.py` | Scan `~/models/**/*.gguf`, pick a model (and engine, `--pick`), auto-tune `llama-server` flags to the detected card RAM, and serve an OpenAI-compatible endpoint at `127.0.0.1:11434`. |
+| **GGUF launcher + auto-tuner** | `scripts/llgenie_serve.py` | Scan `~/models/**/*.gguf`, pick a model (and engine, `--pick`), auto-tune `llama-server` flags to the detected card RAM, and serve an OpenAI-compatible endpoint at `127.0.0.1:11434`. |
 | **HF downloader** | `scripts/hf_download.py` | Download a GGUF into a tiered models folder with live progress and auto-resume/auto-retry against a throttled Hugging Face CDN. |
 | **venv setup** | `tools/` | `gguf`-tooling environment (Python 3.10 venv + pip-compile container), recreatable via `make venv-install`. |
 
@@ -49,7 +49,7 @@ make install
 1. **venv** — builds the Python 3.10 gguf-tooling venv at `~/llama-gguf-tools/.venv`
    (`numpy` + `gguf==0.19.0` + `huggingface_hub[cli]` so the `hf` downloader used by
    `--download-top-tier` is always available, no separate install needed).
-2. **launcher** — writes an executable `~/bin/llgenie` that runs `scripts/llama_serve.py` **with the
+2. **launcher** — writes an executable `~/bin/llgenie` that runs `scripts/llgenie_serve.py` **with the
    venv's python**, so `gguf`/`numpy` resolve with zero extra steps.
 3. **engine images + start scripts** — pulls this host's backend images from GHCR
    (`LLGENIE_REGISTRY`, default `ghcr.io/asimov-agent`): by default llama.cpp + Prism,
@@ -67,7 +67,7 @@ make install
    that device node), they run `nvidia-modprobe -c 0 -m -u` before `docker run` and exit
    if the node is still missing. `LLGENIE_NO_GPU=1` drops the CDI device first, so that
    path does not call `nvidia-modprobe`.
-4. **symlink + smoke** — symlinks `~/bin/llgenie.py` → this repo's launcher (`scripts/llama_serve.py`),
+4. **symlink + smoke** — symlinks `~/bin/llgenie.py` → this repo's launcher (`scripts/llgenie_serve.py`),
    then runs `~/bin/llgenie --list`. Succeeds even when `~/models` is empty (you populate it with
    `llgenie --download-top-tier`), failing only on a genuine gguf/launch error.
 5. **PATH** — if `$HOME/bin` is not already on `PATH` in the default shell's rc file,
@@ -158,7 +158,7 @@ whole (arch × vram × ram) permutation set through these: the choice of inferen
 **server is selected by the architecture** — only engines with a runnable image
 variant for that host are offered (the arch variant, else the cpu fallback image;
 on Metal never a cpu image, issue #120) — and each chosen (model, engine) maps to a
-resolvable HF quant URL. The env seams `LLAMA_BACKEND` / `LLAMA_RAM_BYTES` /
+resolvable HF quant URL. The env seams `LLGENIE_BACKEND` / `LLGENIE_RAM_BYTES` /
 `LLGENIE_SYSTEM_RAM_BYTES` do the same when neither flags nor positionals are given.
 `tests/test_pick_matrix_arch_perms.py` asserts the whole (arch × vram × ram)
 permutation set on the Linux CI (`make test-unit`), and `tests/test_pick_full_registry.py`
@@ -403,7 +403,7 @@ started and must answer "hi" on `/v1/chat/completions`; GPU images of the llama.
 and Ollama run without GPU devices and fall back to CPU, GPU-only engines such as vLLM or SGLang
 get the version test on their GPU images), and installs from the registry only
 (`make engine-launchers` + `make test-built-engine`). The last stage, `install-published`,
-runs the real `make install` per backend (cpu/cuda/rocm/vulkan mocked via `LLAMA_BACKEND`, GPU
+runs the real `make install` per backend (cpu/cuda/rocm/vulkan mocked via `LLGENIE_BACKEND`, GPU
 images on CPU) against those published images: only that backend's images are pulled, llgenie
 answers "hi" through `llama-server` and `prism-server`, `llgenie --pick --engine` pulls the
 picked engine on first use, and `make uninstall` leaves nothing behind.
@@ -415,10 +415,10 @@ the installed `llgenie` with no model runs in a pty, picks the top recommendatio
 from `data/models.json`, downloads the GGUF and the engine container answers "hi" -> `make uninstall`).
 Each `install-published-<backend>` job also runs the trend pick (`--dry`) from the installed `llgenie`.
 
-> **Why a wrapper?** `scripts/llama_serve.py` imports the `gguf`/`numpy` packages that live in the
+> **Why a wrapper?** `scripts/llgenie_serve.py` imports the `gguf`/`numpy` packages that live in the
 > venv, so it must be launched with the venv python. The `~/bin/llgenie` wrapper does
 > exactly that; the `llgenie.py` symlink keeps editors/`--list` pointing at the real file (which lives at
-> `scripts/llama_serve.py`).
+> `scripts/llgenie_serve.py`).
 
 ### Manual setup (only if you don't want `make install`)
 
@@ -426,7 +426,7 @@ Each `install-published-<backend>` job also runs the trend pick (`--dry`) from t
 # 1. venv
 cd tools && make venv-install      # create ~/llama-gguf-tools/.venv + install deps
 # 2. run with the venv python
-~/llama-gguf-tools/.venv/bin/python scripts/llama_serve.py --list
+~/llama-gguf-tools/.venv/bin/python scripts/llgenie_serve.py --list
 ```
 
 `requirements.in` is the single source of truth; `requirements.txt` is generated with
@@ -443,7 +443,7 @@ nothing is compiled on the host (only macOS Metal builds natively, see below).
 
 ### Tree selection — card RAM only (no model quant inspection)
 Card RAM means the GPU's VRAM when an NVIDIA card is present (via `nvidia-smi`),
-otherwise the system RAM. `LLAMA_RAM_BYTES` is a test/CI seam, not a user knob.
+otherwise the system RAM. `LLGENIE_RAM_BYTES` is a test/CI seam, not a user knob.
 
 | Card RAM | Tree to build | Why |
 |---|---|---|
@@ -496,9 +496,9 @@ started. `make stop-serve-variant` stops that same recorded pid. Neither one
 signals a llama-server that was not started by this Makefile.
 
 ### Env seams (CI/test)
-- `LLAMA_BACKEND` = metal | cuda | cpu (| rocm | vulkan for engine skills)  (override hardware detection)
+- `LLGENIE_BACKEND` = metal | cuda | cpu (| rocm | vulkan for engine skills)  (override hardware detection)
 - `LLGENIE_CUDA_ARCH` / `LLGENIE_CUDA_VERSION` / `LLGENIE_GPU_TARGETS` / `BUILD_JOBS` (engine-skill hardware params)
-- `LLAMA_RAM_BYTES` = card RAM in bytes (test/CI seam)
+- `LLGENIE_RAM_BYTES` = card RAM in bytes (test/CI seam)
 - `LLAMA_SERVER_TREE` = prism | upstream (force the tree, independent of card RAM)
 - `LLGENIE_REGISTRY` = registry to pull/push engine images (default `ghcr.io/asimov-agent`)
 - `LLGENIE_NO_GPU=1` = start GPU images without GPU devices (CPU fallback; used by CI)
@@ -684,15 +684,15 @@ python3 scripts/hf_download.py <repo_id> <filename> <dest_dir> <label>
 python3 scripts/hf_download.py Qwen/Qwen3.5-24B-GGUF qwen3.5-24b-q5_k_m.gguf ~/models/Qwen/24GB qwen-q5
 ```
 
-## 3. Launch a model (`scripts/llama_serve.py`)
+## 3. Launch a model (`scripts/llgenie_serve.py`)
 
 Run with the tooling venv's Python so `gguf`/`numpy` are importable:
 
 ```bash
-~/llama-gguf-tools/.venv/bin/python scripts/llama_serve.py --list     # list models, don't run
-~/llama-gguf-tools/.venv/bin/python scripts/llama_serve.py <name>     # run by substring
-~/llama-gguf-tools/.venv/bin/python scripts/llama_serve.py            # interactive picker
-~/llama-gguf-tools/.venv/bin/python scripts/llama_serve.py --dry qwen # print the command, don't run
+~/llama-gguf-tools/.venv/bin/python scripts/llgenie_serve.py --list     # list models, don't run
+~/llama-gguf-tools/.venv/bin/python scripts/llgenie_serve.py <name>     # run by substring
+~/llama-gguf-tools/.venv/bin/python scripts/llgenie_serve.py            # interactive picker
+~/llama-gguf-tools/.venv/bin/python scripts/llgenie_serve.py --dry qwen # print the command, don't run
 ```
 
 The launcher will:
@@ -736,8 +736,8 @@ The launcher will:
 - Write the exact command to `<model-dir>/.run.log` for audit/replay.
 
 You can customize `TOTAL_RAM_BYTES`, `OS_OVERHEAD`, `KV_QUANT`, and `SAMPLING` at the top
-of `scripts/llama_serve.py`. For `--download-top-tier`, the fit is **dynamic**: the total
-comes from the actual card (`LLAMA_RAM_BYTES` overrides it), headroom is capped at 45% of
+of `scripts/llgenie_serve.py`. For `--download-top-tier`, the fit is **dynamic**: the total
+comes from the actual card (`LLGENIE_RAM_BYTES` overrides it), headroom is capped at 45% of
 total, and KV reserve applies automatically.
 
 ### Test the endpoint
@@ -789,7 +789,7 @@ How it decides "trending + top tier + fits":
   **MTP/mtp-* companion heads** (multi-token-prediction aux files, not the serviceable
   model), and still excludes non-LLM repos (TTS, image/audio encoders).
 - **Fits with buffer** — the total memory comes from the **actual card** at runtime
-  (`sysctl hw.memsize` on macOS, `/proc/meminfo` on Linux, or `LLAMA_RAM_BYTES`), with
+  (`sysctl hw.memsize` on macOS, `/proc/meminfo` on Linux, or `LLGENIE_RAM_BYTES`), with
   current-pressure headroom (`vm_stat`). Only models that leave a KV-cache reserve are
   offered — on a 48 GB card that's ~29 GB Q8-class 27B models; on a 16 GB CPU card it
   downshifts to ~12 GB Q3-class.
@@ -844,7 +844,7 @@ llgenie --download-top-tier --family qwen
 # top 1 provider of the ornith family, just the high quant
 llgenie --download-top-tier --family ornith --count 1 --per-provider 1
 # preview a known low-end family, 1 provider, without downloading (small card)
-LLAMA_RAM_BYTES=$((8*1024**3)) llgenie --download-top-tier --family qwen --count 1 --dry
+LLGENIE_RAM_BYTES=$((8*1024**3)) llgenie --download-top-tier --family qwen --count 1 --dry
 ```
 
 Everything else (`--count`, `--per-provider`, `--dry`, placement, probe+refill,
@@ -1095,7 +1095,7 @@ llgenie/
 │   └── strata_models.json  # Strata's setup.py model/file/shard map (make sync-strata-models)
 ├── docker-compose-files/  # hermetic test container (documented)
 ├── scripts/
-│   ├── llama_serve.py      # GGUF launcher + llama-server auto-tuner + --download-top-tier / --trend / --select / --matrix
+│   ├── llgenie_serve.py      # GGUF launcher + llama-server auto-tuner + --download-top-tier / --trend / --select / --matrix
 │   ├── model_engine_pick.py # trend/README pick, engine ranking, GGUF download plan (no mocks)
 │   ├── engine_skills.py    # engine skills: detect/install/launch every engine (no engine-specific code)
 │   ├── engine_image.py     # skills -> engine params + Dockerfiles; build/push/pull images
@@ -1104,7 +1104,7 @@ llgenie/
 │   ├── install_engine_launchers.py  # writes ~/bin/llgenie-engine-<id> start scripts
 │   ├── sync_registry.py    # vendor + validate data/models.json + trending-README.md (make sync/check)
 │   ├── gen_trending_quant_catalog.py  # HF class table generator: model -> engine -> arch + real quant plans (make sync/check-quant-catalog)
-│   ├── detect_server.py    # card RAM / backend detection (LLAMA_RAM_BYTES seam)
+│   ├── detect_server.py    # card RAM / backend detection (LLGENIE_RAM_BYTES seam)
 │   ├── native_build_env.py # macOS Metal native build env (build_llama_server.sh)
 │   ├── hf_download.py      # HF downloader (auto-resume/retry, throttled, xet->HTTP fallback)
 │   ├── __init__.py         # package marker for hermetic unit tests
@@ -1120,7 +1120,7 @@ llgenie/
 │   ├── test_model_engine_pick.py     # pick logic unit tests
 │   ├── test_install_trend.py         # pty trend pick from installed ~/bin/llgenie
 │   ├── test_install_published.py     # pty trend pick per backend from published images
-│   ├── test_llama_ai.py / test_top_tier_acceptance.py / test_install.py / test_health.py
+│   ├── test_llgenie_serve.py / test_top_tier_acceptance.py / test_install.py / test_health.py
 │   └── conftest.py / ptydrive.py / fixtures/   # shared test helpers
 ├── .github/workflows/
 │   ├── ci.yml              # parallel per-stage CI (all branches/PRs)

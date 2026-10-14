@@ -27,7 +27,7 @@ import model_engine_pick as mp  # noqa: E402
 import strata_models as sm  # noqa: E402
 from ptydrive import Pty  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 PARAMS = REPO / "containers" / "engines" / "params" / "strata.json"
 HUB_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
 GIB = 2**30

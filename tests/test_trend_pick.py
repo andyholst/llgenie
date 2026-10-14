@@ -22,7 +22,7 @@ import sync_registry as sr  # noqa: E402
 from ptydrive import Pty  # noqa: E402
 
 VENDORED = REPO / "data" / "models.json"
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 
 
 # One Hub answer cache for the whole session (llgenie caches Hub lookups on disk):

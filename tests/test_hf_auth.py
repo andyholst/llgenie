@@ -165,7 +165,7 @@ def _short_hub_process_limits() -> list[tuple[str, str, int]]:
                 if not isinstance(func, ast.Attribute) or func.attr != "run":
                     continue
                 blob = ast.dump(call)
-                if "llama_serve.py" not in blob and "hf_download.py" not in blob:
+                if "llgenie_serve.py" not in blob and "hf_download.py" not in blob:
                     continue
                 for kw in call.keywords:
                     if kw.arg != "timeout" or not isinstance(kw.value, ast.Constant):
@@ -178,7 +178,7 @@ def _short_hub_process_limits() -> list[tuple[str, str, int]]:
 def test_hub_launcher_processes_use_the_dry_run_budget():
     """A launcher or real download subprocess outlives one capped Hub 429."""
 
-    # Given every test that starts llama_serve or hf_download
+    # Given every test that starts llgenie_serve or hf_download
     short = _short_hub_process_limits()
 
     # When its subprocess timeout is a number

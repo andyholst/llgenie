@@ -43,7 +43,7 @@ import engine_image as ei  # noqa: E402
 import model_engine_pick as mp  # noqa: E402
 import sync_registry as sr  # noqa: E402
 
-SERVE = REPO / "scripts" / "llama_serve.py"
+SERVE = REPO / "scripts" / "llgenie_serve.py"
 README = REPO / "data" / "trending-README.md"
 HUB_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
 RAM = 64  # system RAM of the Linux hosts (GiB); a Mac's RAM is its card

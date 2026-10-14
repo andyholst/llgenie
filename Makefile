@@ -72,7 +72,7 @@ all: bash-check install
 # ---- full install: engine images + venv + launcher + start scripts ---------
 # `make install` does NOT build a native llama-server anymore. Entry points run
 # through the engine CONTAINER images (issue #98): it
-#   1. builds the gguf-tooling venv (venv-install, for llama_serve.py metadata/tuning)
+#   1. builds the gguf-tooling venv (venv-install, for llgenie_serve.py metadata/tuning)
 #   2. builds every engine image (llama.cpp, prism, ...) via `make build-engines` on
 #      the detected DEFAULT arch, or pulls the published image,
 #   3. writes a start script per engine image into ~/bin (engine-launchers) —
@@ -95,9 +95,9 @@ venv-install:
 link:
 	@mkdir -p "$(BIN)"
 	@printf '#!/usr/bin/env bash\n# llgenie launcher -> runs %s with the %s venv.\n# Prepend ~/bin to PATH so the llama-server symlink there resolves in any shell.\nexport PATH="$(BIN):$$PATH"\nexec "%s" "%s" "$$@"\n' \
-		"$(REPO)/scripts/llama_serve.py" "$(VENV)" "$(PY)" "$(REPO)/scripts/llama_serve.py" > "$(LAUNCHER)"
+		"$(REPO)/scripts/llgenie_serve.py" "$(VENV)" "$(PY)" "$(REPO)/scripts/llgenie_serve.py" > "$(LAUNCHER)"
 	@chmod +x "$(LAUNCHER)"
-	@ln -sfn "$(REPO)/scripts/llama_serve.py" "$(BIN)/llgenie.py"
+	@ln -sfn "$(REPO)/scripts/llgenie_serve.py" "$(BIN)/llgenie.py"
 	# ~/bin/llama-server is the container shim written by engine-launchers (no native build).
 	@echo "==> Wrote $(LAUNCHER) (exec) and symlinked ~/bin/llgenie.py -> repo"
 	@$(PY) scripts/ensure_user_path.py
@@ -522,7 +522,7 @@ test-clean: ## Remove left-over/stopped orphaned containers of the test image (i
 	echo "Pruned stopped orphaned $(TEST_IMG) containers."
 
 test-unit: ## Hermetic unit tests (containerized) — includes the lint regression + openspec-tasks-check tests
-	$(TEST_RUN) python -m pytest tests/test_llama_ai.py tests/test_hf_auth.py tests/test_hf_download_stall.py tests/test_hf_download_retry.py tests/test_lint_linefeeds.py tests/test_engine_bump_sync.py tests/test_engine_bump_rebase.py tests/test_check_openspec_tasks.py tests/test_remove_watchloop.py tests/test_ci_variant_matrix.py tests/test_serve_variant.py tests/test_ensure_user_path.py tests/test_engine_skills.py tests/test_engine_bump.py tests/test_engine_bump_pr_body.py tests/test_detect_server.py tests/test_model_engine_pick.py tests/test_trend_pick.py tests/test_registry_sync_trend.py tests/test_trend_list_matrix.py tests/test_registry_keys.py tests/test_engine_skill_gap.py tests/test_strata_download.py tests/test_macos_install.py tests/test_ci_images.py tests/test_mac_trend_pick.py tests/test_trend_list_acceptance.py tests/test_tensorfold_seamless.py tests/test_pick_matrix.py tests/test_pick_matrix_arch_perms.py tests/test_pick_full_registry.py tests/test_trending_quant_catalog.py tests/test_engine_supported_quants.py tests/test_quant_generator_edges.py tests/test_check_python_uv.py tests/test_engine_image_matrix.py tests/test_agents_worktree.py tests/test_agents_debt_analysis.py tests/test_wiring.py tests/test_kv_quant_bytes.py tests/test_queued_run_alarm.py -p no:cacheprovider -q -k 'not test_derive_reports_the_live_release_archives and not test_tensorfold_v1_0_5_release_is_native_archives and not test_tensorfold_release_archive_unpacks_and_runs'
+	$(TEST_RUN) python -m pytest tests/test_llgenie_serve.py tests/test_hf_auth.py tests/test_hf_download_stall.py tests/test_hf_download_retry.py tests/test_lint_linefeeds.py tests/test_engine_bump_sync.py tests/test_engine_bump_rebase.py tests/test_check_openspec_tasks.py tests/test_remove_watchloop.py tests/test_ci_variant_matrix.py tests/test_serve_variant.py tests/test_ensure_user_path.py tests/test_engine_skills.py tests/test_engine_bump.py tests/test_engine_bump_pr_body.py tests/test_detect_server.py tests/test_model_engine_pick.py tests/test_trend_pick.py tests/test_registry_sync_trend.py tests/test_trend_list_matrix.py tests/test_registry_keys.py tests/test_engine_skill_gap.py tests/test_strata_download.py tests/test_macos_install.py tests/test_ci_images.py tests/test_mac_trend_pick.py tests/test_trend_list_acceptance.py tests/test_tensorfold_seamless.py tests/test_pick_matrix.py tests/test_pick_matrix_arch_perms.py tests/test_pick_full_registry.py tests/test_trending_quant_catalog.py tests/test_engine_supported_quants.py tests/test_quant_generator_edges.py tests/test_check_python_uv.py tests/test_engine_image_matrix.py tests/test_agents_worktree.py tests/test_agents_debt_analysis.py tests/test_wiring.py tests/test_kv_quant_bytes.py tests/test_queued_run_alarm.py tests/test_rename_llgenie_serve.py -p no:cacheprovider -q -k 'not test_derive_reports_the_live_release_archives and not test_tensorfold_v1_0_5_release_is_native_archives and not test_tensorfold_release_archive_unpacks_and_runs'
 
 # Live GitHub release reads. Linux only: the macOS runner cannot reach
 # api.github.com, and TensorFold publishes no macos-x86_64 archive.
@@ -608,7 +608,7 @@ test-uninstalled: ## After make uninstall: no installed launcher, shim or llgeni
 	@! ls "$(BIN)"/llgenie-engine-* >/dev/null 2>&1 || { echo "FAIL: make uninstall left llgenie-engine-* in $(BIN)"; exit 1; }
 	@if [ "$(HOST_OS)" = Darwin ]; then echo "==> uninstall removed every installed file (macOS: no container runtime was started)"; exit 0; fi
 	@test -z "$$($(RUNTIME) ps -q --filter name=^llgenie-)" || { echo "FAIL: an llgenie engine container is still running"; exit 1; }
-	@test -f scripts/llama_serve.py || { echo "FAIL: repo touched"; exit 1; }
+	@test -f scripts/llgenie_serve.py || { echo "FAIL: repo touched"; exit 1; }
 	@echo "==> uninstall removed every installed file, no engine container left"
 
 test-health-host: ## After make install: llgenie serves the 0.5B model through ~/bin/llama-server (the llama.cpp image) and answers "hi"
@@ -677,7 +677,7 @@ else
 endif
 
 test: ## Full fast suite (unit + install; containerized)
-	$(TEST_RUN) python -m pytest tests/test_llama_ai.py tests/test_install.py tests/test_lint_linefeeds.py tests/test_kv_quant_bytes.py -p no:cacheprovider -q
+	$(TEST_RUN) python -m pytest tests/test_llgenie_serve.py tests/test_install.py tests/test_lint_linefeeds.py tests/test_kv_quant_bytes.py tests/test_rename_llgenie_serve.py -p no:cacheprovider -q
 
 download-test-model: ## Fetch the lightweight (0.5B Q4 ~340MB) model into container ~/models/Qwen/8GB
 	$(TEST_RUN) python scripts/download_test_model.py

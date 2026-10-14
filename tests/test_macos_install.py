@@ -425,12 +425,12 @@ def test_linux_container_env_is_never_touched(tmp_path, monkeypatch):
 
 
 def test_install_and_llgenie_check_the_container_env_first():
-    """make install (install_engine_launchers) and llgenie (llama_serve: the llama-server
+    """make install (install_engine_launchers) and llgenie (llgenie_serve: the llama-server
     shim and first-use engine pulls) call the check before any container starts."""
 
     # Given the install script and the llgenie launcher source
     inst = (REPO / "scripts" / "install_engine_launchers.py").read_text()
-    serve = (REPO / "scripts" / "llama_serve.py").read_text()
+    serve = (REPO / "scripts" / "llgenie_serve.py").read_text()
 
     # When the start paths are read
     main = inst[inst.index("def main("):]

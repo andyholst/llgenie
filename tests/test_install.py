@@ -47,10 +47,10 @@ def test_launcher_exists_and_executable(launcher):
 
 
 def test_launcher_is_venv_based():
-    # The launcher execs llama_serve.py with the gguf venv python so gguf/numpy
+    # The launcher execs llgenie_serve.py with the gguf venv python so gguf/numpy
     # resolve without touching the env. Validate it references the venv.
     text = (BIN / "llgenie").read_text()
-    assert "scripts/llama_serve.py" in text, "launcher does not call llama_serve.py"
+    assert "scripts/llgenie_serve.py" in text, "launcher does not call llgenie_serve.py"
     assert "llama-gguf-tools/.venv" in text, "launcher does not use the gguf venv python"
 
 
@@ -107,16 +107,16 @@ def test_launcher_dry_run_picks_a_unique_model(launcher):
 # PATH-resolution failure mode (hermetic, no server needed)
 # ---------------------------------------------------------------------------
 def test_launcher_script_terminates_with_missing_server(monkeypatch):
-    """llama_ai.resolve_llama_server raises SystemExit when nothing is found.
+    """llgenie_serve.resolve_llama_server raises SystemExit when nothing is found.
 
     This is the hermetic proof of the 'terminate with a clear error' requirement
     (no real llama-server needed). For the subprocess-level proof we trust the
-    unit test in test_llama_ai.py; here we sanity-check the runnable script's
+    unit test in test_llgenie_serve.py; here we sanity-check the runnable script's
     resolve path imports cleanly and the module carries the requirement.
     """
-    import scripts.llama_serve as llama_ai  # module backing ~/bin/llgenie.py
-    assert hasattr(llama_ai, "resolve_llama_server")
+    import scripts.llgenie_serve as llgenie_serve  # module backing ~/bin/llgenie.py
+    assert hasattr(llgenie_serve, "resolve_llama_server")
     # document the resolve contract in the installed script text
-    script = (REPO_ROOT / "scripts/llama_serve.py").read_text()
+    script = (REPO_ROOT / "scripts/llgenie_serve.py").read_text()
     assert "resolve_llama_server" in script
     assert "llama-server binary not found" in script
