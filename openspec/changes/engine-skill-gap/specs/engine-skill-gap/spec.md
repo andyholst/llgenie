@@ -66,6 +66,8 @@ rendered artifact and the sync pull request.
 - **When** `matrix()` runs for each case and the gap is computed
 - **Then** no offered cell is that engine, the model is skipped with the engine named as the reason, and the gap lists the model under `models_never_offered`
 - **Test:** `tests/test_engine_skill_gap.py::test_no_permutation_ever_offers_an_engine_with_no_skill_and_the_model_is_named`
+- **Test:** `tests/test_pick_matrix_arch_perms.py::test_no_image_engine_is_never_offered_and_its_model_is_skipped_with_a_reason` (the existing hermetic grid, every arch x vram x ram)
+- **Test:** `tests/test_pick_full_registry.py::test_pick_matrix_offers_only_engines_the_gap_says_have_an_image` (the existing live-registry grid against the committed gap)
 
 #### Scenario: a model that also lists an unskilled engine is reported as such
 

@@ -42,6 +42,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
+import engine_skill_gap as gap_mod  # noqa: E402
+import engine_skills as es  # noqa: E402
 import hf_auth  # noqa: E402
 import model_engine_pick as mp  # noqa: E402
 
@@ -298,6 +300,47 @@ def test_pick_matrix_llgenie_cli_agrees_with_business_logic(p, tmp_path):
         assert "llgenie-engine-" in r.stdout, (mid, eng, arch, r.stdout[-1000:])
     else:
         assert r.returncode in (0, 1), (mid, eng, arch, r.stdout[-600:], r.stderr[-600:])
+
+
+def test_pick_matrix_offers_only_engines_the_gap_says_have_an_image():
+    """The LIVE permutation grid and `data/engine-skill-gap.json` agree (issue #229):
+    an engine the gap says has no image is never offered on any architecture, and a model
+    the gap lists as one no engine can offer never produces a cell — it is SKIPPED with a
+    named reason instead of vanishing from the list."""
+
+    # Given the real registry, the real skills, the dated decisions and the live grid
+    registry = mp.load_registry(str(REGISTRY))
+    g = gap_mod.gap(registry, es.load_skills(), es.load_unsupported())
+    image_ids = {info["id"] for info in _ENGINE_IDS.values() if info["variants"]}
+    no_image = sorted(n for n, info in _ENGINE_IDS.items() if not info["variants"])
+
+    # When the matrix runs for every architecture at 24 GB / 64 GB
+    offered, skipped = set(), set()
+    for arch in ARCHES:
+        res = _live_matrix(24, 64, arch)
+        for row in res["permutations"]:
+            offered |= {(cell["engine"]["id"], arch) for cell in row["engines"]}
+        skipped |= {s["model"] for s in res["skipped"]}
+
+    # Then nothing the gap calls image-less is ever offered
+    assert {eid for eid, _arch in offered} <= image_ids, no_image
+    assert all(g["engines"][name]["variants"] == [] for name in no_image)
+
+    # And every model the gap says no engine can offer is skipped on every architecture,
+    # never in the offer and never silently absent
+    fits = {m["id"] for m in real_models()
+            if mp._num(m["vram_tier"]) <= mp.card_class_gb(24)}
+    never = {m["id"] for m in g["models_never_offered"]}
+    assert never <= skipped or not never, (never, sorted(skipped))
+    assert not (never & {eid for eid, _a in offered})
+    assert never <= fits, (sorted(never), sorted(fits))
+
+    # And every model within the card is either offered or skipped with a reason
+    for arch in ARCHES:
+        res = _live_matrix(24, 64, arch)
+        seen = {r["model"]["id"] for r in res["permutations"]} | {s["model"] for s in res["skipped"]}
+        assert seen == fits, arch
+        assert all(s["why"] for s in res["skipped"]), arch
 
 
 def _url_exists(url: str) -> bool:

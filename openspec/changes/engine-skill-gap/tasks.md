@@ -6,7 +6,7 @@
 - [x] 4. Makefile: `engine-skill-gap`, `render-engine-skill-gap`, `check-engine-skill-gap`, `spawn-engine-skill-issues`; `ci-unit` gates on the decisions file instead of `ALLOW_UNSKILLED=1`
 - [x] 5. `data/engine-skill-gap.json` is rendered and committed
 - [x] 6. `registry-sync.yml` renders/commits the per-engine gap, carries it in the PR body, and spawns one tracking issue per NEW unskilled engine with `issues: write`
-- [x] 7. `tests/test_engine_skill_gap.py` covers the gap, the gate, the spawn, the per-engine list and the (arch, vram, ram) permutation drop; the existing registry-sync tests are updated to the decisions file
+- [x] 7. `tests/test_engine_skill_gap.py` covers the gap, the gate, the spawn, the per-engine list and the (arch, vram, ram) permutation drop; the existing registry-sync tests are updated to the decisions file, and the two existing permutation grids (`test_pick_matrix_arch_perms.py`, `test_pick_full_registry.py`) lock that no image-less engine is ever offered and that a model no engine can offer is skipped, named
 - [x] 8. `tests/test_engine_skill_gap.py` is named in `make test-unit`, and `make lint` passes
 - [x] 9. README documents the decisions file, the gap report, the gate and the spawned work item
 - [x] 10. Issue #229 body reflects the wiring as implemented (options 1 and 2 landed: dated decisions + per-engine spawn)
