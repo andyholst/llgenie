@@ -175,6 +175,37 @@ def test_arch_drives_engine_selection(matrix_env, arch, vram=16, ram=32):
     assert has_sglang == (arch in ("cuda", "rocm")), f"{arch}: SGLang = {has_sglang}"
 
 
+# -- spec scenario: an engine with no image never produces a cell (issue #229) -----
+def test_no_image_engine_is_never_offered_and_its_model_is_skipped_with_a_reason(matrix_env):
+    """The (arch, vram, ram) grid offers an engine only when it has an image variant for
+    that arch: an upstream engine the registry lists with no skill (no image at all) never
+    produces a cell on any of the five architectures, and the model it alone serves is
+    SKIPPED with the engine named — never silently absent (issue #229)."""
+
+    # Given the stub engine registry (no entry at all for `MegaCapybara`) plus a model
+    # served only by it
+    reg = _mkreg()
+    reg["models"].append(_model("lost-3b", "Lost 3B", "8GB", "FakeOrg/NV-E2E-3B-GGUF",
+                                [("MegaCapybara", 110, "RTX 4090")], ["MegaCapybara"]))
+
+    # When every (arch, vram, ram) case is computed
+    for arch in ARCHES:
+        for vram in (8, 16, 32):
+            for ram in (16, 64):
+                res = mp.matrix(reg, vram, ram, arch)
+
+                # Then no offered cell is an engine without an image, on any arch
+                for row in res["permutations"]:
+                    for cell in row["engines"]:
+                        assert cell["engine"]["id"] in VARIANT_BY_ID, (arch, vram, ram)
+                        assert VARIANT_BY_ID[cell["engine"]["id"]], (arch, vram, ram)
+
+                # And the model the image-less engine alone serves is skipped, named
+                assert not any(r["model"]["id"] == "lost-3b" for r in res["permutations"])
+                why = next((s["why"] for s in res["skipped"] if s["model"] == "lost-3b"), None)
+                assert why and "MegaCapybara" in why, (arch, vram, ram, res["skipped"])
+
+
 # -- spec scenario: metal host never falls back to a cpu image -------------------
 def test_metal_never_offers_cpu_image(matrix_env, vram=16, ram=32):
     """On a Metal host only native Metal engine variants are offered — never the

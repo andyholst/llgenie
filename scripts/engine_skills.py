@@ -48,6 +48,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO_ROOT / "skills" / "engines"
 REGISTRY_URL = ("https://raw.githubusercontent.com/andyholst/trending-local-llms/"
                 "master/data/models.json")
+# The dated decisions that make an unshipped registry engine deliberate (issue #229).
+UNSUPPORTED_FILE = REPO_ROOT / "data" / "unsupported-engines.json"
+UNSUPPORTED_DECISIONS = ("not-shipped", "deferred")
 
 BACKENDS = ("cuda", "rocm", "vulkan", "metal", "cpu")
 SERVABLE = (True, False, "via")
@@ -1084,7 +1087,35 @@ def load_registry(src: str) -> dict:
     return data.get("engines", data)
 
 
-def validate(skills: dict, registry: dict | None = None, allow_unskilled: bool = False) -> list[str]:
+def load_unsupported(src: str | Path | None = None) -> dict:
+    """The dated decisions that make an unshipped registry engine deliberate
+    (issue #229): ``{"path": <file>, "engines": {name: {decision, decided, reason,
+    issue}}}``. `decision` is `not-shipped` (llgenie will not ship it) or `deferred`
+    (accepted as work, tracked by `issue`).
+
+    A missing or malformed entry raises SystemExit: a gap that is not accounted for
+    must never validate silently — that is the whole point of the file.
+    """
+    path = Path(src or UNSUPPORTED_FILE)
+    if not path.exists():
+        raise SystemExit(f"[engine-skills] no unsupported-engine decisions at {path} "
+                         "(issue #229: every registry engine llgenie does not ship needs a "
+                         "dated decision, or an open tracking issue)")
+    data = json.loads(path.read_text())
+    engines = data.get("engines")
+    if not isinstance(engines, dict):
+        raise SystemExit(f"[engine-skills] {path}: 'engines' must be an object")
+    for name, e in engines.items():
+        for k in ("decision", "decided", "reason"):
+            if not e.get(k):
+                raise SystemExit(f"[engine-skills] {path}: {name!r} lacks {k}")
+        if e["decision"] not in UNSUPPORTED_DECISIONS:
+            raise SystemExit(f"[engine-skills] {path}: {name!r} decision must be one of "
+                             f"{list(UNSUPPORTED_DECISIONS)}, got {e['decision']!r}")
+    return {"path": str(path), "engines": engines}
+
+
+def validate(skills: dict, registry: dict | None = None, unsupported: dict | None = None) -> list[str]:
     errors = []
     for sid, s in skills.items():
         where = f"{sid} ({s.get('_path')})"
@@ -1179,11 +1210,23 @@ def validate(skills: dict, registry: dict | None = None, allow_unskilled: bool =
             errors.append(f"{where}: {exc}")
     if registry is not None:
         engines = {s.get("engine") for s in skills.values()}
+        # The weekly registry sync carries every engine upstream lists, including
+        # engines llgenie does not ship (no skill, no params, no image). rank_engines
+        # drops them, so a model served only by them silently leaves the trend offer.
+        # Such an engine is tolerated ONLY when it is a dated decision in the
+        # unsupported-engines file (issue #229): "deliberately not shipped" is a
+        # decision, "no skill and nobody decided" is a new, unresolved engine.
+        decisions = (unsupported or {}).get("engines") or {}
+        where = (unsupported or {}).get("path") or str(UNSUPPORTED_FILE)
         for name in registry:
-            # The weekly registry sync keeps upstream engines llgenie does not ship.
-            # rank_engines drops them (no image). They are not a failed sync.
-            if name not in engines and not allow_unskilled:
+            if name in engines:
+                continue
+            if unsupported is None:
                 errors.append(f"registry engine {name!r} has no skill (add skills/engines/<id>/SKILL.md)")
+            elif name not in decisions:
+                errors.append(f"registry engine {name!r} has no skill and no dated decision in {where} "
+                              f"(new and unresolved, issue #229): add skills/engines/<id>/SKILL.md or "
+                              f"record the decision (make engine-skill-gap)")
         for sid, s in skills.items():
             if s.get("engine") not in registry:
                 errors.append(f"{sid}: engine {s.get('engine')!r} is not a key in the registry engines{{}}")
@@ -1216,8 +1259,10 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--json", action="store_true")
     v = sub.add_parser("validate")
     v.add_argument("--registry", default=None, help="models.json path or URL (default: none)")
-    v.add_argument("--allow-unskilled", action="store_true",
-                   help="do not fail when the registry names an engine with no skill")
+    v.add_argument("--unsupported", default=None,
+                   help="the dated decisions that make an unshipped registry engine deliberate "
+                        "(data/unsupported-engines.json, issue #229). Without it every registry "
+                        "engine with no skill is an error.")
     for name in ("plan", "check", "install", "detect"):
         p = sub.add_parser(name)
         p.add_argument("id")
@@ -1257,7 +1302,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "validate":
         reg = load_registry(a.registry) if a.registry else None
-        errors = validate(skills, reg, allow_unskilled=a.allow_unskilled)
+        unsupported = load_unsupported(a.unsupported) if a.unsupported else None
+        errors = validate(skills, reg, unsupported)
         for e in errors:
             print(f"[skills-validate] {e}", file=sys.stderr)
         print(f"[skills-validate] {len(skills)} skills, "

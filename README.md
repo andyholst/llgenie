@@ -223,17 +223,37 @@ make check-quant-catalog  # CI: fail if the committed quant catalog differs from
 make render-trend-list-matrix  # rewrite tests/fixtures/trend-list-matrix.json: the trending
                               # list for every arch x vram x ram, from `llgenie --matrix`
 make check-trend-list-matrix   # CI: fail if that file differs from a fresh matrix() call
+make render-engine-skill-gap   # rewrite data/engine-skill-gap.json: the per-engine list (status,
+                               # image variants, the models each engine is the top engine for,
+                               # per arch) + the models no engine can offer
+make check-engine-skill-gap    # CI gate: fail on a registry engine with no skill and no dated
+                               # decision, a stale decision, or a stale rendered file
+make engine-skill-gap          # show that gap (shipped / known-unsupported / NEW-unresolved)
+make spawn-engine-skill-issues # open one tracking issue per NEW unskilled engine (the sync does this)
 ```
 
 The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
-Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`) and
-the trend-list matrix (`make render-trend-list-matrix`), and opens a PR when any
-of those files changed. The matrix fixture is the review of the new list: one
-block per architecture, card size, and RAM size, in README order, with the
-server `llgenie --matrix` would put first. A sync that updates `data/models.json`
-and leaves the fixture stale fails `make test-unit`. An upstream engine with no llgenie skill is
-left out of the startup list (no image) and does not fail that job
-(`make skills-validate REGISTRY=data/models.json ALLOW_UNSKILLED=1`). The
+Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`), the
+trend-list matrix (`make render-trend-list-matrix`) and the per-engine gap
+(`make render-engine-skill-gap`), and opens a PR when any of those files changed.
+The matrix fixture is the review of the new list: one block per architecture, card
+size, and RAM size, in README order, with the server `llgenie --matrix` would put
+first. A sync that updates `data/models.json` and leaves the fixture stale fails
+`make test-unit`.
+
+An upstream engine with no llgenie skill is left out of the startup list (no
+image). That omission has to be a **decision**: `data/unsupported-engines.json`
+records, per engine, `decision` (`not-shipped` | `deferred`), the `decided` date,
+a `reason` and the tracking `issue` — 8 engines are recorded today
+(`make engine-skill-gap` prints them, `make render-engine-skill-gap` writes the
+per-engine view into `data/engine-skill-gap.json`). An engine upstream adds with
+no skill and no entry is **new and unresolved**: `make check-engine-skill-gap`
+fails naming it, and the sync opens one tracking issue per new engine, so the gap
+is a linkable work item instead of a log line. `data/engine-skill-gap.json` also
+names the models no engine can offer at all, so a model cannot vanish from the
+list unnoticed. `make skills-validate REGISTRY=data/models.json
+UNSUPPORTED=data/unsupported-engines.json` tolerates the recorded decisions per
+engine and still fails on an undecided one. The
 `engine-bump` workflow runs on its **own** cron (weekly,
 Monday `23 6 * * 1`, separate from the registry sync) and pins every engine skill
 to the latest upstream commit, opening a PR per changed engine (issue #107):

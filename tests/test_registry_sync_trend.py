@@ -103,44 +103,53 @@ def test_october_5_fixture_ranks_qwen38_27b_on_sglang():
     assert best["Qwen3.8-Flash-Next 125B"] == "Strata"
 
 
-def test_allow_unskilled_omits_unknown_engines_and_still_requires_our_skills():
-    """A registry engine with no skill fails the strict check and not the sync check."""
+def test_a_dated_decision_omits_an_unknown_engine_and_dropping_ours_is_still_an_error():
+    """A registry engine with no skill fails the strict check; with a dated decision in
+    data/unsupported-engines.json (issue #229) it is tolerated, and an engine llgenie
+    DOES ship can never be dropped."""
 
     # Given the October 5 engines plus one name no skill covers, and a copy that drops vLLM
     base = es.load_registry(str(BEFORE_MODELS))
     skills = es.load_skills()
+    unsupported = es.load_unsupported(REPO / "data" / "unsupported-engines.json")
     extra = {**base, "MegaCapybara": {"backend": "CUDA", "url": "https://example.invalid"}}
     dropped = {name: spec for name, spec in base.items() if name != "vLLM"}
 
     # When both registries are validated
     strict = es.validate(skills, extra)
-    loose = es.validate(skills, extra, allow_unskilled=True)
-    missing_ours = es.validate(skills, dropped, allow_unskilled=True)
+    decided = es.validate(skills, extra, unsupported)
+    missing_ours = es.validate(skills, dropped, unsupported)
 
     # Then only the strict run names MegaCapybara, and dropping our engine is still an error
     assert any("MegaCapybara" in err and "has no skill" in err for err in strict)
-    assert not any("has no skill" in err for err in loose)
-    assert loose == []
+    assert not any("has no skill" in err for err in decided)
+    assert decided == []
     assert any("vLLM" in err and "not a key" in err for err in missing_ours)
 
+    # And an engine with no skill AND no decision is named as new and unresolved
+    unresolved = es.validate(skills, {**base, "NobodyDecidedThis": {"backend": "CUDA"}}, unsupported)
+    assert any("NobodyDecidedThis" in err and "no dated decision" in err for err in unresolved)
 
-def test_registry_sync_workflow_is_weekly_and_allows_unskilled_engines():
-    """The sync job is weekly, uses the owner token, and does not touch skills."""
+
+def test_registry_sync_workflow_is_weekly_and_accounts_for_unskilled_engines():
+    """The sync job is weekly, uses the owner token, and never touches skills/*. It
+    reports the unskilled-engine gap instead of loosening validation (#229)."""
 
     # Given the registry-sync workflow
     text = WORKFLOW.read_text()
     doc = yaml.safe_load(text)
     steps = doc["jobs"]["sync"]["steps"]
     opening = next(step for step in steps if "pr create" in step.get("run", ""))
-    validate = next(step for step in steps if "skills-validate" in step.get("run", ""))
 
     # When its schedule and its pull-request step are read
     # PyYAML parses the bare workflow key `on` as boolean true.
     cron = re.search(r'cron:\s*"([^"]+)"', text).group(1)
 
-    # Then it is Monday 05:17 UTC, allows unskilled upstream engines, and commits the registry files
+    # Then it is Monday 05:17 UTC, accounts for the unshipped engines (a report + one
+    # tracking issue per new one), and commits the registry files
     assert cron == "17 5 * * 1"
-    assert "ALLOW_UNSKILLED=1" in validate["run"]
+    assert "ALLOW_UNSKILLED" not in text
+    assert "make engine-skill-gap" in text and "spawn-engine-skill-issues" in text
     assert "secrets.BUMP_TOKEN" in yaml.dump(opening)
     for path in ("data/models.json", "data/trending-README.md",
                  "data/trending-quant-catalog.json", "tests/fixtures/trending-quant-catalog.json",
@@ -217,9 +226,17 @@ def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_syn
     assert raw > after_by["qwen3.8-27b"][4]
     assert any(e["engine"] in no_skill and mp._num(e.get("tps")) == raw for e in qwen["engines"])
 
-    # And the sync validate accepts that registry while the strict validate names the gap
+    # And the dated decisions accept that registry while the strict validate names the gap.
+    # A LIVE registry may carry an engine upstream added after the decisions were dated:
+    # that must be reported as undecided (new and unresolved, #229) and must be the ONLY
+    # kind of error — never a loosened pass, never an unrelated failure.
     registry = es.load_registry(str(dest))
-    assert es.validate(skills, registry, allow_unskilled=True) == []
+    decisions = es.load_unsupported(REPO / "data" / "unsupported-engines.json")
+    undecided = sorted(set(registry) - set(decisions["engines"])
+                       - {s.get("engine") for s in skills.values()})
+    decided = es.validate(skills, registry, decisions)
+    assert [e for e in decided if "no dated decision" not in e] == [], decided
+    assert {n for n in undecided if any(n in e for e in decided)} == set(undecided), decided
     strict = es.validate(skills, registry)
     assert strict and all("has no skill" in err for err in strict)
     for name in no_skill:
@@ -320,12 +337,14 @@ def test_rank_follows_the_given_vram_ram_and_arch(live_sync):
     assert all(m["id"] not in at_48 for m in big)
 
 
-def test_allow_unskilled_cli_exits_zero_on_the_october_5_fixture():
-    """`make skills-validate ALLOW_UNSKILLED=1` is this command."""
+def test_skills_validate_cli_with_the_decisions_exits_zero_on_the_october_5_fixture():
+    """`make skills-validate REGISTRY=<file> UNSUPPORTED=data/unsupported-engines.json` is
+    this command (issue #229: one path — the decisions file, not a loose global flag)."""
 
     # Given the October 5 registry, which our skills already cover
     cmd = [sys.executable, str(REPO / "scripts" / "engine_skills.py"), "validate",
-           "--registry", str(BEFORE_MODELS), "--allow-unskilled"]
+           "--registry", str(BEFORE_MODELS),
+           "--unsupported", str(REPO / "data" / "unsupported-engines.json")]
 
     # When the validator CLI runs
     result = subprocess.run(cmd, capture_output=True, text=True)

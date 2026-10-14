@@ -1,0 +1,878 @@
+{
+  "generated_utc": "2026-10-13T14:31:40Z",
+  "registry_engines": 24,
+  "skills": 16,
+  "shipped": [
+    "DFlash2",
+    "ExLlamaV3 (ROCm fork)",
+    "FreeToken",
+    "LiteRT",
+    "MLX",
+    "MLX-fast (Bonsai 2)",
+    "Ollama",
+    "SGLang",
+    "Strata",
+    "TensorFold",
+    "TensorRT-LLM",
+    "WebLLM",
+    "llama.cpp",
+    "llama.cpp (LaurentZuijdwijk fork)",
+    "llama.cpp (PrismML fork)",
+    "vLLM"
+  ],
+  "imageless_skills": [
+    "DFlash2",
+    "ExLlamaV3 (ROCm fork)",
+    "MLX-fast (Bonsai 2)",
+    "WebLLM"
+  ],
+  "known_unsupported": [
+    {
+      "engine": "ExLlamaV3",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream is a quantization/inference library whose OpenAI API comes from a separate server (TabbyAPI), so there is no first-party server to image; llgenie ships the ExLlamaV3 ROCm-fork engine instead.",
+      "issue": 229
+    },
+    {
+      "engine": "MegaCapybara",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Closed-source binaries (upstream says the source comes later) behind an interactive launcher, scoped to one model on one card (Qwen3.8-27B on an RTX 5090): there is no source, release tree or image to build from.",
+      "issue": 229
+    },
+    {
+      "engine": "Project Maya",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash) engine + dashboard built on Strata, installed by a native setup script with no container image; llgenie already ships the Strata engine for that family.",
+      "issue": 229
+    },
+    {
+      "engine": "glm-flash-lite",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash EXL3) offload engine for one 24 GB card, built on SGLang + ExLlamaV3 - both of which llgenie already ships; a skill for it would duplicate two engines for one model.",
+      "issue": 229
+    },
+    {
+      "engine": "llama.cpp (LlamAmpere fork)",
+      "decision": "not-shipped",
+      "decided": "2026-10-14",
+      "reason": "A llama.cpp fork tuned for Ampere cards only: llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks, and a third fork is a permanent maintenance burden for a per-card gain.",
+      "issue": 229
+    },
+    {
+      "engine": "mlx-serve",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream ships native binaries only (a brew cask plus linux CUDA tarballs), no container image, and it is an all-in-one app overlapping the MLX engine llgenie already serves natively.",
+      "issue": 229
+    },
+    {
+      "engine": "oMLX",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon server delivered as a macOS menu-bar app: Metal cannot run in a container, so it would need a native Metal skill, and llgenie already ships the `mlx` engine for that platform.",
+      "issue": 229
+    },
+    {
+      "engine": "omlx-exl3",
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Not a server at all: a patch set that adds ExLlamaV3's EXL3 format to oMLX (pinned to one commit, single author) and rides oMLX's own server on Apple Silicon.",
+      "issue": 229
+    }
+  ],
+  "unresolved": [],
+  "stale_decisions": [],
+  "models_never_offered": [],
+  "models_touching_unsupported": [
+    {
+      "id": "qwen3.8-27b",
+      "name": "Qwen3.8-27B",
+      "engines": [
+        "DFlash2",
+        "MLX",
+        "MegaCapybara",
+        "SGLang",
+        "TensorFold",
+        "llama.cpp",
+        "llama.cpp (LaurentZuijdwijk fork)",
+        "llama.cpp (LlamAmpere fork)",
+        "mlx-serve",
+        "oMLX",
+        "omlx-exl3",
+        "vLLM"
+      ],
+      "unsupported": [
+        "MegaCapybara",
+        "llama.cpp (LlamAmpere fork)",
+        "mlx-serve",
+        "oMLX",
+        "omlx-exl3"
+      ]
+    },
+    {
+      "id": "qwen3.8-flash-next-125b",
+      "name": "Qwen3.8-Flash-Next 125B",
+      "engines": [
+        "ExLlamaV3 (ROCm fork)",
+        "MLX",
+        "Strata",
+        "TensorFold",
+        "llama.cpp",
+        "mlx-serve",
+        "oMLX"
+      ],
+      "unsupported": [
+        "mlx-serve",
+        "oMLX"
+      ]
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM-5.3-Flash",
+      "engines": [
+        "ExLlamaV3",
+        "FreeToken",
+        "Project Maya",
+        "TensorFold",
+        "glm-flash-lite"
+      ],
+      "unsupported": [
+        "ExLlamaV3",
+        "Project Maya",
+        "glm-flash-lite"
+      ]
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "name": "Qwen3.6-35B-A3B",
+      "engines": [
+        "FreeToken",
+        "llama.cpp",
+        "mlx-serve"
+      ],
+      "unsupported": [
+        "mlx-serve"
+      ]
+    }
+  ],
+  "engines": {
+    "DFlash2": {
+      "status": "shipped",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/z-lab/dflash",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "served_via": [
+        "sglang",
+        "vllm"
+      ]
+    },
+    "ExLlamaV3": {
+      "status": "known-unsupported",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/turboderp-org/exllamav3",
+      "image": false,
+      "variants": [],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream is a quantization/inference library whose OpenAI API comes from a separate server (TabbyAPI), so there is no first-party server to image; llgenie ships the ExLlamaV3 ROCm-fork engine instead.",
+      "issue": 229
+    },
+    "ExLlamaV3 (ROCm fork)": {
+      "status": "shipped",
+      "backends": [
+        "ROCM"
+      ],
+      "url": "https://github.com/CarouselAether/rocm_exl3",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-flash-next-125b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "exllamav3-rocm"
+    },
+    "FreeToken": {
+      "status": "shipped",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/FlashML-org/FreeToken",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm"
+      ],
+      "models": [
+        "glm-5.3-flash",
+        "qwen3.6-35b-a3b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "glm-5.3-flash",
+          "qwen3.6-35b-a3b"
+        ],
+        "rocm": [
+          "glm-5.3-flash"
+        ],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "freetoken"
+    },
+    "LiteRT": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / METAL"
+      ],
+      "url": "https://github.com/google-ai-edge/LiteRT",
+      "image": true,
+      "variants": [
+        "cpu",
+        "metal"
+      ],
+      "models": [
+        "gemma-4-e2b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "gemma-4-e2b"
+        ],
+        "rocm": [
+          "gemma-4-e2b"
+        ],
+        "vulkan": [
+          "gemma-4-e2b"
+        ],
+        "metal": [
+          "gemma-4-e2b"
+        ],
+        "cpu": [
+          "gemma-4-e2b"
+        ]
+      },
+      "id": "litert"
+    },
+    "MLX": {
+      "status": "shipped",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/ml-explore/mlx",
+      "image": true,
+      "variants": [
+        "cuda",
+        "cpu",
+        "metal"
+      ],
+      "models": [
+        "qwen3.8-27b",
+        "qwen3.8-flash-next-125b",
+        "qwen3-4b",
+        "ornith-1.5",
+        "ravenx-conjecture-qwen3-8b-mlx"
+      ],
+      "top_engine": {
+        "cuda": [
+          "qwen3-4b",
+          "ornith-1.5",
+          "ravenx-conjecture-qwen3-8b-mlx"
+        ],
+        "rocm": [
+          "qwen3-4b",
+          "ornith-1.5",
+          "ravenx-conjecture-qwen3-8b-mlx"
+        ],
+        "vulkan": [
+          "qwen3.8-flash-next-125b",
+          "qwen3-4b",
+          "ornith-1.5",
+          "ravenx-conjecture-qwen3-8b-mlx"
+        ],
+        "metal": [
+          "qwen3-4b",
+          "ornith-1.5",
+          "ravenx-conjecture-qwen3-8b-mlx"
+        ],
+        "cpu": [
+          "qwen3.8-flash-next-125b",
+          "qwen3-4b",
+          "ornith-1.5",
+          "ravenx-conjecture-qwen3-8b-mlx"
+        ]
+      },
+      "id": "mlx"
+    },
+    "MLX-fast (Bonsai 2)": {
+      "status": "shipped",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/Layr-Labs/mlxfast-bonsai2-27b-engine",
+      "image": false,
+      "variants": [],
+      "models": [
+        "bonsai-2-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "served_via": [
+        "tensorfold",
+        "mlx"
+      ]
+    },
+    "MegaCapybara": {
+      "status": "known-unsupported",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/perkel666/MegaCapybara",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Closed-source binaries (upstream says the source comes later) behind an interactive launcher, scoped to one model on one card (Qwen3.8-27B on an RTX 5090): there is no source, release tree or image to build from.",
+      "issue": 229
+    },
+    "Ollama": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / ROCM / CPU / METAL"
+      ],
+      "url": "https://github.com/ollama/ollama",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm",
+        "vulkan",
+        "cpu",
+        "metal"
+      ],
+      "models": [
+        "qwen3-14b",
+        "qwen3-8b",
+        "deepseek-r1-1.5b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "qwen3-14b",
+          "qwen3-8b",
+          "deepseek-r1-1.5b"
+        ],
+        "rocm": [
+          "qwen3-8b",
+          "deepseek-r1-1.5b"
+        ],
+        "vulkan": [
+          "qwen3-8b",
+          "deepseek-r1-1.5b"
+        ],
+        "metal": [
+          "qwen3-14b",
+          "qwen3-8b",
+          "deepseek-r1-1.5b"
+        ],
+        "cpu": [
+          "qwen3-14b",
+          "qwen3-8b",
+          "deepseek-r1-1.5b"
+        ]
+      },
+      "id": "ollama"
+    },
+    "Project Maya": {
+      "status": "known-unsupported",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/mw00/project-maya",
+      "image": false,
+      "variants": [],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash) engine + dashboard built on Strata, installed by a native setup script with no container image; llgenie already ships the Strata engine for that family.",
+      "issue": 229
+    },
+    "SGLang": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / ROCM"
+      ],
+      "url": "https://github.com/sgl-project/sglang",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm"
+      ],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "sglang"
+    },
+    "Strata": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / ROCM"
+      ],
+      "url": "https://github.com/Niko1221/Strata",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm"
+      ],
+      "models": [
+        "qwen3.8-flash-next-125b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "qwen3.8-flash-next-125b"
+        ],
+        "rocm": [
+          "qwen3.8-flash-next-125b"
+        ],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "strata"
+    },
+    "TensorFold": {
+      "status": "shipped",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/ashhart/TensorFold",
+      "image": true,
+      "variants": [
+        "cuda",
+        "metal"
+      ],
+      "models": [
+        "qwen3.8-27b",
+        "qwen3.8-flash-next-125b",
+        "glm-5.3-flash",
+        "nemotron-3.5-lightning-30b-a3b",
+        "cyber-frost-3.8-mlx"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [
+          "qwen3.8-27b",
+          "qwen3.8-flash-next-125b",
+          "glm-5.3-flash"
+        ],
+        "cpu": []
+      },
+      "id": "tensorfold"
+    },
+    "TensorRT-LLM": {
+      "status": "shipped",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/NVIDIA/TensorRT-LLM",
+      "image": true,
+      "variants": [
+        "cuda"
+      ],
+      "models": [],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "tensorrt-llm"
+    },
+    "WebLLM": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / METAL"
+      ],
+      "url": "https://github.com/mlc-ai/web-llm",
+      "image": false,
+      "variants": [],
+      "models": [],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      }
+    },
+    "glm-flash-lite": {
+      "status": "known-unsupported",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/sybil-solutions/glm-flash-lite",
+      "image": false,
+      "variants": [],
+      "models": [
+        "glm-5.3-flash"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash EXL3) offload engine for one 24 GB card, built on SGLang + ExLlamaV3 - both of which llgenie already ships; a skill for it would duplicate two engines for one model.",
+      "issue": 229
+    },
+    "llama.cpp": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / ROCM / CPU / METAL"
+      ],
+      "url": "https://github.com/ggml-org/llama.cpp",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm",
+        "vulkan",
+        "cpu",
+        "metal"
+      ],
+      "models": [
+        "qwen3.8-27b",
+        "qwen3.8-flash-next-125b",
+        "qwen3.6-35b-a3b",
+        "qwen3-14b",
+        "qwen2.5-1.5b-instruct",
+        "kolibri-1",
+        "qwen3.8-35b-a3b",
+        "gemma-4-12b",
+        "gemma-3-4b",
+        "qwen3-30b-a3b",
+        "muse-glimmer-30b",
+        "qwen-3.6-27b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "qwen2.5-1.5b-instruct",
+          "kolibri-1",
+          "qwen3.8-35b-a3b",
+          "gemma-4-12b",
+          "gemma-3-4b",
+          "qwen3-30b-a3b",
+          "muse-glimmer-30b",
+          "qwen-3.6-27b"
+        ],
+        "rocm": [
+          "qwen3.6-35b-a3b",
+          "qwen3-14b",
+          "qwen2.5-1.5b-instruct",
+          "kolibri-1",
+          "qwen3.8-35b-a3b",
+          "gemma-4-12b",
+          "gemma-3-4b",
+          "qwen3-30b-a3b",
+          "muse-glimmer-30b",
+          "qwen-3.6-27b"
+        ],
+        "vulkan": [
+          "qwen3.6-35b-a3b",
+          "qwen3-14b",
+          "qwen2.5-1.5b-instruct",
+          "kolibri-1",
+          "qwen3.8-35b-a3b",
+          "gemma-4-12b",
+          "gemma-3-4b",
+          "qwen3-30b-a3b",
+          "muse-glimmer-30b",
+          "qwen-3.6-27b"
+        ],
+        "metal": [
+          "qwen3.6-35b-a3b",
+          "qwen2.5-1.5b-instruct",
+          "kolibri-1",
+          "qwen3.8-35b-a3b",
+          "gemma-4-12b",
+          "gemma-3-4b",
+          "qwen3-30b-a3b",
+          "muse-glimmer-30b",
+          "qwen-3.6-27b"
+        ],
+        "cpu": [
+          "qwen3.6-35b-a3b",
+          "qwen2.5-1.5b-instruct",
+          "kolibri-1",
+          "qwen3.8-35b-a3b",
+          "gemma-4-12b",
+          "gemma-3-4b",
+          "qwen3-30b-a3b",
+          "muse-glimmer-30b",
+          "qwen-3.6-27b"
+        ]
+      },
+      "id": "llama.cpp"
+    },
+    "llama.cpp (LaurentZuijdwijk fork)": {
+      "status": "shipped",
+      "backends": [
+        "ROCM"
+      ],
+      "url": "https://github.com/HaddarD/llama.cpp",
+      "image": true,
+      "variants": [
+        "rocm",
+        "vulkan",
+        "cpu"
+      ],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [
+          "qwen3.8-27b"
+        ],
+        "vulkan": [
+          "qwen3.8-27b"
+        ],
+        "metal": [],
+        "cpu": []
+      },
+      "id": "llama.cpp-laurentzuijdwijk"
+    },
+    "llama.cpp (LlamAmpere fork)": {
+      "status": "known-unsupported",
+      "backends": [
+        "CUDA"
+      ],
+      "url": "https://github.com/JakeATX/llamAmpere",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "not-shipped",
+      "decided": "2026-10-14",
+      "reason": "A llama.cpp fork tuned for Ampere cards only: llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks, and a third fork is a permanent maintenance burden for a per-card gain.",
+      "issue": 229
+    },
+    "llama.cpp (PrismML fork)": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / CPU / METAL"
+      ],
+      "url": "https://github.com/PrismML-Eng/llama.cpp",
+      "image": true,
+      "variants": [
+        "vulkan",
+        "cpu",
+        "metal"
+      ],
+      "models": [
+        "bonsai-2-27b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "bonsai-2-27b"
+        ],
+        "rocm": [
+          "bonsai-2-27b"
+        ],
+        "vulkan": [
+          "bonsai-2-27b"
+        ],
+        "metal": [
+          "bonsai-2-27b"
+        ],
+        "cpu": [
+          "bonsai-2-27b"
+        ]
+      },
+      "id": "llama.cpp-prism"
+    },
+    "mlx-serve": {
+      "status": "known-unsupported",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/ddalcu/mlx-serve",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b",
+        "qwen3.8-flash-next-125b",
+        "qwen3.6-35b-a3b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream ships native binaries only (a brew cask plus linux CUDA tarballs), no container image, and it is an all-in-one app overlapping the MLX engine llgenie already serves natively.",
+      "issue": 229
+    },
+    "oMLX": {
+      "status": "known-unsupported",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/jundot/omlx",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b",
+        "qwen3.8-flash-next-125b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon server delivered as a macOS menu-bar app: Metal cannot run in a container, so it would need a native Metal skill, and llgenie already ships the `mlx` engine for that platform.",
+      "issue": 229
+    },
+    "omlx-exl3": {
+      "status": "known-unsupported",
+      "backends": [
+        "METAL"
+      ],
+      "url": "https://github.com/daig/omlx-exl3",
+      "image": false,
+      "variants": [],
+      "models": [
+        "qwen3.8-27b"
+      ],
+      "top_engine": {
+        "cuda": [],
+        "rocm": [],
+        "vulkan": [],
+        "metal": [],
+        "cpu": []
+      },
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Not a server at all: a patch set that adds ExLlamaV3's EXL3 format to oMLX (pinned to one commit, single author) and rides oMLX's own server on Apple Silicon.",
+      "issue": 229
+    },
+    "vLLM": {
+      "status": "shipped",
+      "backends": [
+        "CUDA / ROCM"
+      ],
+      "url": "https://github.com/vllm-project/vllm",
+      "image": true,
+      "variants": [
+        "cuda",
+        "rocm",
+        "cpu"
+      ],
+      "models": [
+        "qwen3.8-27b",
+        "llama-3.1-8b"
+      ],
+      "top_engine": {
+        "cuda": [
+          "qwen3.8-27b",
+          "llama-3.1-8b"
+        ],
+        "rocm": [
+          "llama-3.1-8b"
+        ],
+        "vulkan": [
+          "llama-3.1-8b"
+        ],
+        "metal": [],
+        "cpu": [
+          "qwen3.8-27b",
+          "llama-3.1-8b"
+        ]
+      },
+      "id": "vllm"
+    }
+  }
+}

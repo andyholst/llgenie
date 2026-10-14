@@ -1,0 +1,70 @@
+{
+  "note": "Registry engines llgenie deliberately ships no skill/image for (issue #229). registry-sync carries every engine upstream lists, and rank_engines drops an engine with no image, so an engine with no skill must be a DECISION here - dated and reasoned - or it is not a decision at all. An engine in data/models.json with no skills/engines/<id>/SKILL.md and no entry here is NEW AND UNRESOLVED: `make check-engine-skill-gap` fails naming it, and the weekly registry-sync opens one tracking issue for it. Entries for an engine that later ships a skill, or that upstream stops listing, are stale: delete them (the gate fails until you do). Each reason below was read from the upstream repository's own README/releases, not inferred from the registry's one-line auto-registration note.",
+  "decided_utc": "2026-10-14",
+  "engines": {
+    "mlx-serve": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream ships native binaries only (a brew cask plus linux CUDA tarballs), no container image, and it is an all-in-one app overlapping the MLX engine llgenie already serves natively.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/ddalcu/mlx-serve"
+    },
+    "oMLX": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon server delivered as a macOS menu-bar app: Metal cannot run in a container, so it would need a native Metal skill, and llgenie already ships the `mlx` engine for that platform.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/jundot/omlx"
+    },
+    "omlx-exl3": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Not a server at all: a patch set that adds ExLlamaV3's EXL3 format to oMLX (pinned to one commit, single author) and rides oMLX's own server on Apple Silicon.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/daig/omlx-exl3"
+    },
+    "ExLlamaV3": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Upstream is a quantization/inference library whose OpenAI API comes from a separate server (TabbyAPI), so there is no first-party server to image; llgenie ships the ExLlamaV3 ROCm-fork engine instead.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/turboderp-org/exllamav3"
+    },
+    "MegaCapybara": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Closed-source binaries (upstream says the source comes later) behind an interactive launcher, scoped to one model on one card (Qwen3.8-27B on an RTX 5090): there is no source, release tree or image to build from.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/perkel666/MegaCapybara"
+    },
+    "llama.cpp (LlamAmpere fork)": {
+      "decision": "not-shipped",
+      "decided": "2026-10-14",
+      "reason": "A llama.cpp fork tuned for Ampere cards only: llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks, and a third fork is a permanent maintenance burden for a per-card gain.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/JakeATX/llamAmpere"
+    },
+    "glm-flash-lite": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash EXL3) offload engine for one 24 GB card, built on SGLang + ExLlamaV3 - both of which llgenie already ships; a skill for it would duplicate two engines for one model.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/sybil-solutions/glm-flash-lite"
+    },
+    "Project Maya": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "A single-model (GLM-5.3-Flash) engine + dashboard built on Strata, installed by a native setup script with no container image; llgenie already ships the Strata engine for that family.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/mw00/project-maya"
+    }
+  }
+}
