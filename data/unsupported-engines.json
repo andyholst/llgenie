@@ -1,0 +1,70 @@
+{
+  "note": "Registry engines llgenie deliberately ships no skill/image for (issue #229). registry-sync carries every engine upstream lists, and rank_engines drops an engine with no image, so an engine with no skill must be a DECISION here - dated and reasoned - or it is not a decision at all. An engine in data/models.json with no skills/engines/<id>/SKILL.md and no entry here is NEW AND UNRESOLVED: `make check-engine-skill-gap` fails naming it, and the weekly registry-sync opens one tracking issue for it. Entries for an engine that later ships a skill, or that upstream stops listing, are stale: delete them (the gate fails until you do).",
+  "decided_utc": "2026-10-14",
+  "engines": {
+    "mlx-serve": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon MLX server: Metal cannot run in a container, so it needs a native Metal skill, not an image. llgenie's Metal path already covers MLX with the `mlx` skill.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/ddalcu/mlx-serve"
+    },
+    "oMLX": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon MLX server: Metal-only, so it needs a native Metal skill rather than a container image, and the `mlx` skill already serves MLX natively.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/jundot/omlx"
+    },
+    "omlx-exl3": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Apple-Silicon server for ExL3 quants: Metal-only, so it needs a native Metal skill; the format is not one llgenie ships an image for yet.",
+      "issue": 229,
+      "backend": "Metal",
+      "upstream": "https://github.com/daig/omlx-exl3"
+    },
+    "ExLlamaV3": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "The upstream family llgenie already ships, as the ROCm fork skill `exllamav3-rocm`; the upstream CUDA build has no pinned release and no verified install recipe yet.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/turboderp-org/exllamav3"
+    },
+    "MegaCapybara": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/perkel666/MegaCapybara"
+    },
+    "llama.cpp (LlamAmpere fork)": {
+      "decision": "not-shipped",
+      "decided": "2026-10-14",
+      "reason": "llgenie ships stock llama.cpp plus the Prism and LaurentZuijdwijk forks; a third llama.cpp fork is not added unless it offers something the two shipped forks do not.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/JakeATX/llamAmpere"
+    },
+    "glm-flash-lite": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/sybil-solutions/glm-flash-lite"
+    },
+    "Project Maya": {
+      "decision": "deferred",
+      "decided": "2026-10-14",
+      "reason": "Auto-registered CUDA server with no pinned release to build an image from: it needs a verified upstream build recipe before it can become a skill.",
+      "issue": 229,
+      "backend": "CUDA",
+      "upstream": "https://github.com/mw00/project-maya"
+    }
+  }
+}
