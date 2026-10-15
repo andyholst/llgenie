@@ -1,0 +1,135 @@
+# The rebase bot (issue #246): keep every open PR on the latest `main`, ONE PR per run.
+#
+# Triggered every 6 hours (and by hand). AGENTS.md's own rule is that a PR behind `main` cannot
+# be merged, so a stale PR silently blocks itself until someone rebases it — that is what this
+# bot exists to prevent. It runs as ONE job that always runs: the decision ("which PR, or none")
+# lives in scripts/rebase_bot_sweep.py, because issue #107 forbids a CI job that can skip itself.
+#
+# A conflict is handed to the agent, whose resolution is checked structurally (a recipe's TAB,
+# the wiring guard, lint) before the branch is force-with-leased back to the PR's OWN head remote
+# — a fork PR is pushed to the fork, never to `origin`. It never merges, and a resolution it
+# cannot finish is reported on the PR and left for a human.
+#
+# Coexisting with the other bots (they all touch the same branches):
+#   * the fix-bot pushes a plain fast-forward commit and THIS bot pushes with --force-with-lease,
+#     so if the two ever collide the second one is REJECTED loudly — nothing is clobbered in
+#     either direction. This bot additionally skips any PR whose checks are IN FLIGHT, which is
+#     what makes a collision unlikely in the first place;
+#   * a merely-BEHIND PR that is RED is left to the fix-bot (a rebase fixes staleness, not a
+#     failing test); a CONFLICTED PR is taken even when red, because the rebase is the
+#     precondition for anything else to be fixable;
+#   * the implementer cannot be raced: it pushes a NEW branch and only then opens the PR, so a PR
+#     it created is fresh (never BEHIND/DIRTY) by construction;
+#   * the refiner never touches a branch at all (comments and a label only).
+name: rebase-bot
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"   # every 6 hours, at an odd minute
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: rebase-bot
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Owner / collaborator trigger guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          OWNER="${REPO%%/*}"
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+
+  rebase:
+    needs: guard
+    runs-on: ubuntu-latest
+    # One agent-resolved rebase plus the structural checks. Same 120-minute budget as the other
+    # bots: nothing inside bounds a round (no step timeout, no per-command cap).
+    timeout-minutes: 120
+    env:
+      NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: "Checkout (full history - a rebase needs it, and the PAT re-triggers CI on push)"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BUMP_TOKEN }}
+
+      - name: Add the fork remote when the PR's head lives there
+        # The PAT arrives as an env var, never interpolated into the script (issue #283: a
+        # `${{ secrets.X }}` inside a `run:` block is a value in a log waiting to happen).
+        env:
+          BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git remote -v
+          git remote add fork "https://x-access-token:${BUMP_TOKEN}@github.com/andyholst/llgenie.git" 2>/dev/null || \
+            git remote set-url fork "https://x-access-token:${BUMP_TOKEN}@github.com/andyholst/llgenie.git"
+
+      - name: Which ONE PR needs rebasing (decision in code, never a skipping job)
+        id: sweep
+        env:
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
+        run: |
+          set +e
+          out=$(make rebase-bot-sweep REPO="$REPO" OWN_FORK=andyholst)
+          echo "$out"
+          action=$(printf '%s\n' "$out" | sed -n 's/^action=//p' | tail -1)
+          pr=$(printf '%s\n' "$out" | sed -n 's/^pr=//p' | tail -1)
+          branch=$(printf '%s\n' "$out" | sed -n 's/^head_branch=//p' | tail -1)
+          headrepo=$(printf '%s\n' "$out" | sed -n 's/^head_repo=//p' | tail -1)
+          echo "action=${action:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "headrepo=$headrepo" >> "$GITHUB_OUTPUT"
+          [ "$action" = "rebase" ] && echo "go=true" >> "$GITHUB_OUTPUT" || echo "go=false" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Prove the JEV engine is active — the rebase does not start without it (issue #238)
+        run: make agent-jev-preflight NERVE_REQUIRE=1
+
+      - name: Rebase it (agent resolves a conflict; verified, then force-with-leased to its own remote)
+        id: go
+        if: steps.sweep.outputs.go == 'true'
+        env:
+          PR: ${{ steps.sweep.outputs.pr }}
+          HEAD_BRANCH: ${{ steps.sweep.outputs.branch }}
+          HEAD_REPO: ${{ steps.sweep.outputs.headrepo }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set +e
+          make rebase-bot REPO="$REPO" PR="$PR" HEAD_BRANCH="$HEAD_BRANCH" HEAD_REPO="$HEAD_REPO"
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Fail loudly when a picked PR was not rebased
+        if: always() && steps.sweep.outputs.go == 'true' && steps.go.outputs.rc != '0'
+        run: |
+          echo "::error::rebase-bot picked #${{ steps.sweep.outputs.pr }} but did not rebase it (make rebase-bot rc=${{ steps.go.outputs.rc }}); the PR carries the reason."
+          exit 1

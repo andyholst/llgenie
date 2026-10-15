@@ -29,11 +29,19 @@ DONE_RE = re.compile(
 
 CLAIM_RE = re.compile(
     r"<!--\s*bot-claim:\s*(?P<bot>[A-Za-z0-9_.-]+)\s+(?P<at>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
-    r"\s+(?P<work>refine|implement)\s*-->")
+    r"\s+(?P<work>refine|implement|fix|rebase)\s*-->")
 
-#: The bots, as they name themselves in a claim.
+#: The bots, as they name themselves in a claim. The first two work on issues, the last two on PRs;
+#: the name is the workflow's bot name (`fix-bot.yml` -> `fix-bot`) so a claim reads as the thing a
+#: maintainer sees in the Actions tab.
 REFINER = "refiner"
 IMPLEMENTER = "implementer"
+FIXER = "fix-bot"
+REBASER = "rebase-bot"
+
+#: How long a PR claim holds. The fix-bot's own budget is 180 minutes (three rounds of check + agent
+#: repair), so a reader must age a claim by at least that or the rebase-bot walks in mid-repair.
+PR_CLAIM_TTL = dt.timedelta(hours=4)
 
 
 #: A `done` marker means one of these. Kept as words, because the difference decides whether the
@@ -55,13 +63,18 @@ def done_comment(bot: str, when: dt.datetime, what: str = "done") -> str:
     return f"<!-- bot-done: {bot} {stamp} {what} -->"
 
 
-def claim_comment(bot: str, work: str, when: dt.datetime) -> str:
-    """The claim to post BEFORE starting, so another bot can see the issue is taken."""
-    assert work in ("refine", "implement"), work
+def claim_comment(bot: str, work: str, when: dt.datetime, ttl: dt.timedelta | None = None) -> str:
+    """The claim to post BEFORE starting, so another bot can see the subject is taken.
+
+    `ttl` shapes the sentence a human reads (the lock itself is the marker plus the TTL the READER
+    applies): a repair says four hours because that is how long it may run, a rebase says minutes.
+    """
+    assert work in ("refine", "implement", "fix", "rebase"), work
     stamp = when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hours = int((ttl or CLAIM_TTL).total_seconds() // 3600) or 1
     return (f"<!-- bot-claim: {bot} {stamp} {work} -->\n"
-            f"`{bot}` is {work}ing this issue now. Other bots: leave it alone for the next "
-            f"{int(CLAIM_TTL.total_seconds() // 3600)} hours.")
+            f"`{bot}` is {work}ing this now. Other bots: leave it alone for the next "
+            f"{hours} hour{'s' if hours != 1 else ''}.")
 
 
 def claims(comments: list[dict] | None) -> list[dict]:

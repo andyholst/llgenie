@@ -363,6 +363,30 @@ picks ONE verdict, written to `triage.md`:
 
 An issue labelled `agent:refined` or `agent:closed` is never picked again, so neither verdict can
 loop, and neither opens a PR — so it does not consume the 3/day PR cap.
+make rebase-bot-sweep     # which ONE open PR needs rebasing (BEHIND/DIRTY against main), with the reason for every pass-over
+make rebase-bot PR=<n> HEAD_BRANCH=<b> HEAD_REPO=<owner>   # rebase it (agent resolves a conflict), verify, push --force-with-lease
+**Every open PR is kept on `main` by a third bot** (`rebase-bot.yml`, issue #246), because
+AGENTS.md's rule is that a branch behind `main` cannot be merged — so a stale PR blocks itself.
+It runs **every 6 hours** and handles **ONE PR per run**, oldest first:
+- `make rebase-bot-sweep` decides *which* PR — an open, non-draft PR against `main` whose merge
+  state is `BEHIND` (a clean rebase) or `DIRTY` (conflicts). It states a reason for every PR it
+  passes over, skips a PR it already rebased **today** (its own marker comment is the record, so
+  no label is invented and no PR is rebased twice in a day), and skips a fork it cannot push to.
+- **It keeps out of the other bots' way.** It skips a PR with checks **in flight** (rebasing
+  would cancel the run deciding it), and leaves a **red, merely-behind** PR to the fix-bot — a
+  rebase fixes staleness, not a failing test — while still taking a **conflicted** red PR, since a
+  rebase is the precondition for fixing anything on it. The implementer cannot be raced (it pushes
+  a new branch and only then opens the PR, so its PRs are fresh by construction), and the refiner
+  never touches a branch. If the rebase bot and the fix-bot ever do collide, the fix-bot's plain
+  fast-forward push and this bot's `--force-with-lease` mean the **second one is rejected loudly**:
+  nothing is clobbered in either direction.
+- `make rebase-bot` does the work: rebase with `rerere` **off** (a recorded resolution from an
+  earlier rebase is not trustworthy), and on a conflict hand the stopped rebase to Hermes with what
+  each side means plus the hard rules (preserve both sides, never weaken a test, keep a recipe's
+  TAB). Then it checks the result structurally — `make -n ci-unit` parses, `make lint`, and the
+  wiring guard — and pushes with **`--force-with-lease`** to the **PR's own head remote**: a fork
+  PR goes to the fork, never to `origin`. It never merges, and a resolution it cannot finish is
+  reported on the PR and left for a human.
 
 - **Cap**: at 3 PRs already opened today (counted from GitHub with
   `gh search prs --author <bot> --created ">=today 00:00Z"`), the run logs

@@ -6,6 +6,8 @@ sync so no real network or push happens.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import os
 import subprocess
 import sys
@@ -66,12 +68,17 @@ class TestPrIsBehind:
 
 
 class TestMain:
-    def _patch(self, monkeypatch, prs, sync_result=True):
+    def _patch(self, monkeypatch, prs, sync_result=True, comments=None, post_ok=True):
         monkeypatch.setattr(ebr, "open_engine_bump_prs", lambda: prs)
         monkeypatch.setattr(ebr, "pr_is_behind", lambda pr: pr.get("_behind", True))
         synced = []
         monkeypatch.setattr(ebr, "sync_pr_with_main",
                             lambda pr, repo, run_git, log: synced.append(pr["number"]) or sync_result)
+        # the claim protocol: the comments are read through the same api(), the claim goes out
+        # through post() (issues #279/#285). Both are patched so no test touches the network.
+        monkeypatch.setattr(ebr, "api", lambda path: comments if comments is not None else [])
+        self.posted = []
+        monkeypatch.setattr(ebr, "post", lambda path, body: self.posted.append((path, body)) or post_ok)
         return synced
 
     def test_dry_run_reports_without_pushing(self, monkeypatch, capsys):
@@ -104,6 +111,37 @@ class TestMain:
         # Then it is skipped (not synced)
         assert rc == 0
         assert synced == [], f"up-to-date PR must be skipped: {synced}"
+
+    def test_it_claims_the_pr_before_rebasing_and_releases_it_after(self, monkeypatch, capsys):
+        """Issue #279: the engine-bump PRs belong to another bot, so this one announces itself
+        before it force-pushes, and says when it has finished."""
+        synced = self._patch(monkeypatch, [_pr(202, behind=True)])
+        monkeypatch.setattr(ebr.sys, "argv", ["engine_bump_rebase.py"])
+        rc = ebr.main()
+        assert rc == 0 and synced == [202]
+        kinds = [b["body"].split()[1] for _path, b in self.posted]
+        assert kinds == ["bot-claim:", "bot-done:"], self.posted
+        assert "engine-bump-rebase" in self.posted[0][1]["body"]
+        assert self.posted[0][0] == "/issues/202/comments"
+
+    def test_a_pr_another_bot_holds_is_left_alone(self, monkeypatch, capsys):
+        """A claim on the PR means someone is on it: a fresh one blocks, whatever bot posted it."""
+        when = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        held = [{"body": f"<!-- bot-claim: fix-bot {when} fix -->\n`fix-bot` is fixing this now.",
+                 "createdAt": when, "author": {"login": "github-actions[bot]"}}]
+        synced = self._patch(monkeypatch, [_pr(202, behind=True)], comments=held)
+        monkeypatch.setattr(ebr.sys, "argv", ["engine_bump_rebase.py"])
+        rc = ebr.main()
+        assert rc == 0 and synced == [], f"a held PR must not be synced: {synced}"
+        assert self.posted == [], self.posted
+        assert "claimed by fix-bot" in capsys.readouterr().out
+
+    def test_it_does_not_touch_a_pr_whose_claim_it_could_not_post(self, monkeypatch, capsys):
+        """Fail closed: an unannounced push is exactly what the protocol exists to prevent."""
+        synced = self._patch(monkeypatch, [_pr(202, behind=True)], post_ok=False)
+        monkeypatch.setattr(ebr.sys, "argv", ["engine_bump_rebase.py"])
+        rc = ebr.main()
+        assert rc == 0 and synced == [], f"no claim, no push: {synced}"
 
     def test_no_open_prs_is_clean(self, monkeypatch, capsys):
         # Given no open engine-bump PRs
