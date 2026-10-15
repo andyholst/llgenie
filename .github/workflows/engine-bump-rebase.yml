@@ -1,4 +1,4 @@
-name: engine-bump-rebase
+name: engine-bump-rebase — rebases every open engine-bump PR onto the latest main
 
 # Issue #208: keep the open engine-bump PRs (chore/engine-bump-*, created by
 # engine-bump.yml, issue #107) current with the latest `main`. The engine-bump
@@ -15,10 +15,22 @@ name: engine-bump-rebase
 # not GITHUB_TOKEN (issue #136): a push made with GITHUB_TOKEN starts no
 # workflows, and the PAT is what engine-bump.yml already uses to write the
 # upstream branches.
+# Trigger surface: schedule daily 05:41 UTC (`41 5 * * *`), and workflow_dispatch (owner/collaborator; `dry=true`
+#                  prints the plan and pushes nothing).
+# Flow: guard (owner/collaborator/bot, BEFORE any secret is read) -> make engine-bump-rebase
+#       (scripts/engine_bump_rebase.py: every open `chore/engine-bump-*` PR that is behind `main`
+#       gets the latest `main` forward-merged in and is force-with-lease pushed).
+# Never: never merges a PR, never pushes to `main`, never touches a branch whose merge conflicts —
+#        a conflicting PR is left for a human.
 on:
   schedule:
     - cron: "41 5 * * *"   # daily: 05:41 UTC (unique minute, issue #275)
   workflow_dispatch:
+    inputs:
+      dry:
+        description: "print the PRs it would rebase and push nothing (no branch is touched)"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -73,7 +85,17 @@ jobs:
       - name: Rebase open engine-bump PRs onto the latest main
         env:
           GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
+          DRY_INPUT: ${{ inputs.dry }}   # empty on a scheduled run; "true"/"false" by hand
         run: |
           git config user.name "$(gh api user --jq .login)"
           git config user.email "$(gh api user --jq .id)+$(gh api user --jq .login)@users.noreply.github.com"
-          python3 scripts/engine_bump_rebase.py
+          # `dry` is OFF unless a dispatcher ticks the box: the daily cron REBASES each open
+          # chore/engine-bump-* PR onto main and force-with-lease pushes it. Spelled out rather than
+          # folded into one `${{ ... }}` so the mode this run took is readable in the log.
+          if [ "${DRY_INPUT}" = "true" ]; then
+            echo "==> DRY RUN: printing the PRs that would be rebased; nothing is pushed"
+            make engine-bump-rebase DRY=1
+          else
+            echo "==> REAL REBASE: forward-merging main into each open engine-bump PR and pushing it back"
+            make engine-bump-rebase
+          fi
