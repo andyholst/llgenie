@@ -33,6 +33,36 @@ PROVIDER="${PROVIDER:-typesafe}"
 
 say()  { echo "[jev-preflight] $*"; }
 warn() { echo "[jev-preflight] WARNING: $*" >&2; }
+
+# The key value must never reach a terminal, a log or a step summary. THIS script never prints it,
+# but the provider's own smoke does the printing for step 4 — so its output is filtered before it
+# goes anywhere: the exact key, and anything key-shaped, come out as REDACTED. The key is passed to
+# the filter through the environment (not argv, so it cannot show up in a process list).
+redact() {
+  _JEV_KEY="${key:-}" "${HERMES_NERVE_PYTHON:-python3}" -c '
+import os, re, sys
+data = sys.stdin.read()
+key = os.environ.get("_JEV_KEY") or ""
+if key:
+    data = data.replace(key, "***REDACTED-KEY***")
+sys.stdout.write(re.sub(r"(?:hf_|sk-|sk_|jev-)[A-Za-z0-9_-]{12,}", "***REDACTED-KEY-SHAPE***", data))
+'
+}
+
+# A workflow run must be READABLE at a glance: the layer never blocks a run, so a silent "JEV off"
+# would only exist in the log. In Actions, annotate the run (the annotation shows on the run and
+# the job summary) and write the outcome to the step summary. Locally this stays plain text.
+#   `::warning`  the layer is unavailable — this run makes more LLM calls than it needs to
+#   `::notice`   the layer is ready — this run is JEV-assisted
+annotate() {   # annotate <warning|notice> <message>
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "::$1 title=JEV decision layer::$2"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      printf '**JEV decision layer (%s):** %s\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+    fi
+  fi
+}
+
 #: The ONE failure mode: the caller asked to verify the image (`NERVE_REQUIRE=1`).
 require() {
   if [ "${NERVE_REQUIRE:-}" = "1" ]; then
@@ -42,6 +72,7 @@ require() {
   warn "$*"
   warn "JEV is INACTIVE for this run: the agent still works, autonomously — expect more LLM"
   warn "calls and more mistakes for a reviewer to catch than a JEV-assisted run would make."
+  annotate warning "JEV is INACTIVE for this run: $* — the agent continues, with more LLM calls and more mistakes than a JEV-assisted run."
   say "continuing without JEV (the bots never stop for this)"
   exit 0
 }
@@ -125,8 +156,9 @@ else
   fi
   say "provider smoke: ${PROVIDER} (model $(hermes config get plugins.entries.nerve.settings.typesafe_model 2>/dev/null || echo '?'), no token echoed)"
   if ! out="$(HERMES_NERVE_PROVIDER="$PROVIDER" "${HERMES_NERVE_PYTHON:-python3}" "$smoke" 2>&1)"; then
-    # The plugin redacts the key, and so do we: only the provider's own message is shown.
-    printf '%s\n' "$out" | tail -n 5 >&2
+    # The plugin redacts the key, and so do we: the smoke's own message is shown through the
+    # filter, so a provider that echoes the credential cannot leak it into the run log.
+    printf '%s\n' "$out" | tail -n 5 | redact >&2
     require "the ${PROVIDER} provider did not answer a live decision call"
   fi
   printf '%s\n' "$out" | grep -q '"ok": true' \
@@ -136,3 +168,4 @@ fi
 
 say "JEV ready: nerve enabled in ${HERMES_HOME}, provider ${PROVIDER}, token supplied at run time only"
 say "the agent runs with the decision layer available — fewer LLM calls, fewer mistakes"
+annotate notice "JEV is ON for this run: nerve enabled (${HERMES_HOME}), provider ${PROVIDER} answered a real decision call."

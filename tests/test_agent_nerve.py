@@ -425,6 +425,123 @@ def test_the_preflight_reads_an_existing_home_env_and_never_echoes_it(tmp_path):
     assert not LEAKED_KEY.search(r.stdout + r.stderr), "the preflight must never echo the key"
 
 
+def test_the_run_annotates_whether_jev_is_on_or_off(tmp_path):
+    """A non-blocking layer must still be VISIBLE: the run says JEV is ON, or warns that it is off.
+
+    The layer never stops a run, so "JEV was inactive" would otherwise only exist in a log nobody
+    reads. In Actions the preflight annotates the run (`::notice` / `::warning`, which also reach
+    the job summary) and writes the outcome to the step summary; locally it stays plain text.
+    """
+
+    # Given a key-less home and a home that has everything the layer needs
+    home = _home(tmp_path)
+    off = _run(PREFLIGHT, {"HERMES_HOME": str(home), "NERVE_GATE_SKIP_PROVIDER": "1",
+                           "GITHUB_ACTIONS": "true"})
+
+    # When the preflight reports in a workflow
+    # Then the off case carries a GitHub warning, and still exits 0
+    assert off.returncode == 0, off.stderr
+    assert "::warning title=JEV decision layer::" in off.stdout + off.stderr
+    assert "JEV is INACTIVE for this run" in off.stderr
+
+    # And the same home, with a plugin that answers, carries a notice instead
+    smoke = home / "plugins" / "nerve" / "scripts"
+    smoke.mkdir(parents=True, exist_ok=True)
+    (smoke / "live_api_smoke.py").write_text('print(\'{"ok": true}\')\n')
+    on = _run(PREFLIGHT, _with_fake_hermes(tmp_path, HERMES_HOME=str(home),
+                                          FAKE_HERMES_STATUS="enabled",
+                                          GITHUB_ACTIONS="true",
+                                          **{KEY_VAR: "jev-okkey-0123456789abcdef"}))
+    assert on.returncode == 0, on.stderr
+    assert "::notice title=JEV decision layer::" in on.stdout
+    assert "JEV is ON for this run" in on.stdout
+
+    # And outside Actions there is no annotation noise, only the plain lines
+    plain = _run(PREFLIGHT, {"HERMES_HOME": str(home), "NERVE_GATE_SKIP_PROVIDER": "1"})
+    assert "::warning" not in plain.stdout + plain.stderr
+    assert "::notice" not in plain.stdout + plain.stderr
+
+    # And the step summary is written when Actions offers one
+    summary = tmp_path / "summary.md"
+    _run(PREFLIGHT, {"HERMES_HOME": str(home), "NERVE_GATE_SKIP_PROVIDER": "1",
+                     "GITHUB_ACTIONS": "true", "GITHUB_STEP_SUMMARY": str(summary)})
+    assert "JEV decision layer" in summary.read_text()
+
+
+def test_the_workflow_comments_describe_the_layer_it_actually_runs():
+    """A comment that says "fails the run when the key is missing" is a lie about an autonomous bot."""
+
+    for wf in ("issue-bot.yml", "fix-bot.yml"):
+        text = (WORKFLOWS / wf).read_text()
+        assert "fewer llm calls" in text.lower(), f"{wf} must say what the layer is for"
+        assert "never stop" in text or "never stops" in text, f"{wf} must say it never blocks a run"
+        for stale in ("fails the run when it is missing", "fails loudly instead of repairing",
+                      "so the bot never implements an issue unsupervised"):
+            assert stale not in text, f"{wf} still describes the old gate contract: {stale!r}"
+
+
+def test_the_key_value_itself_never_reaches_stdout_or_stderr(tmp_path):
+    """The literal value must never be printed — not on success, not in a home's `.env`, not when
+    the provider misbehaves and echoes it back.
+
+    The key-shaped regex the other tests use proves nothing about a real credential's value, so this
+    test passes a distinctive one and greps the WHOLE output for that exact string.
+    """
+    secret = "jev-NEVER-PRINT-THIS-0123456789abcdef"
+
+    # Given a home with a plugin whose smoke FAILS and PRINTS THE KEY (the worst case: a provider
+    # that echoes the credential in its error text)
+    home = _home(tmp_path)
+    smoke = home / "plugins" / "nerve" / "scripts"
+    smoke.mkdir(parents=True, exist_ok=True)
+    (smoke / "live_api_smoke.py").write_text(
+        "import os, sys\n"
+        "print('auth failed for key ' + os.environ.get('TYPESAFE_API_KEY', ''))\n"
+        "sys.exit(1)\n")
+
+    # When the preflight runs with the key in the environment
+    r = _run(PREFLIGHT, _with_fake_hermes(tmp_path, HERMES_HOME=str(home),
+                                         FAKE_HERMES_STATUS="enabled", **{KEY_VAR: secret}))
+
+    # Then the run continued, showed the provider's message, and the VALUE is nowhere in the output
+    assert r.returncode == 0, r.stderr
+    assert "auth failed" in r.stderr, "the provider's own message must still be visible"
+    assert secret not in r.stdout + r.stderr, "the provider key leaked into the run log"
+    assert "***REDACTED-KEY***" in r.stderr, "the leak was not reported as redacted"
+
+    # And the same holds when the key already lives in the home's `.env` and the provider answers
+    home2 = _home(tmp_path / "second")
+    (home2 / ".env").write_text(f"{KEY_VAR}={secret}\n")
+    smoke2 = home2 / "plugins" / "nerve" / "scripts"
+    smoke2.mkdir(parents=True, exist_ok=True)
+    (smoke2 / "live_api_smoke.py").write_text('print(\'{"ok": true}\')\n')
+    r2 = _run(PREFLIGHT, _with_fake_hermes(tmp_path / "second", HERMES_HOME=str(home2),
+                                          FAKE_HERMES_STATUS="enabled"))
+    assert r2.returncode == 0, r2.stderr
+    assert secret not in r2.stdout + r2.stderr, "the key from the home's .env leaked into the output"
+
+
+def test_no_message_interpolates_the_key_value():
+    """Static check on the source: no printing line expands the value — a future edit that echoes
+    `$key` fails here. Reading it (`key="${key%...}"`) and writing it to the home's `.env` (a
+    redirect to a file, mode 600) are fine; naming the VARIABLE in a message is fine; putting the
+    VALUE into stdout/stderr is not.
+    """
+    text = PREFLIGHT.read_text()
+    printing = re.compile(r"^(say|warn|echo|printf|annotate)\b")
+    for n, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("#") or not printing.match(stripped):
+            continue
+        if ">>" in stripped:
+            continue          # a redirect to a FILE (the home's .env, mode 600) is not output
+        assert not re.search(r"\$\{?key\b", stripped), f"line {n} prints the key value: {stripped}"
+
+    # And the one place a third party prints is filtered through the redactor
+    assert "| redact" in text, "the provider smoke's output must pass through the redactor"
+    assert "never printed" in text
+
+
 # ---------------------------------------------------------------------------
 # the wiring: the key travels at run time, and the scripts move the image tag
 # ---------------------------------------------------------------------------
