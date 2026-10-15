@@ -17,8 +17,12 @@ name: engine-bump-rebase
 # upstream branches.
 on:
   schedule:
-    - cron: "41 5 * * *"   # daily: 05:41 UTC (unique minute, issue #275)
+    - cron: "11 5 * * *"   # its own minute, shared with no other bot (#281, issue #275)
   workflow_dispatch:
+
+concurrency:
+  group: engine-bump-rebase
+  cancel-in-progress: false
 
 permissions:
   contents: write

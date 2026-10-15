@@ -253,7 +253,7 @@ there.
 
 
 The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
-Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`), the
+Monday 05:31 UTC — its own minute, see #281), regenerates the quant catalog (`make sync-quant-catalog`), the
 trend-list matrix (`make render-trend-list-matrix`) and the per-engine gap
 (`make render-engine-skill-gap`), and opens a PR when any of those files changed.
 The matrix fixture is the review of the new list: one block per architecture, card

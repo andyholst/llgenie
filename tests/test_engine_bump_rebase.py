@@ -122,7 +122,8 @@ class TestWorkflowYaml:
         text = wf.read_text()
         # Then it has a daily cron, checks out with BUMP_TOKEN, and runs the entrypoint
         # The minute moved with issue #275: every bot owns its own slot. It must still be DAILY.
-        assert "cron:" in text and "41 5 * * *" in text, "must have a daily cron on its own minute"
+        assert "cron:" in text and "11 5 * * *" in text, "must have a daily cron on its own minute"
+        assert "cron:" in text and "11 5 * * *" in text, "must have a daily cron"
         assert "secrets.BUMP_TOKEN" in text, "must use the owner PAT"
         assert "engine_bump_rebase.py" in text, "must run the rebase entrypoint"
         assert "workflow_dispatch" in text, "must allow manual dispatch"

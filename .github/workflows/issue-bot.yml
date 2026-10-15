@@ -24,7 +24,7 @@ on:
   issues:
     types: [labeled]
   schedule:
-    - cron: "23 6 * * *"   # daily 06:23 UTC (an odd minute; gets the agent a slot each day)
+    - cron: "31 6 * * *"   # its own minute, shared with no other bot (#281, issue #275)
   workflow_dispatch:
     inputs:
       issue_number:

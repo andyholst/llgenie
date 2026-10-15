@@ -32,7 +32,7 @@ on:
   # this workflow with that PR; the sibling repo's lesson is that a schedule is a safer
   # trigger than workflow_run for anything a bot can push to.
   schedule:
-    - cron: "17 * * * *"
+    - cron: "51 * * * *"   # its own minute, shared with no other bot (#281, issue #275)
   workflow_dispatch:
     inputs:
       pr_number:

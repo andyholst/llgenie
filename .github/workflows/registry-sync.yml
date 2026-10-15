@@ -12,12 +12,16 @@ name: registry-sync
 # and a push made with GITHUB_TOKEN starts no workflows.
 on:
   schedule:
-    - cron: "19 5 * * 1"   # Monday 05:19 UTC (unique minute, issue #275)
+    - cron: "19 5 * * 1"   # its own minute, shared with no other bot (#281, issue #275)
   workflow_dispatch:
 
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: registry-sync
+  cancel-in-progress: false
 
 permissions:
   contents: write
