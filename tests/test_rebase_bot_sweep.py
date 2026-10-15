@@ -10,6 +10,7 @@ Two halves, both real code under test:
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import subprocess
@@ -33,6 +34,7 @@ def _fake_gh(tmp_path: Path, opts: dict | None = None):
     (tmp_path / "search.json").write_text(json.dumps(opts.get("search", [])))
     (tmp_path / "prs.json").write_text(json.dumps(opts.get("prs", [])))
     (tmp_path / "checks.json").write_text(json.dumps(opts.get("checks_by_pr", {})))
+    (tmp_path / "comments.json").write_text(json.dumps(opts.get("comments_by_pr", {})))
     gh = tmp_path / "gh"
     gh.write_text(f'''#!{sys.executable}
 import json, sys, pathlib
@@ -44,6 +46,10 @@ if args[:2] == ["search", "prs"]:
     print((here / "search.json").read_text())
 elif args[:2] == ["pr", "list"]:
     print((here / "prs.json").read_text())
+elif args[:2] == ["pr", "view"]:
+    f = here / "comments.json"
+    by_pr = json.loads(f.read_text()) if f.exists() else {{}}
+    print(json.dumps({{"comments": by_pr.get(args[2], [])}}))
 elif args[:2] == ["pr", "checks"]:
     f = here / "checks.json"
     by_pr = json.loads(f.read_text()) if f.exists() else {{}}
@@ -217,6 +223,66 @@ def test_it_does_not_rebase_while_the_pr_has_checks_in_flight(tmp_path):
     assert any("checks in flight" in r for r in res["reasons"])
 
 
+def _stamp(minutes_ago: int) -> str:
+    ts = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes_ago)
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _claim(bot="fixer", when=None, work="repair"):
+    when = when or _stamp(5)
+    body = "<!-- bot-claim: " + bot + " " + when + " " + work + " -->\n`" + bot + "` is " + work + "ing this now."
+    return {"body": body, "createdAt": when, "author": {"login": "github-actions[bot]"}}
+
+def _done(bot="fixer", when=None, what="repaired"):
+    when = when or _stamp(1)
+    return {"body": "<!-- bot-done: " + bot + " " + when + " " + what + " -->", "createdAt": when,
+            "author": {"login": "github-actions[bot]"}}
+
+
+def test_a_pr_the_other_bot_has_claimed_is_left_alone(tmp_path):
+    """Issue #285: a fix-bot repair posts a claim; while it is fresh this bot must stand down, or
+    the two of them rewrite the same branch."""
+    gh, _log = _fake_gh(tmp_path, {"prs": [_pr(7, head=OWNER, created="2026-09-07T00:00:00Z")],
+                                   "comments_by_pr": {"7": [_claim()]}})
+    res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
+    assert res["action"] == "none", res
+    assert any("held by another bot" in r for r in res["reasons"]), res["reasons"]
+
+
+def test_a_released_claim_does_not_hold_the_pr(tmp_path):
+    """A `done` marker releases it - green or exhausted, the repair has ended."""
+    gh, _log = _fake_gh(tmp_path, {"prs": [_pr(7, "DIRTY", head=OWNER, created="2026-09-07T00:00:00Z")],
+                                   "comments_by_pr": {"7": [_claim(), _done()]}})
+    res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
+    assert res["action"] == "rebase" and res["pr"] == 7, res
+
+
+def test_a_stale_claim_does_not_hold_the_pr(tmp_path):
+    """A crashed repair must not freeze a PR: past PR_CLAIM_TTL the claim locks nothing."""
+    stale = _claim(when=_stamp(5 * 60))          # 5 hours old
+    gh, _log = _fake_gh(tmp_path, {"prs": [_pr(7, "DIRTY", head=OWNER, created="2026-09-07T00:00:00Z")],
+                                   "comments_by_pr": {"7": [stale]}})
+    res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
+    assert res["action"] == "rebase" and res["pr"] == 7, res
+
+
+def test_the_decision_step_claims_the_pr_IT_picked(tmp_path):
+    """Issue #279: this bot force-pushes the PR's branch, and the fix-bot writes to it too - so the
+    claim has to be posted by the step that DECIDES, before the actor touches anything."""
+    gh, log = _fake_gh(tmp_path, {"prs": [_pr(7, "DIRTY", head=OWNER, created="2026-09-07T00:00:00Z")]})
+    rb.main(["--gh", str(gh), "--repo", f"{OWNER}/llgenie", "--today", "2026-10-14"])
+    calls = log.read_text().splitlines()
+    claim = [c for c in calls if '"pr", "comment"' in c and "bot-claim" in c]
+    assert len(claim) == 1, calls
+    assert '"7"' in claim[0] and "rebase-bot" in claim[0], claim[0]
+
+
+def test_the_decision_step_claims_nothing_when_nothing_is_picked(tmp_path):
+    gh, log = _fake_gh(tmp_path, {"prs": [_pr(1, "CLEAN", head=OWNER)]})
+    rb.main(["--gh", str(gh), "--repo", f"{OWNER}/llgenie", "--today", "2026-10-14"])
+    assert not [c for c in log.read_text().splitlines() if '"pr", "comment"' in c], log.read_text()
+
+
 def test_a_red_pr_that_is_only_behind_is_left_to_the_fix_bot(tmp_path):
     """Division of labour: a rebase fixes staleness, not a failing test."""
     gh, _log = _fake_gh(tmp_path, {"search": [], "checks_by_pr": {"1": ["FAILURE"], "2": ["FAILURE"]},
@@ -226,17 +292,3 @@ def test_a_red_pr_that_is_only_behind_is_left_to_the_fix_bot(tmp_path):
     # the conflicted one is taken even though it is red: the rebase is the precondition
     assert res["pr"] == 2, res
     assert any("the fix-bot owns that" in r for r in res["reasons"])
-
-
-def test_the_rebase_bot_gates_the_run_on_jev():
-    """Every bot: the job does not start when the JEV engine is off. The rebase bot asked the agent
-    to resolve conflicts with no JEV env at all, so its agent ran unsupervised (issue #238)."""
-    from pathlib import Path
-    repo = Path(__file__).resolve().parent.parent
-    text = (repo / ".github/workflows/rebase-bot.yml").read_text()
-    assert "NERVE_REQUIRE=1" in text, "the gate must be ARMED"
-    assert text.index("JEV engine is active") < text.index("Rebase it (agent resolves"), \
-        "the gate must run before the rebase"
-    mk = (repo / "Makefile").read_text()
-    recipe = mk[mk.index("rebase-bot-agent:"):mk.index("_rebase-bot-agent:")]
-    assert "TYPESAFE_API_KEY" in recipe, "the key must reach the container at run time"

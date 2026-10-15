@@ -30,11 +30,19 @@ import argparse
 import json
 import re
 import subprocess
+import datetime as dt
 from datetime import datetime, timezone
+
+import bot_claims
 
 #: Marks this bot's own comments, so its records are found without inventing a label.
 MARKER = "rebase-bot"
 #: PRs one bot may rebase in a UTC day (each 6-hourly run handles one).
+#: How long this bot's own claim holds. A rebase is minutes, and its actor releases the claim from
+#: the comment it posts, so this is only the floor for a run that dies without a word - short on
+#: purpose: the readers age a claim by their own TTL and a crash must not freeze a PR for hours.
+REBASE_CLAIM_TTL = dt.timedelta(minutes=30)
+
 MAX_PER_DAY = 5
 #: Merge states that mean "this branch has to come back onto main".
 NEEDS = ("BEHIND", "DIRTY")
@@ -61,6 +69,15 @@ def rebased_today(gh: str, repo: str, today: str) -> list[int]:
         if re.search(rf"{MARKER}[^0-9]{{0,40}}{re.escape(today)}", body):
             done.append(pr["number"])
     return done
+
+
+def _comments(gh: str, repo: str, num: int) -> list[dict]:
+    """This PR's comments — where the claim protocol lives (scripts/bot_claims.py).
+
+    Asked for through `--json` alone: `gh` REFUSES `--comments` together with `--json`.
+    """
+    out = _gh(gh, ["pr", "view", str(num), "--repo", repo, "--json", "comments"])
+    return (json.loads(out or "{}") or {}).get("comments") or []
 
 
 def _checks(gh: str, repo: str, num: int) -> tuple[bool, bool]:
@@ -105,6 +122,15 @@ def sweep(gh: str, repo: str, today: str | None = None, max_per_day: int = MAX_P
         if state not in NEEDS:
             reasons.append(f"#{num} is {state or 'unknown'} against main"); continue
         # --- coexistence with the other bots: never invalidate a run, never race the fix-bot ---
+        # A claim is how the other bot says "I am on this branch" (issue #285): a fix-bot repair
+        # spends up to 180 minutes in the agent with nothing in flight and no commit yet, so the
+        # checks and the attempt counter both look idle. A claim from ANY other bot makes this PR
+        # theirs; a `done` marker releases it, and a claim older than PR_CLAIM_TTL is ignored.
+        held = bot_claims.occupied(_comments(gh, repo, num), bot_claims.REBASER,
+                                   ttl=bot_claims.PR_CLAIM_TTL)
+        if held:
+            reasons.append(f"#{num} is held by another bot: {held}")
+            continue
         running, red = _checks(gh, repo, num)
         if running:
             reasons.append(f"#{num} has checks in flight; rebasing now would cancel that run")
@@ -133,6 +159,16 @@ def main(argv=None) -> int:
     for r in res["reasons"]:
         print(f"[rebase-bot] pass-over: {r}")
     print(f"[rebase-bot] {res['reason']}")
+    if res["action"] == "rebase":
+        # CLAIM it here, in the decision step, BEFORE the actor force-pushes this branch
+        # (scripts/bot_claims.py, issues #279/#285). The fix-bot writes to the same branch, and
+        # `sweep()` above is what made sure nobody else holds it.
+        posted = _gh(a.gh, ["pr", "comment", str(res["pr"]), "--repo", a.repo, "--body",
+                            bot_claims.claim_comment(bot_claims.REBASER, "rebase",
+                                                     dt.datetime.now(dt.timezone.utc),
+                                                     ttl=REBASE_CLAIM_TTL)])
+        print(f"[rebase-bot] claimed #{res['pr']} for {bot_claims.REBASER} "
+              f"({int(REBASE_CLAIM_TTL.total_seconds() // 60)} min){'' if posted else ' — the comment did not post'}")
     print(f"action={res['action']}")
     for k in ("pr", "head_branch", "head_repo"):
         if res.get(k):

@@ -48,7 +48,14 @@ comment() {
   if [ -n "$DRY" ]; then
     echo "[rebase-bot] DRY: gh pr comment $PR --body <the outcome>"
   else
-    gh pr comment "$PR" --repo "$REPO" --body "$1" >/dev/null || echo "[rebase-bot] could not comment" >&2
+    # Every comment this bot posts ALSO releases its claim (scripts/bot_claims.py, issues #279/#285).
+    # The reader ages a claim by its own TTL (4h for a repair), so a run that ended has to say so -
+    # on every path, which is why the release lives in this one helper rather than at the exits.
+    local done_marker
+    done_marker=$(PYTHONPATH="$(dirname "$0")" python3 -c \
+      'import datetime as dt, bot_claims; print(bot_claims.done_comment(bot_claims.REBASER, dt.datetime.now(dt.timezone.utc), "rebased"))' 2>/dev/null)
+    gh pr comment "$PR" --repo "$REPO" --body "$1
+${done_marker}" >/dev/null || echo "[rebase-bot] could not comment" >&2
   fi
 }
 

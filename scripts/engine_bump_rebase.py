@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import subprocess
@@ -32,6 +33,11 @@ import urllib.request
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+
+import bot_claims  # noqa: E402  the shared claim protocol (issues #279/#285)
 
 from scripts.engine_bump_sync import (
     UPSTREAM_SLUG,
@@ -40,6 +46,11 @@ from scripts.engine_bump_sync import (
 )
 
 API = f"https://api.github.com/repos/{UPSTREAM_SLUG}"
+
+#: This bot, as the claim marker names it. It rebases PRs the ENGINE-BUMP bot opened, so it is a
+#: second writer on branches another bot owns: it claims each PR before it pushes and releases it
+#: when it is done (issues #279/#285, scripts/bot_claims.py).
+BOT = "engine-bump-rebase"
 
 
 def load_token() -> str:
@@ -61,6 +72,37 @@ def api(path: str) -> list | None:
             return json.loads(raw) if raw else None
     except Exception:
         return None  # fail closed: any API problem -> don't act
+
+
+def post(path: str, body: dict) -> bool:
+    """POST to the API (a claim is a comment). Fail closed: a claim that cannot be posted means this
+    bot must not touch the PR - an unannounced push is what the protocol exists to prevent."""
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(API + path, data=data, headers={**HEADER, "Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30):
+            return True
+    except Exception as exc:
+        log(f"    could not post to {path}: {exc}")
+        return False
+
+
+def held_by_another_bot(n: int) -> str | None:
+    """A reason to leave this PR alone, or None (scripts/bot_claims.py)."""
+    comments = api(f"/issues/{n}/comments")
+    return bot_claims.occupied(comments if isinstance(comments, list) else None, BOT,
+                               ttl=bot_claims.PR_CLAIM_TTL)
+
+
+def claim(n: int) -> bool:
+    return post(f"/issues/{n}/comments", {"body": bot_claims.claim_comment(
+        BOT, "rebase", dt.datetime.now(dt.timezone.utc), ttl=bot_claims.PR_CLAIM_TTL)})
+
+
+def release(n: int, ok: bool) -> None:
+    post(f"/issues/{n}/comments", {"body": bot_claims.done_comment(
+        BOT, dt.datetime.now(dt.timezone.utc), "rebased" if ok else "gave-up")})
 
 
 def open_engine_bump_prs() -> list:
@@ -105,11 +147,22 @@ def main() -> int:
         if not pr_is_behind(pr):
             log(f"  PR#{n} ({ref}): not behind main — skip")
             continue
+        held = held_by_another_bot(n)
+        if held:
+            log(f"  PR#{n} ({ref}): {held} — skip")
+            continue
         log(f"  PR#{n} ({ref}): behind main — rebasing onto the upstream main")
         if args.dry:
             log(f"    [dry] would forward-merge the upstream main into {ref} and push")
             continue
-        if sync_pr_with_main(pr, args.repo, lambda *a: run_git(args.repo, *a), log):
+        # Announce BEFORE the push, so the bots that write to this branch too (the fix-bot, the
+        # rebase-bot) can see it is taken; release below, whatever the outcome.
+        if not claim(n):
+            log(f"  PR#{n} ({ref}): could not post the claim — left alone (the protocol is the point)")
+            continue
+        ok = bool(sync_pr_with_main(pr, args.repo, lambda *a: run_git(args.repo, *a), log))
+        release(n, ok)
+        if ok:
             rebased += 1
             log(f"  PR#{n} ({ref}): rebased; CI will re-run")
         else:

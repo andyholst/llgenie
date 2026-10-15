@@ -78,11 +78,15 @@ jobs:
           token: ${{ secrets.BUMP_TOKEN }}
 
       - name: Add the fork remote when the PR's head lives there
+        # The PAT arrives as an env var, never interpolated into the script (issue #283: a
+        # `${{ secrets.X }}` inside a `run:` block is a value in a log waiting to happen).
+        env:
+          BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
         run: |
           set -euo pipefail
           git remote -v
-          git remote add fork "https://x-access-token:${{ secrets.BUMP_TOKEN }}@github.com/andyholst/llgenie.git" 2>/dev/null || \
-            git remote set-url fork "https://x-access-token:${{ secrets.BUMP_TOKEN }}@github.com/andyholst/llgenie.git"
+          git remote add fork "https://x-access-token:${BUMP_TOKEN}@github.com/andyholst/llgenie.git" 2>/dev/null || \
+            git remote set-url fork "https://x-access-token:${BUMP_TOKEN}@github.com/andyholst/llgenie.git"
 
       - name: Which ONE PR needs rebasing (decision in code, never a skipping job)
         id: sweep
