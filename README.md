@@ -436,7 +436,7 @@ cd tools && make venv-install      # create ~/llama-gguf-tools/.venv + install d
 `requirements.in` is the single source of truth; `requirements.txt` is generated with
 `pip-compile` inside the `tools/` Dockerfile container (`make generate-requirements`).
 
-## No secret value reaches a log (issue #283)
+## No secret value reaches a log (#283)
 
 Every key this repo uses travels the same way: a CI secret, `docker run -e VAR` (the **name**, never
 `VAR=value`), and a guard that echoes only the variable's name when it is missing. `make

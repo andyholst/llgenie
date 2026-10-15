@@ -1,4 +1,4 @@
-# No secret value reaches a log — for every key, not just the JEV one (issue #283)
+# No secret value reaches a log — for every key, not just the JEV one (#283)
 
 ## Why
 
