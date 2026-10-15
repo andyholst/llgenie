@@ -1,0 +1,198 @@
+"""Do we have a test that no secret VALUE is printed? Yes — for every key, not just the JEV one.
+
+`scripts/check_secret_output.py` is the guard; this file is its proof. Every rule is broken on a
+fixture file (one violation, the right rule id), and the guard is then run over THIS repository,
+because a rule the repo itself violates is not a rule.
+
+secret-output: test value — the marker this fixture file carries: the credential-shaped strings
+below are deliberate, non-live test values, which is exactly what the marker in the guard is for.
+
+NO-SKIP POLICY: a missing prerequisite is a LOUD FAILURE, never a skip.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+import check_secret_output as cso  # noqa: E402
+
+
+def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir(parents=True, exist_ok=True)
+    for name, body in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+    return root
+
+
+def _rules(root: Path) -> list[str]:
+    return [v.split(": ", 1)[1].split(" —")[0] for v in cso.violations(root)]
+
+
+# ---------------------------------------------------------------------------
+# rule: secrets-in-run-block
+# ---------------------------------------------------------------------------
+def test_a_secret_interpolated_into_a_run_block_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {".github/workflows/a.yml": """
+name: a
+on:
+  workflow_dispatch:
+jobs:
+  a:
+    steps:
+      - run: |
+          curl -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" https://example.invalid
+"""})
+    assert _rules(root) == ["secrets-in-run-block"], cso.violations(root)
+
+
+def test_a_secret_passed_through_env_is_not_a_violation(tmp_path):
+    root = _tree(tmp_path, {".github/workflows/a.yml": """
+name: a
+on:
+  workflow_dispatch:
+jobs:
+  a:
+    steps:
+      - run: make something
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+"""})
+    assert cso.violations(root) == []
+
+
+# ---------------------------------------------------------------------------
+# rule: prints-secret-value
+# ---------------------------------------------------------------------------
+def test_echoing_a_secret_value_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\necho "token: $HF_TOKEN"\n'})
+    assert _rules(root) == ["prints-secret-value"], cso.violations(root)
+
+
+def test_printing_the_name_and_guarding_on_it_is_not_a_violation(tmp_path):
+    """The repo's own guard shape: it fails when the key is missing and prints only the NAME."""
+    root = _tree(tmp_path, {"s.sh": '''#!/usr/bin/env bash
+set -euo pipefail
+test -n "$NOUS_API_KEY" || { echo "NOUS_API_KEY unset - refusing to spend time on a dead key"; exit 1; }
+'''})
+    assert cso.violations(root) == []
+
+
+def test_writing_a_secret_to_a_file_is_not_a_violation(tmp_path):
+    """`>> \"$HERMES_HOME/.env\"` is where a key IS allowed to live (mode 600), not output."""
+    root = _tree(tmp_path, {"s.sh": '''#!/usr/bin/env bash
+printf '%s=%s\\n' "TYPESAFE_API_KEY" "$TYPESAFE_API_KEY" >> "${HERMES_HOME}/.env"
+'''})
+    assert cso.violations(root) == []
+
+
+# ---------------------------------------------------------------------------
+# rule: xtrace-with-secrets
+# ---------------------------------------------------------------------------
+def test_xtrace_in_a_file_that_reads_a_secret_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\nset -eux\nmake deploy TOKEN="$BUMP_TOKEN"\n'})
+    assert "xtrace-with-secrets" in _rules(root), cso.violations(root)
+
+
+def test_no_xtrace_is_not_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\nset -euo pipefail\nmake deploy TOKEN="$BUMP_TOKEN"\n'})
+    assert cso.violations(root) == []
+
+
+# ---------------------------------------------------------------------------
+# rule: value-in-argv
+# ---------------------------------------------------------------------------
+def test_a_secret_value_on_the_command_line_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\ndocker run -e HF_TOKEN=$HF_TOKEN img true\n'})
+    assert _rules(root) == ["value-in-argv"], cso.violations(root)
+
+
+def test_passing_the_name_only_is_not_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\ndocker run -e HF_TOKEN -e NOUS_API_KEY img true\n'})
+    assert cso.violations(root) == []
+
+
+def test_a_secret_expression_on_the_command_line_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\ndocker run -e HF_TOKEN=${{ secrets.HF_TOKEN }} img true\n'})
+    assert _rules(root) == ["value-in-argv"], cso.violations(root)
+
+
+# ---------------------------------------------------------------------------
+# rule: env-dump
+# ---------------------------------------------------------------------------
+def test_a_bare_environment_dump_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.sh": "#!/usr/bin/env bash\nenv\n"})
+    assert _rules(root) == ["env-dump"], cso.violations(root)
+
+
+def test_python_reading_os_environ_is_not_a_violation(tmp_path):
+    root = _tree(tmp_path, {"s.py": "import os\nenv = os.environ if os.environ else {}\n"})
+    assert cso.violations(root) == []
+
+
+# ---------------------------------------------------------------------------
+# rule: key-shaped-literal
+# ---------------------------------------------------------------------------
+def test_a_credential_shaped_literal_is_a_violation(tmp_path):
+    root = _tree(tmp_path, {"cfg.py": 'TOKEN = "hf_' + "A1b2C3d4E5f6G7h8I9j0K1l2M3" + '"\n'})
+    assert _rules(root) == ["key-shaped-literal"], cso.violations(root)
+
+
+def test_a_fixture_name_that_merely_starts_like_a_token_is_not_a_violation(tmp_path):
+    """Measured: the loose pattern flagged 13 such names (`hf_get_wrapped`, `hf_download_stall`)."""
+    root = _tree(tmp_path, {"t.py": 'NAME = "hf_download_stall"\nOTHER = "hf_get_wrapped"\n'})
+    assert cso.violations(root) == []
+
+
+def test_the_marker_declares_deliberate_test_values(tmp_path):
+    # this file itself carries the marker (see the module docstring), so use a copy of it
+    body = (REPO / "tests" / "test_secret_output.py").read_text()
+    assert cso.TEST_VALUE_MARKER in body
+    root = _tree(tmp_path, {"t.py": 'TOKEN = "hf_' + "A1b2C3d4E5f6G7h8I9j0K1l2M3" + '"\n'})
+    marked = _tree(tmp_path / "marked", {"t.py": f"# {cso.TEST_VALUE_MARKER}\n"
+                                                 'TOKEN = "hf_' + "A1b2C3d4E5f6G7h8I9j0K1l2M3" + '"\n'})
+    assert _rules(root) == ["key-shaped-literal"]
+    assert cso.violations(marked) == []
+
+
+# ---------------------------------------------------------------------------
+# the guard over THIS repository, and the exit code CI gates on
+# ---------------------------------------------------------------------------
+def test_this_repository_never_prints_a_secret_value():
+    assert cso.violations(REPO) == [], cso.violations(REPO)
+    assert cso.main(["check"]) == 0
+
+
+def test_the_report_lists_the_files_that_name_a_secret():
+    rows = cso.report(REPO)
+    files = {r["file"] for r in rows}
+    # the bot workflows and the image's install scripts are the ones that carry keys
+    for name in (".github/workflows/issue-bot.yml", ".github/workflows/fix-bot.yml",
+                 "scripts/agent_jev_preflight.sh", "scripts/install_nerve_ci.sh", "Makefile"):
+        assert name in files, f"{name} should name a secret variable"
+    assert all(r["prints"] is False for r in rows), [r for r in rows if r["prints"]]
+    assert all(r["xtrace"] is False for r in rows), [r for r in rows if r["xtrace"]]
+
+
+def test_check_exits_non_zero_on_a_violation(tmp_path, capsys):
+    root = _tree(tmp_path, {"s.sh": '#!/usr/bin/env bash\necho "$HF_TOKEN"\n'})
+    assert cso.main(["check", "--root", str(root)]) == 1
+    assert "prints-secret-value" in capsys.readouterr().err
+
+    clean = _tree(tmp_path / "clean", {"s.sh": '#!/usr/bin/env bash\necho "HF_TOKEN unset"\n'})
+    assert cso.main(["check", "--root", str(clean)]) == 0
+
+
+def test_the_guard_is_wired_into_the_repo():
+    """A guard no target names runs nowhere: the make target, .PHONY, help, CI job and the test."""
+    mk = (REPO / "Makefile").read_text()
+    assert "check-secret-output:" in mk
+    assert "check-secret-output" in mk.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
+    assert "make check-secret-output" in mk.split("\nhelp:", 1)[1]
+    ci_unit = mk.split("\nci-unit:", 1)[1].split("\n\n", 1)[0]
+    assert "check-secret-output" in ci_unit, "ci-unit must run the guard"
+    assert "tests/test_secret_output.py" in mk.split("\ntest-unit:", 1)[1].split("\n\n", 1)[0]

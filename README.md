@@ -436,6 +436,28 @@ cd tools && make venv-install      # create ~/llama-gguf-tools/.venv + install d
 `requirements.in` is the single source of truth; `requirements.txt` is generated with
 `pip-compile` inside the `tools/` Dockerfile container (`make generate-requirements`).
 
+## No secret value reaches a log (issue #283)
+
+Every key this repo uses travels the same way: a CI secret, `docker run -e VAR` (the **name**, never
+`VAR=value`), and a guard that echoes only the variable's name when it is missing. `make
+check-secret-output` (in the `ci-unit` job) keeps that true for **all** of them — `NOUS_API_KEY` /
+`NOUS_PORTAL_API_TOKEN`, `GH_TOKEN` / `BUMP_TOKEN` / `GITHUB_TOKEN`, `HF_TOKEN`, `TYPESAFE_API_KEY`,
+`OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`:
+
+| rule | what it fails on |
+|---|---|
+| `secrets-in-run-block` | `${{ secrets.X }}` interpolated **inside** a `run:` block — it becomes part of the script text and of its output; pass it through `env:` |
+| `prints-secret-value` | a printing command that expands a secret's value, e.g. an echo of a token variable. Printing the variable's *name*, and redirecting a value into a `chmod 600` file, are not violations |
+| `xtrace-with-secrets` | `set -x` in a file that also reads a secret: xtrace prints every expansion |
+| `value-in-argv` | `-e VAR=$VAR` / `--build-arg VAR=$VAR`: the value lands in the process list, not only in the environment |
+| `env-dump` | a bare `env` / `printenv` whose output reaches the log |
+| `key-shaped-literal` | something that looks like a live credential, committed (a deliberate test value carries `secret-output: test value` in its file) |
+
+GitHub masks a registered secret in its own logs, and that is **not** enough: masking is a filter over
+the log stream, so a transformed value (base64, a URL, a slice) sails past it, and nothing is masked in
+a log a job uploads itself. `make secret-output-report` shows which files name a secret and whether any
+of them prints it.
+
 ## Which llama.cpp build is used (card-size rule, issue #84)
 
 `make install` picks the llama.cpp **tree** (upstream or Prism) and the **backend** from the
