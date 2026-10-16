@@ -591,6 +591,16 @@ A bot you cannot dispatch without reading its YAML is a bot only its author can 
 The table below is generated from the workflows by `make dispatch-forms-report` and verified against
 them by `make check-dispatch-forms`, so the documentation you read before dispatching cannot drift
 from the pipeline that will run.
+
+A workflow file GitHub **refuses** fails silently: it lands a run that is `completed`/`failure` with
+**zero jobs**, named after the file PATH instead of the workflow's `name:`, with no log to read
+(`gh run view <id> --log-failed` → `log not found`). `make check-workflows` (in the `ci-unit` job,
+issue #330) reads every tracked `.github/workflows/*.yml` and fails on a `${{ … }}` expression that
+does not parse, an unterminated `${{`, a duplicate key, or a file with no top-level `name:`. The one
+that shipped was a **comment inside a `run: |` block** — a `#` line there is script text, not a YAML
+comment, so its literal `${{ ... }}` was parsed as an expression and the whole file was refused;
+PyYAML accepts it, which is why review missed it. Keep prose ellipses out of your expressions.
+(`make workflows-report` lists every file with its expression count and name.)
 <!-- dispatch-forms:begin -->
 | workflow | what the run does | dispatch inputs |
 |---|---|---|
@@ -1151,6 +1161,8 @@ make check-docs        # fail when a user-facing make target is not documented h
 make docs-report       # show every user-facing target: documented, missing, or a recorded exception
 make check-pr-hygiene  # fail when a producer's commit message or PR body is empty, a placeholder, a subject with no body, or when AGENTS.md lost the mandate (issue #313)
 make pr-hygiene-report # show every producer the PR/commit-message guard reads, and its verdict
+make check-workflows   # fail when a workflow file is one GitHub REFUSES: an unparseable ${{ }} expression, an unterminated one, a duplicate key, or no top-level name (issue #330)
+make workflows-report  # show every workflow file, its expression count and its top-level name
 make test-clean        # prune stopped orphaned test containers (always)
 ```
 

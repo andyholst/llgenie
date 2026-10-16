@@ -23,6 +23,15 @@ workflow. Follow it for any change.
   it a make target (e.g. `fix-bot-sweep`, `fix-bot-report`, `agent-image-ref`,
   `fix-loop-image`) and call that. The wiring guard (`make check-wiring`) enforces
   that every script is wired to a target CI runs.
+- **A workflow file GitHub refuses fails SILENTLY — keep every expression parseable** (issue
+  #330). A `#` line inside a `run: |` block is SCRIPT TEXT, not a YAML comment, so a literal
+  `${{ … }}` there is parsed as an expression — and a prose ellipsis is not one, so GitHub refuses
+  the WHOLE file. The symptom is a run that is `completed`/`failure` with **zero jobs**, named after
+  the file PATH rather than the workflow's `name:`, with no log to read (`gh run view <id>
+  --log-failed` → `log not found`). PyYAML accepts such a file, so review cannot see it: treat a red
+  0-job run for a workflow you did not run as a REJECTED FILE, and let `make check-workflows`
+  (`scripts/check_workflows.py`, in `ci-unit`) catch it first. Keep prose ellipses out of
+  expressions and never `${{ ... }}` inside a `run:` block.
 
 ## OpenSpec is the checklist of record (MANDATORY)
 
