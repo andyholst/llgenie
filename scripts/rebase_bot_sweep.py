@@ -79,14 +79,25 @@ def _today() -> str:
 
 
 def rebased_today(gh: str, repo: str, today: str) -> list[int]:
-    """PR numbers carrying this bot's marker for today (its own audit trail, no label)."""
-    out = _gh(gh, ["search", "prs", "--repo", repo, "--commenter", "github-actions[bot]",
-                   "--updated", f">={today}", "--json", "number,comments", "--limit", "50"])
+    """PR numbers carrying this bot's marker for today (its own audit trail, no label).
+
+    `gh search prs` exposes no comment BODIES — `comments` is not one of its fields (only
+    `commentsCount`), so asking for it is a hard CLI error. The marker therefore comes from each
+    candidate PR's comments through `_comments()` (`gh pr view <n> --json comments`), the one call
+    that carries them. The search is deliberately NOT filtered by author: the marker itself
+    identifies this bot's record, and the bot comments as the owner PAT, never
+    `github-actions[bot]` — a `--commenter` guess returns nothing (issue #309).
+    """
+    out = _gh(gh, ["search", "prs", "--repo", repo, "--updated", f">={today}",
+                   "--json", "number", "--limit", "50"])
     done = []
     for pr in json.loads(out or "[]") or []:
-        body = json.dumps(pr.get("comments") or [])
+        num = pr.get("number")
+        if num is None:
+            continue
+        body = json.dumps(_comments(gh, repo, num))
         if re.search(rf"{MARKER}[^0-9]{{0,40}}{re.escape(today)}", body):
-            done.append(pr["number"])
+            done.append(num)
     return done
 
 
