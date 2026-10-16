@@ -584,6 +584,33 @@ key it has already filed, and a cap (3 per run) bounds a bad run — a weekly ru
 files nothing and stays quiet. The two API-backed checks need a token with admin to read the secret
 list; without one they warn loudly and skip rather than filing a claim they cannot support.
 
+## The run-failure reactor (issue #286)
+
+A bot that reacts to a **failed CI run** — any run, not just a PR check — and routes it to a remedy.
+It is triggered by `workflow_run: types: [completed]` over the repo's own workflows, and the route
+decision lives in `scripts/run_failure_reactor.py` (stdlib only, no LLM), never in a job `if:` that
+can silently skip (issue #107):
+
+```bash
+make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run>   # route a failed run
+make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run> DRY=1   # preview, dispatch/file nothing
+```
+
+- **Route A** — the failed run has a pushable **same-repo** PR: the reactor claims the PR
+  (`scripts/bot_claims.py`, issues #279/#285) and dispatches the **existing** `fix-bot` for it,
+  reusing `scripts/fix_bot_sweep.py`'s eligibility rules. A **fork** PR is never dispatched (the
+  token cannot push it).
+- **Route B** — no pushable PR (a red `main` push, a red scheduled bot run, a red publish job):
+  the reactor files **exactly ONE** issue whose title names the workflow + failing job, whose body
+  carries the failing job, its step, and a tail of `gh run view --log-failed`, deduped by the
+  marker `<!-- run-fixer: WORKFLOW/JOB@SHORTSHA -->` (searched `in:body`), and labelled
+  `agent:implement` so the issue-bot picks it up. An OPEN issue already carrying the marker files
+  nothing.
+
+`.github/workflows/run-failure-reactor.yml` runs it on every completed run. It **never** repairs,
+commits, pushes or merges in the file-issue path — it files; the issue-bot owns implementation, the
+fix-bot owns PR repair. A run it cannot diagnose is reported loudly, never silently dropped.
+
 ## Dispatching a bot by hand (issue #276)
 Every workflow a human can start by hand states **what work the run will do** — in its name, in its
 dispatch form, and in the header block at the top of the file (`Trigger surface` / `Flow` / `Never`).
@@ -1145,6 +1172,8 @@ make check-strata-models     # fail when data/strata_models.json differs from St
 make queued-alarm      # report CI jobs stuck in `queued` too long (a runner that never picks them up, issue #254);
                        # COMMENT=1 delivers it to the run's pull request (else ONE deduped issue per stuck runner
                        # label, for runs no PR tracks) and a delivery that fails is exit 3, never silent; DRY=1 previews
+make run-failure-reactor  # route a failed CI run to a remedy (REPO=; RUN_ID=; DRY=1 previews): a pushable same-repo
+                       # PR -> dispatch the fix-bot; else file ONE deduped issue labelled agent:implement (issue #286)
 make openspec-validate NAME=<change>   # validate an OpenSpec change
 make openspec-new NAME=<change>        # create a change dir (the OpenSpec CLI, containerized)
 make openspec-status                   # list the changes and their task state
@@ -1161,7 +1190,7 @@ make check-pr-hygiene  # fail when a producer's commit message or PR body is emp
 make pr-hygiene-report # show every producer the PR/commit-message guard reads, and its verdict
 make check-pr-authors  # fail when a PR commit is authored by anyone but Andy Holst or Asimov Agent, when a Co-authored-by trailer names anyone else, or when a producer commits off the allowlist (issue #345)
 make pr-authors-report # show every commit in the range with its author verdict, and the identity each producer assigns
-make check-workflows   # fail when a YAML file's GitHub expression does not parse, a YAML file lacks a trailing newline, or a workflow has no top-level name (issue #330)
+make check-workflows   # fail when a YAML file's GitHub expression does not parse, a YAML file lacks a trailing newline, a workflow has no top-level name, or a `workflow_run` trigger names no workflows (issue #330)
 make workflows-report  # show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
 make test-clean        # prune stopped orphaned test containers (always)
 ```
@@ -1429,7 +1458,11 @@ no notion of `${{ }}` — which is why nothing caught it.
    grammar, so the expressions this repo already uses are not false positives);
 2. every YAML file must end with a newline (the repository's linefeed lint spec);
 3. every `.github/workflows/*.yml` must declare a top-level `name:` — a missing name is what makes a run
-   present itself as a file path, indistinguishable from a startup failure in `gh run list`.
+   present itself as a file path, indistinguishable from a startup failure in `gh run list`;
+4. an `on.workflow_run` trigger must carry a `workflows:` list. GitHub **requires** it and refuses the
+   whole file without it (`Invalid workflow file: on.workflow_run does not reference any workflows`),
+   just as silently: a 0-job run whose `name` is the file path and with no log. Measured on
+   `run-failure-reactor.yml`, whose first two push runs were refused that way while this gate passed.
 
 `make workflows-report` prints the file count, how many expressions were validated and the verdict, so
 the gate's scope is visible rather than assumed. `tests/test_workflows_valid.py` (in `make test-unit`, so
