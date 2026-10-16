@@ -5,12 +5,16 @@ other CI job. macOS runs the pipeline's make targets in three Docker jobs instea
 Hermetic: a fake `docker` on PATH logs every call; no registry, no build."""
 from __future__ import annotations
 
+import base64
+import http.server
 import importlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import yaml
@@ -497,3 +501,201 @@ def test_a_normal_image_still_publishes_both_platforms(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     b = next(c for c in _calls(log) if c.startswith("buildx build"))
     assert "--platform linux/amd64,linux/arm64" in b, b
+
+
+# ---------------------------------------------------------------------------
+# pushcheck (publish-agent-image.yml, BEFORE the build — issue #335)
+# ---------------------------------------------------------------------------
+_DENIED = '{"errors":[{"code":"DENIED","message":"denied: requested access to the resource is denied"}]}'
+
+
+def _stub_registry(token_status: int = 200,
+                   upload_status: int = 202) -> tuple[str, list, http.server.ThreadingHTTPServer]:
+    """A stand-in GHCR. Records (method, path, authorization) for every request it answers.
+
+    The pre-flight makes exactly two: the push-scoped token exchange, then the empty blob upload.
+    """
+    seen: list[tuple[str, str, str]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args) -> None:   # keep pytest's output clean
+            pass
+
+        def _answer(self, status: int, payload) -> None:
+            raw = (payload if isinstance(payload, str) else json.dumps(payload)).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            seen.append((self.command, self.path, self.headers.get("Authorization", "")))
+            self._answer(token_status, {"token": "stub-token"} if token_status == 200 else _DENIED)
+
+        def do_POST(self):
+            seen.append((self.command, self.path, self.headers.get("Authorization", "")))
+            self._answer(upload_status, "" if upload_status < 300 else _DENIED)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}", seen, srv
+
+
+def _pushcheck(env: dict, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(REPO / "scripts" / "ci_images.py"), "pushcheck", *args],
+                          env=env, capture_output=True, text=True, timeout=60)
+
+
+def test_pushcheck_asks_for_a_push_token_then_does_an_empty_upload():
+    """The shape the pre-flight must have: a push-scoped token for the package the publish writes,
+    then the cheapest real write there is — an empty blob upload, carrying no data."""
+
+    # Given a stub registry that accepts the token exchange and the upload
+    base, seen, srv = _stub_registry()
+    try:
+        env = {**os.environ, "LLGENIE_REGISTRY": base, "GHCR_TOKEN": "s3cret",
+               "GHCR_USER": "asimov-agent"}
+
+        # When the pre-flight runs for the agent package
+        r = _pushcheck(env, "agent")
+
+        # Then it exits 0 and asked for a token scoped to push exactly that package
+        assert r.returncode == 0, r.stdout + r.stderr
+        method, path, auth = seen[0]
+        assert method == "GET" and path.startswith("/token?")
+        assert "service=127.0.0.1" in path and "scope=repository:llgenie/agent:push" in path
+        assert base64.b64decode(auth.split()[1]).decode() == "asimov-agent:s3cret"
+        assert "may push" in r.stdout
+
+        # And the write it initiated is the EMPTY upload, with the token it was just given
+        assert seen[1] == ("POST", "/v2/llgenie/agent/blobs/uploads/", "Bearer stub-token")
+    finally:
+        srv.shutdown()
+
+
+def test_pushcheck_fails_when_the_credential_may_not_push():
+    """A denial is the whole point: it must exit non-zero and surface the registry's own message,
+    not be swallowed into a green step that then burns the build."""
+
+    # Given a registry that grants the token but refuses the upload
+    base, seen, srv = _stub_registry(upload_status=403)
+    try:
+        env = {**os.environ, "LLGENIE_REGISTRY": base, "GHCR_TOKEN": "s3cret"}
+
+        # When the pre-flight runs
+        r = _pushcheck(env, "agent")
+
+        # Then it fails loudly, quoting the registry, and never reports success
+        assert r.returncode == 1
+        assert "CANNOT push" in r.stderr and "denied:" in r.stderr
+        assert "may push" not in r.stdout
+        assert len(seen) == 2, seen
+    finally:
+        srv.shutdown()
+
+
+def test_pushcheck_reports_a_refused_token():
+    """A credential the registry will not even issue a push token for is the same verdict, one step
+    earlier — and no upload may be attempted without the token."""
+
+    # Given a registry that refuses the token exchange
+    base, seen, srv = _stub_registry(token_status=403)
+    try:
+        env = {**os.environ, "LLGENIE_REGISTRY": base, "GHCR_TOKEN": "s3cret"}
+
+        # When the pre-flight runs
+        r = _pushcheck(env, "agent")
+
+        # Then it names the refusal and stops
+        assert r.returncode == 1
+        assert "refused a push-scoped token" in r.stderr and "denied:" in r.stderr
+        assert len(seen) == 1, "no upload is attempted without a token"
+    finally:
+        srv.shutdown()
+
+
+def test_pushcheck_without_a_credential_fails_before_any_request():
+    """A run with no credential must say so — not discover it at the push, after the build."""
+
+    # Given no token in the environment
+    env = {k: v for k, v in os.environ.items() if k not in ("GHCR_TOKEN", "GITHUB_TOKEN")}
+    env["LLGENIE_REGISTRY"] = "http://127.0.0.1:1"     # nothing listens: any request would error
+
+    # When the pre-flight runs
+    r = _pushcheck(env, "agent")
+
+    # Then it fails with the reason, and the registry is never contacted
+    assert r.returncode == 1
+    assert "no credential" in r.stderr
+
+
+def test_pushcheck_fails_with_a_sentence_when_the_registry_is_unreachable():
+    """A network failure is a failure too — and it must read as one, not as a traceback that hides
+    which registry the step could not reach."""
+
+    # Given a registry address nothing is listening on
+    env = {**os.environ, "LLGENIE_REGISTRY": "http://127.0.0.1:1", "GHCR_TOKEN": "s3cret"}
+
+    # When the pre-flight runs
+    r = _pushcheck(env, "agent")
+
+    # Then it fails with a sentence naming what it could not reach
+    assert r.returncode == 1
+    assert "could not reach" in r.stderr and "http://127.0.0.1:1" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_the_push_check_targets_the_package_the_publish_writes(monkeypatch):
+    """<registry>/llgenie/<name> — the owner in the registry is part of the package path, and GHCR
+    carries no scheme of its own."""
+    import ci_images
+
+    monkeypatch.setenv("LLGENIE_REGISTRY", "ghcr.io/asimov-agent")
+    assert ci_images.package("agent") == ("https://ghcr.io", "asimov-agent/llgenie/agent")
+
+
+def test_pushcheck_defaults_to_the_registry_owner_and_targets_its_package():
+    """With no GHCR_USER, the Basic user is the registry's owner segment — the account the workflow's
+    own `docker login -u ${{ github.repository_owner }}` uses — and the owner is part of the package
+    path the upload targets."""
+
+    # Given a registry that names an owner and no GHCR_USER in the environment
+    base, seen, srv = _stub_registry()
+    try:
+        env = {k: v for k, v in os.environ.items() if k not in ("GHCR_USER", "GITHUB_ACTOR")}
+        env.update({"LLGENIE_REGISTRY": f"{base}/asimov-agent", "GHCR_TOKEN": "s3cret"})
+
+        # When the pre-flight runs
+        r = _pushcheck(env, "agent")
+
+        # Then it pushes as the owner, against the owner's package
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert base64.b64decode(seen[0][2].split()[1]).decode() == "asimov-agent:s3cret"
+        assert seen[1][1] == "/v2/asimov-agent/llgenie/agent/blobs/uploads/"
+    finally:
+        srv.shutdown()
+
+
+def test_the_publish_job_proves_the_push_before_it_builds():
+    """The pre-flight is a step of publish-agent-image.yml, before the publish it protects, wired to
+    the target and handed the credential the job logs in with."""
+
+    # Given the publish job's steps and the Makefile
+    steps = _jobs("publish-agent-image.yml")["publish"]["steps"]
+    mk = (REPO / "Makefile").read_text()
+
+    # When the pre-flight step and the publish step are located
+    runs = [st.get("run", "") or "" for st in steps]
+    i_check = next(i for i, r in enumerate(runs) if "make agent-image-push-check" in r)
+    i_publish = next(i for i, r in enumerate(runs) if "make publish-agent-image" in r)
+
+    # Then the check precedes the build and is handed the credential the login step uses
+    assert i_check < i_publish, "the pre-flight must run BEFORE the expensive build"
+    assert "GHCR_TOKEN" in yaml.safe_dump(steps[i_check]), "the step must pass the credential"
+
+    # And the target exists, is .PHONY, and drives the pushcheck sub-command
+    assert re.search(r"^agent-image-push-check:", mk, re.M)
+    assert "agent-image-push-check" in mk.split("\n.PHONY:", 1)[1].split("\n\n", 1)[0]
+    assert re.search(r"^agent-image-push-check:.*\n.*\n\tpython3 scripts/ci_images\.py pushcheck agent",
+                     mk, re.M)

@@ -27,9 +27,11 @@ name: publish-agent-image — builds + pushes the Hermes agent image when its ha
 #                  image is published when a human decides to, and `force=true` rebuilds even when
 #                  the hash tag is already on GHCR.
 # Flow: guard (owner / collaborator with write/maintain/admin, BEFORE any secret is read) ->
-#       make publish-agent-image (scripts/ci_images.py publish agent — builds the image, and pushes
-#       it to GHCR only when its hash tag is not there yet; that decision lives inside the script,
-#       NOT in a make target) -> make ci-image-refs (prints the published ref).
+#       make agent-image-push-check (asks GHCR for a push-scoped token and initiates an empty blob
+#       upload, so a credential that may not publish fails in seconds instead of after the build;
+#       issue #335) -> make publish-agent-image (scripts/ci_images.py publish agent — builds the
+#       image, and pushes it to GHCR only when its hash tag is not there yet; that decision lives
+#       inside the script) -> make ci-image-refs (prints the published ref).
 # Never: never pushes an image whose hash already exists (unless `force=true`), never overwrites a
 #        different hash's tag, never merges, never runs on a schedule.
 on:
@@ -86,6 +88,10 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR (owner PAT - can create the org package)
         run: echo "${{ secrets.BUMP_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+      - name: make agent-image-push-check (prove the PAT can push BEFORE the build, issue #335)
+        env:
+          GHCR_TOKEN: ${{ secrets.BUMP_TOKEN }}
+        run: make agent-image-push-check
       - name: make publish-agent-image (build + push the Hermes image when its hash is not on GHCR yet)
         run: make publish-agent-image
       - name: Print the published ref

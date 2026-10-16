@@ -1490,10 +1490,12 @@ MIT — see [LICENSE](LICENSE).
   (`secrets.BUMP_TOKEN`), not `GITHUB_TOKEN`, and prints the published ref with `make
   ci-image-refs`. The credential reasoning is stated in that workflow's header, which is the file
   that has to stay true.
-  A pre-flight that proves the credential can push **before** the ten-minute build — an empty blob
-  upload, the cheapest real write — is **not implemented**: `make agent-image-push-check` was
-  documented here but is not a target, so this paragraph used to describe both a target and a token
-  the pipeline does not have. Tracked as issue #335.
+  Before that build the job runs `make agent-image-push-check`: it asks GHCR for a **push-scoped
+  token** and then initiates an **empty blob upload** against the package the publish writes — the
+  cheapest real write there is, which sends no data, so a refusal costs nothing and a success leaves
+  no layer. A credential that may not publish fails in seconds, quoting the registry's own message,
+  instead of after a build that could never succeed (issue #335). It needs the same credential the
+  login uses (`GHCR_TOKEN`), so the step passes the owner PAT.
 
 ## Who may start a bot or publish (the trigger guard)
 

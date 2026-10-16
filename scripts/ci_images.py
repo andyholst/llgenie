@@ -18,16 +18,24 @@ Commands (driven by make, never by hand):
     ensure <name>   a dev host: pull the published hash, else build it here from the same
                     Dockerfile (an edited Dockerfile/lockfile is not published yet)  make test-image
     ref <name>      print the published ref                                  make ci-image-refs
+    pushcheck <name>  publish-agent-image.yml: prove the credential can PUSH before the expensive
+                    build — ask the registry for a push-scoped token, then initiate an empty blob
+                    upload (the cheapest real write there is); the registry's own refusal is the
+                    verdict                                              make agent-image-push-check
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -181,9 +189,106 @@ def ensure(name: str, root: Path = REPO) -> int:
         shutil.rmtree(ctx, ignore_errors=True)
 
 
+# --------------------------------------------------------------------------- the push pre-flight
+def registry_parts() -> tuple[str, str, str]:
+    """(scheme, host, owner) of the configured registry.
+
+    `LLGENIE_REGISTRY` carries no scheme by default (`ghcr.io/asimov-agent`) and GHCR is https, so the
+    scheme is filled in only when the value does not name one — a test stub points at `http://127.0.0.1`.
+    The owner segment is what the package path and the default Basic user are built from.
+    """
+    reg = registry()
+    scheme, sep, rest = reg.partition("://")
+    if not sep:
+        scheme, rest = "https", reg
+    host, _, owner = rest.partition("/")
+    return scheme, host, owner
+
+
+def package(name: str) -> tuple[str, str]:
+    """(base URL, the package path a publish writes) for `<registry>/llgenie/<name>`.
+
+    With an owner (`ghcr.io/asimov-agent`) the path is `asimov-agent/llgenie/<name>`; a registry without
+    one — a local stub — keeps `llgenie/<name>`.
+    """
+    scheme, host, owner = registry_parts()
+    return f"{scheme}://{host}", (f"{owner}/llgenie/{name}" if owner else f"llgenie/{name}")
+
+
+def _request(method: str, url: str, headers: dict[str, str]) -> tuple[int, str]:
+    """(status, body) — an HTTP error is a RESULT here, never an exception.
+
+    The registry's own refusal message is the verdict this target exists to print, so a 401/403 must
+    come back as data rather than as a traceback that hides it. A request that never got an answer
+    (DNS, connection refused, timeout) comes back as status 0 with the reason, so the caller fails with
+    a sentence instead of a traceback too.
+    """
+    req = urllib.request.Request(url, data=b"", headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as e:
+        return 0, str(getattr(e, "reason", e))
+
+
+def pushcheck(name: str) -> int:
+    """Prove the credential can PUSH `name` BEFORE the expensive build (issue #335).
+
+    The publish job allows 60 minutes and the build is the costly part, so a credential that was
+    never allowed to publish burns the whole run on a foregone conclusion. The verdict is available
+    in seconds: ask the registry for a push-scoped token, then initiate the cheapest real write
+    there is — an EMPTY blob upload, which sends no data (a refusal costs nothing, a success leaves
+    no layer). Any 2xx means the credential may push; anything else prints the registry's own message
+    and fails.
+    """
+    base, path = package(name)
+    secret = os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    if not secret:
+        print("[ci-images] push-check: no credential — set GHCR_TOKEN to the token the publish logs "
+              "in with (publish-agent-image.yml uses the owner PAT, secrets.BUMP_TOKEN)", file=sys.stderr)
+        return 1
+    # The account whose PAT does the pushing: `publish-agent-image.yml` logs in as the repository owner,
+    # so that is the default here too — GHCR_USER overrides it.
+    user = (os.environ.get("GHCR_USER") or os.environ.get("GITHUB_ACTOR")
+            or registry_parts()[2])
+    service = base.split("://", 1)[-1]
+    cred = base64.b64encode(f"{user}:{secret}".encode()).decode()
+    status, body = _request("GET", f"{base}/token?service={service}&scope=repository:{path}:push",
+                            {"Authorization": f"Basic {cred}"})
+    if status == 0:
+        print(f"[ci-images] push-check {path}: could not reach {base} for a push token: "
+              f"{body.strip()[:400]}", file=sys.stderr)
+        return 1
+    if status != 200:
+        print(f"[ci-images] push-check {path}: the registry refused a push-scoped token "
+              f"({status}): {body.strip()[:400]}", file=sys.stderr)
+        return 1
+    try:
+        token = json.loads(body)["token"]
+    except (ValueError, KeyError, TypeError):
+        print(f"[ci-images] push-check {path}: the token response carried no `token`: "
+              f"{body.strip()[:400]}", file=sys.stderr)
+        return 1
+    status, body = _request("POST", f"{base}/v2/{path}/blobs/uploads/",
+                            {"Authorization": f"Bearer {token}", "Content-Length": "0"})
+    if 200 <= status < 300:
+        print(f"[ci-images] push-check {path}: the credential may push — empty upload accepted "
+              f"({status})", flush=True)
+        return 0
+    if status:
+        print(f"[ci-images] push-check {path}: the credential CANNOT push ({status}): "
+              f"{body.strip()[:400]}", file=sys.stderr)
+    else:
+        print(f"[ci-images] push-check {path}: the upload could not reach {base}: "
+              f"{body.strip()[:400]}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="CI images on GHCR: publish once per hash, pull everywhere")
-    ap.add_argument("cmd", choices=("publish", "pull", "ensure", "ref", "tag"))
+    ap.add_argument("cmd", choices=("publish", "pull", "ensure", "ref", "tag", "pushcheck"))
     ap.add_argument("names", nargs="*", default=list(IMAGES), help=f"default: {' '.join(IMAGES)}")
     a = ap.parse_args(argv)
     for n in a.names:
@@ -193,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         for n in a.names:
             print(ref(n) if a.cmd == "ref" else tag(n))
         return 0
-    run = {"publish": publish, "pull": pull, "ensure": ensure}[a.cmd]
+    run = {"publish": publish, "pull": pull, "ensure": ensure, "pushcheck": pushcheck}[a.cmd]
     rc = 0
     for n in a.names:
         rc = run(n) or rc
