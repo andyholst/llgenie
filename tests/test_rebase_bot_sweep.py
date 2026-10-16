@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import rebase_bot_sweep as rb  # noqa: E402
@@ -43,6 +45,10 @@ here = pathlib.Path(__file__).parent
 with open({str(log)!r}, "a") as fh:
     fh.write(json.dumps(args) + "\\n")
 if args[:2] == ["search", "prs"]:
+    fields = args[args.index("--json") + 1] if "--json" in args else ""
+    if any(f.strip() == "comments" for f in fields.split(",")):
+        sys.stderr.write('Unknown JSON field: \"comments\"\\n')
+        sys.exit(1)                      # exactly what the real `gh search prs` does (#309)
     print((here / "search.json").read_text())
 elif args[:2] == ["pr", "list"]:
     print((here / "prs.json").read_text())
@@ -70,7 +76,17 @@ def _pr(num, state="BEHIND", *, draft=False, head="andyholst", repo=None, base="
 
 
 def _marker_today(num, today="2026-10-14"):
-    return {"number": num, "comments": [{"body": f"rebased. <!-- rebase-bot: {today} -->"}]}
+    """A PR this bot already rebased today: `search prs` names it, its COMMENTS carry the marker.
+
+    `gh search prs` has no comment bodies (issue #309), so the search row is only the number and
+    the marker comes from `comments_by_pr` — the two-call shape the real CLI has.
+    """
+    return {"number": num}
+
+
+def _marker_comments(nums, today="2026-10-14"):
+    """The `comments_by_pr` fixture carrying this bot's marker for `today`."""
+    return {str(n): [{"body": f"rebased. <!-- rebase-bot: {today} -->"}] for n in nums}
 
 
 def test_the_sweep_picks_one_pr_and_states_a_reason_for_every_pass_over(tmp_path):
@@ -91,18 +107,21 @@ def test_the_sweep_picks_one_pr_and_states_a_reason_for_every_pass_over(tmp_path
 
 def test_a_pr_already_rebased_today_is_left_alone(tmp_path):
     """The marker comment is the record: no label needed, and no rebase loop."""
-    gh, log = _fake_gh(tmp_path, {"search": [_marker_today(7)], "prs": [
+    gh, log = _fake_gh(tmp_path, {"search": [_marker_today(7)], "comments_by_pr": _marker_comments([7]),
+                                  "prs": [
         _pr(7, "BEHIND", created="2026-09-01T00:00:00Z"),
         _pr(8, "BEHIND", created="2026-09-02T00:00:00Z")]})
     res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
     assert res["pr"] == 8, res
     assert any("already rebased today" in r for r in res["reasons"])
     q = [c for c in [json.loads(l) for l in log.read_text().splitlines()] if c[:2] == ["search", "prs"]][0]
-    assert "--commenter" in q and "--updated" in q and ">=2026-10-14" in q
+    assert "--updated" in q and ">=2026-10-14" in q
+    assert "comments" not in q[q.index("--json") + 1].split(","), q   # search has no bodies (#309)
 
 
 def test_the_daily_cap_stops_the_bot(tmp_path, capsys):
-    gh, log = _fake_gh(tmp_path, {"search": [_marker_today(n) for n in range(1, 6)], "prs": []})
+    gh, log = _fake_gh(tmp_path, {"search": [_marker_today(n) for n in range(1, 6)],
+                                  "comments_by_pr": _marker_comments(range(1, 6)), "prs": []})
     res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14")
     assert res["action"] == "cap" and res["pr"] is None
     assert "already rebased 5/5 PRs today" in res["reason"]
@@ -122,6 +141,74 @@ def test_nothing_to_do_is_reported_as_none(tmp_path):
     gh, _log = _fake_gh(tmp_path, {"search": [], "prs": [_pr(1, "CLEAN")]})
     res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
     assert res["action"] == "none" and "no open PR needs rebasing" in res["reason"]
+
+
+def _calls(log: Path) -> list[list[str]]:
+    return [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
+
+
+def test_the_sweep_never_asks_search_prs_for_a_field_the_cli_lacks(tmp_path):
+    """Issue #309: `gh search prs` has no comment bodies; asking for them is a hard CLI error that
+    killed every run. The fake `gh` refuses it like the real CLI, so a regression fails HERE."""
+
+    # Given a repo with a PR the sweep must consider
+    gh, log = _fake_gh(tmp_path, {"search": [_marker_today(7)], "comments_by_pr": _marker_comments([7]),
+                                  "prs": [_pr(7, "BEHIND", created="2026-09-01T00:00:00Z")]})
+
+    # When the sweep runs
+    res = rb.sweep(str(gh), f"{OWNER}/{NAME}", today="2026-10-14", own_fork="andyholst")
+
+    # Then it completed (no crash) and never asked `search prs` for comment bodies
+    assert res["action"] == "none", res
+    searches = [c for c in _calls(log) if c[:2] == ["search", "prs"]]
+    assert searches, "the search must run"
+    assert all("comments" not in c[c.index("--json") + 1].split(",") for c in searches), searches
+
+
+def test_a_marker_written_today_is_found(tmp_path):
+    """The bot's own record for today is read from the PR's COMMENTS, not from the search row."""
+
+    # Given search names PR 7 and its comments carry today's marker
+    gh, _log = _fake_gh(tmp_path, {"search": [{"number": 7}],
+                                   "comments_by_pr": _marker_comments([7], today="2026-10-14")})
+
+    # When rebased_today runs for that day
+    found = rb.rebased_today(str(gh), f"{OWNER}/{NAME}", "2026-10-14")
+
+    # Then PR 7 is reported as already rebased
+    assert found == [7], found
+
+
+def test_a_marker_from_another_day_is_not_counted(tmp_path):
+    """Only TODAY's marker counts; an older one must not suppress a legitimate rebase."""
+
+    # Given PR 7's marker is for the PREVIOUS day
+    gh, _log = _fake_gh(tmp_path, {"search": [{"number": 7}],
+                                   "comments_by_pr": _marker_comments([7], today="2026-10-13")})
+
+    # When rebased_today runs for 2026-10-14
+    found = rb.rebased_today(str(gh), f"{OWNER}/{NAME}", "2026-10-14")
+
+    # Then it is not counted
+    assert found == [], found
+
+
+def test_the_sweep_step_fails_loudly_when_the_sweep_fails():
+    """Issue #309: the sweep step swallowed a crash as `action=unknown` and a green run, hiding a
+    bot that never rebased anything."""
+
+    # Given the rebase-bot workflow
+    wf = yaml.safe_load((REPO / ".github/workflows/rebase-bot.yml").read_text())
+    step = next(s for s in wf["jobs"]["rebase"]["steps"] if s.get("id") == "sweep")
+
+    # When the sweep step's run block is read
+    run = step["run"]
+
+    # Then it captures the sweep's exit code and exits non-zero on a failure
+    assert "make rebase-bot-sweep" in run
+    assert "rc=$?" in run
+    assert 'if [ "$rc" != "0" ]' in run, run
+    assert "exit 1" in run, run
 
 
 # ------------------------------------------------------------------------------------- actor

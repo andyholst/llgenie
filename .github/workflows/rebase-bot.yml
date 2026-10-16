@@ -105,7 +105,14 @@ jobs:
         run: |
           set +e
           out=$(make rebase-bot-sweep REPO="$REPO" OWN_FORK=andyholst)
+          rc=$?
           echo "$out"
+          # A crashed decision is NOT "nothing to do" (issue #309): the sweep died, so the run
+          # must go red instead of writing action=unknown and reporting a green no-op.
+          if [ "$rc" != "0" ]; then
+            echo "::error::the rebase sweep failed (make rebase-bot-sweep rc=$rc); refusing to treat a crashed decision as 'nothing to do'"
+            exit 1
+          fi
           action=$(printf '%s\n' "$out" | sed -n 's/^action=//p' | tail -1)
           pr=$(printf '%s\n' "$out" | sed -n 's/^pr=//p' | tail -1)
           branch=$(printf '%s\n' "$out" | sed -n 's/^head_branch=//p' | tail -1)
