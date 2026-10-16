@@ -55,7 +55,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 .PHONY: all install venv-install link uninstall smoke list version help test-native-engine test-native-engine-serve test-interactive-tensorfold test-interactive-tensorfold-ci \
 	openspec-image openspec-new openspec-validate openspec-status openspec-shell \
 	test test-unit test-agents-read agents-read-venv test-install test-install-ci test-install-host test-install-trend test-health test-health-host download-test-model \
-	test-image test-image-pull openspec-image-pull publish-ci-images publish-agent-image agent-image agent-image-pull ci-image-refs test-clean lint lint-fix loop loop-harness chained \
+	test-image test-image-pull openspec-image-pull publish-ci-images publish-agent-image agent-image-push-check agent-image agent-image-pull ci-image-refs test-clean lint lint-fix loop loop-harness chained \
 	build-server build-variant serve-variant test-serve-variant stop-serve-variant install-prism-cpu install-upstream-cpu \
 	install-prism-cuda install-upstream-cuda install-prism-metal install-upstream-metal \
 	sync-registry check-registry skills-validate engine-list engine-hardware engine-plan engine-check engine-install engine-detect engine-smoke test-engine ci-engine-images build-engine-base build-engines generate-build-engine-params test-engine-image push-engine test-published-engine test-install-published engine-launchers test-built-engine test-uninstalled \
@@ -696,6 +696,10 @@ publish-ci-images: ## CI job ci-images: build + push the test and OpenSpec image
 
 publish-agent-image: ## Build + push ONLY the agent (Hermes) image to GHCR (linux/amd64: it builds Hermes at build time, which times out under arm64 emulation) when its hash tag is not there yet. The dedicated job for the Hermes container (issues #222/#238/#248); guarded to owner/collaborators.
 	python3 scripts/ci_images.py publish agent
+
+agent-image-push-check: ## Prove the GHCR credential can PUSH the agent image BEFORE the (up to 60-minute) build: ask the registry for a push-scoped token, then initiate the cheapest real write there is (an empty blob upload, no data). Prints the registry's own refusal and exits non-zero when the credential may not push (issue #335)
+	@test -n "$$GHCR_TOKEN" || { echo "ERROR: GHCR_TOKEN is unset - this target asks GHCR to prove a credential can push the llgenie/agent package"; exit 1; }
+	python3 scripts/ci_images.py pushcheck agent
 
 agent-image: ## The agent (Hermes) image: pull the published hash of its Dockerfile + install script (GHCR), else build it here
 	python3 scripts/ci_images.py ensure agent
