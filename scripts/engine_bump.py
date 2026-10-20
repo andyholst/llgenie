@@ -203,6 +203,41 @@ def _replace_in_block(text: str, key: str, pat: re.Pattern, repl: str, count: in
     return text[:a] + new + text[b:], n
 
 
+def _drop_pip_prereqs(text: str, steps_for: dict) -> str:
+    """Drop a pip tool from `prereqs` when the derived steps no longer call it.
+
+    The release-archive install REPLACED the pip install, so a leftover `uv`/`pip`
+    prerequisite is a false precondition: `engine_skills.check(mode="native")` refuses
+    the engine on a host that has no uv, for an install that never invokes it
+    (issue #386). Only flow lists inside `prereqs` are rewritten; every other tool the
+    skill documents is kept, and a tool that a derived step still names is kept too.
+    `prereqs.common` applies to every backend, so it is only dropped when NO backend's
+    steps name it.
+    """
+    all_steps = {backend: " ".join(str(s) for s in steps) for backend, steps in steps_for.items()}
+    every = " ".join(all_steps.values())
+    span = _block_span(text, "prereqs")
+    if span is None:
+        return text
+    a, b = span
+    out, changed = [], False
+    for line in text[a:b].split("\n"):
+        m = re.match(r"^([ \t]*)([A-Za-z_][\w-]*):[ \t]*\[([^\]\n]*)\][ \t]*$", line)
+        if not m:
+            out.append(line)
+            continue
+        indent, key, body = m.groups()
+        calls = every if key == "common" else all_steps.get(key, "")
+        drop = {t for t in ("uv", "pip", "pip3") if not re.search(rf"\b{t}\b", calls)}
+        items = [item.strip() for item in body.split(",") if item.strip()]
+        kept = [item for item in items if item.strip("\"'") not in drop]
+        changed = changed or kept != items
+        out.append(f"{indent}{key}: [{', '.join(kept)}]")
+    if not changed:
+        return text
+    return text[:a] + "\n".join(out) + text[b:]
+
+
 def _download(url: str, dest: Path) -> None:
     """Stream `url` to `dest`. stdlib, so it runs in the test image (no curl)."""
     import urllib.request
@@ -313,6 +348,10 @@ def release_archive_install(skill: dict, assets: list[dict]) -> dict | None:
         # share one path. No pipe: the runner uses bash -o pipefail.
         link = ("exe=$(find {prefix}/{version}/bin -maxdepth 1 -type f -perm -111); "
                 "set -- $exe; ln -sfn \"$1\" {prefix}/{version}/bin/{id}")
+        # A pinned version in the binary path would bake {version} into detect,
+        # so native_status could only ever say missing/current (issue #386).
+        # Point {prefix}/current at the release and detect the INSTALLED binary
+        # through it, so `binary --version` can report an older/newer release.
         steps_for[backend] = [
             "mkdir -p {prefix}/{version}",
             "curl -fsSL -o {prefix}/" + asset_tmpl + " {repo}/releases/download/v{version}/" + asset_tmpl,
@@ -320,6 +359,7 @@ def release_archive_install(skill: dict, assets: list[dict]) -> dict | None:
             "cd {prefix} && " + check + " " + asset_tmpl + ".sha256",
             "tar -xzf {prefix}/" + asset_tmpl + " -C {prefix}/{version} --strip-components=1",
             link,
+            "ln -sfn {prefix}/{version} {prefix}/current",
         ]
     return steps_for
 
@@ -354,10 +394,24 @@ def _apply_release_archive(text: str, steps_for: dict) -> str:
     block = _dump_install(steps_for)
     # keep the newline that separated install from the next key
     text = text[:a] + block + text[b:]
-    # The unpacked executable is linked to {id}. detect used to ask pip or
-    # `uv tool` for a package the archive does not install.
-    text = _set_scalar(text, "binary", '"{prefix}/{version}/bin/{id}"')
+    # The unpacked executable is linked to {id}, and {prefix}/current points at
+    # the release it was unpacked into. detect goes through the symlink so it
+    # asks the INSTALLED binary its version — a pinned version baked into the
+    # path would let native_status only ever say missing/current (issue #386).
+    text = _set_scalar(text, "binary", '"{prefix}/current/bin/{id}"')
     text = _set_scalar(text, "detect", '"{binary} --version"')
+    # The release-archive binary answers --version (the detect and native_status
+    # ask it): keep the documented binary flags honest, adding --version to any
+    # --help the pip-era skill already documented.
+    flags = _block_span(text, "binary_flags")
+    has_help = bool(flags) and '"--help"' in text[flags[0]:flags[1]]
+    want = ["--help", "--version"] if has_help else ["--version"]
+    text = _set_scalar(text, "binary_flags",
+                       "[" + ", ".join(f'"{f}"' for f in want) + "]")
+    # The pip-era prerequisite went away with the pip install it belonged to: leaving it
+    # would make check(mode="native") refuse the engine on a host that has no uv, for
+    # steps that never call it (issue #386).
+    text = _drop_pip_prereqs(text, steps_for)
     return text
 
 
