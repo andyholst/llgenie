@@ -1,0 +1,11 @@
+# Tasks
+
+- [x] 1. `scripts/unit_tests.py` — the ONE aggregator of the hermetic unit suite: discovery of `tests/test_*.py` minus the roster, plus `list` / `excluded` / `argv` / `check` / `run`, stdlib only (it runs inside the test image), and `run` refusing to start on a broken roster
+- [x] 2. `tests/fixtures/unit-suite.json` — the 15 deliberate exclusions (reason, issue, date, the target that runs each instead) and the 3 node-id de-selections of the live TensorFold release reads
+- [x] 3. Makefile: `test-unit` runs `python scripts/unit_tests.py run` — the recipe names no test file at all; `make test-engine-bump-live` keeps the de-selected live cases
+- [x] 4. `scripts/check_wiring.py` — a document the aggregator selects is wired through the target that runs it, the roster's consistency findings join the graph, and `make wiring-report` shows the seam (`discovery: make test-unit runs 76 file(s) through scripts/unit_tests.py without naming them in its recipe`)
+- [x] 5. `tests/test_unit_suite.py` — the spec's scenarios against the real tree and real scratch trees: discovery, the roster's staleness in every direction, the node-id invocation, `run` refusing to start on a broken roster
+- [x] 6. The 9 self-wiring sites read the aggregator's selection instead of the recipe line: `test_agent_nerve.py`, `test_agent_shell_keys.py`, `test_check_docs.py`, `test_engine_bump.py` (its `-k` check became an exact `--deselect` node-id check), `test_engine_skill_gap.py`, `test_issue_implementer.py`, `test_require_env.py`, `test_secret_output.py`, `test_wiring.py`
+- [x] 7. `AGENTS.md` states the rule: the unit suite is aggregated, never enumerated — a new `tests/test_*.py` needs no Makefile edit, an exclusion is a dated decision
+- [x] 8. `README.md` documents the seam and the roster; `agent-wiki/2026-10-20-unit-suite-aggregator.md` records the change, referencing issue #393 and PR #397
+- [x] 9. Verified: the aggregator's selection equals the files the recipe named before the change (76 now — `main`'s own `tests/test_ci_publish_order.py` is picked up with no edit; 0 unaccounted); `make check-wiring` exit 0 with `make wiring-report` naming the seam; `make lint` and `make openspec-validate NAME=unit-suite-aggregator` exit 0; the full discovered suite green in `llgenie/test:latest` and on the PR's `linux / unit` job
