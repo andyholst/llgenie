@@ -1018,8 +1018,9 @@ conflict-free, and deletes the branch. The shape is `trending-local-llms`' `auto
 `qa-validate.yml`, which is the model for every bot in this repo.
 
 ```bash
-make auto-merge PR=<n> REPO=asimov-agent/llgenie [HEAD_SHA=<sha>] [DRY=1]   # the decision + the merge
-make verify-closure PR=<n> REPO=asimov-agent/llgenie                        # did `closes #n` actually close?
+make auto-merge PR=<n> REPO=asimov-agent/llgenie [HEAD_SHA=<sha>] [APPROVE=1] [DRY=1]  # the decision + the merge
+make auto-merge-explain PR=<n> REPO=asimov-agent/llgenie     # why it was (or was not) merged — writes nothing
+make verify-closure PR=<n> REPO=asimov-agent/llgenie         # did `closes #n` actually close?
 ```
 
 What it will and will not touch:
@@ -1037,6 +1038,27 @@ The merge runs with the owner PAT (`secrets.BUMP_TOKEN`), never the job token: a
 images — would never happen. Right after merging, `make verify-closure` reads the PR's own
 `closingIssuesReferences` and **fails, naming the issue**, when a claimed `closes #n` did not bind, so an
 unbound keyword is a red run instead of an issue left open on the board.
+
+**The merge runs in `.github/workflows/auto-merge.yml`, a `workflow_run` workflow — not a job in `ci.yml`**
+(issue #493). A `pull_request` run **from a fork** receives no repository secrets, so the job that used to live
+in `ci.yml` saw `secrets.BUMP_TOKEN` as the empty string: #481's run was green and the job `succeeded` while
+merging nothing. A `workflow_run` workflow executes in the base repository with the base repository's secrets,
+acts only on a pull-request run that concluded `success`, checks out the **base** branch (it holds a write
+token, so it never runs PR code), resolves the PR from the run, and calls the same `make auto-merge`. A missing
+token is a red run (exit 2), never a silent deferral. It merges a PR only when its author is the repository
+owner, a collaborator with write access, or the bot (a bot PR is authorised by who triggered the CI run) —
+the same gate `ci.yml`'s `guard` job applies to a run. A stranger's green PR is deferred, even from the
+trusted fork.
+
+Two things make a deferral honest rather than silent (issue #491):
+
+- **A green PR blocked only by a required review is squash-merged with `--admin`.** The owner PAT is the
+  account that opens these PRs, so it can never approve them — GitHub refuses a self-approval. The bypass
+  runs only after the author gate has accepted the opener: the repository owner, a collaborator with write
+  access, or the bot. A stranger's green PR is deferred, not bypassed. Conflicts, a stale branch, a draft
+  and `do-not-merge` are still deferred.
+- **Every deferral posts one comment per head SHA** with the reason and what would unblock it, so the PR
+  answers "why is this not merged?" itself. `make auto-merge-explain` prints the same verdict at any time.
 
 The agent still never runs `gh pr merge` itself (AGENTS.md rule 7): it pushes, drives the PR green and
 stops — CI lands it, or a human does when the job defers.
