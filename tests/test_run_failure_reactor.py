@@ -27,7 +27,9 @@ OWNER = "asimov-agent"
 
 def gh_stub(tmp_path: Path, run: dict, prs: list[dict], comments: dict | None = None,
             filed: list[str] | None = None, fail_read: str | None = None,
-            checks: dict | None = None, commits: dict | None = None) -> Path:
+            checks: dict | None = None, commits: dict | None = None,
+            rest: dict | None = None, fork_prs: dict | None = None,
+            pr_meta: dict | None = None) -> Path:
     """A `gh` that answers the shapes the reactor uses, and logs every argv.
 
     `run` is the `gh run view --json` object; `prs` is the REST `pull_requests` array; `comments`
@@ -40,7 +42,9 @@ def gh_stub(tmp_path: Path, run: dict, prs: list[dict], comments: dict | None = 
     scenario = tmp_path / "scenario.json"
     scenario.write_text(json.dumps({"run": run, "prs": prs, "comments": comments or {},
                                     "filed": filed or [], "fail_read": fail_read,
-                                    "checks": checks or {}, "commits": commits or {}}))
+                                    "checks": checks or {}, "commits": commits or {},
+                                    "rest": rest or {}, "fork_prs": fork_prs or {},
+                                    "pr_meta": pr_meta or {}}))
     log = tmp_path / "gh-calls"
     log.write_text("")
     gh = bin_dir / "gh"
@@ -48,12 +52,16 @@ def gh_stub(tmp_path: Path, run: dict, prs: list[dict], comments: dict | None = 
 import json, pathlib, sys
 sc = json.loads(pathlib.Path("{scenario}").read_text())
 a = sys.argv[1:]
+import os
 with open("{log}", "a") as fh:
-    print(" ".join(x.replace("\\n", "\\\\n") for x in a), file=fh)
+    # the token `gh` was handed: the dispatch identity is asserted from here (issue #555)
+    print(" ".join(x.replace("\\n", "\\\\n") for x in a) + " | token=" + os.environ.get("GH_TOKEN", ""), file=fh)
 if sc.get("fail_read") and sc["fail_read"] in " ".join(a):
     sys.stderr.write("boom\\n"); sys.exit(1)
 if a[0] == "api":
-    print(json.dumps({{"pull_requests": sc["prs"]}}))
+    rest = dict(sc["rest"] or {{"pull_requests": sc["prs"]}})
+    rest.setdefault("pull_requests", sc["prs"])
+    print(json.dumps(rest))
 elif a[:2] == ["run", "view"]:
     if "--log-failed" in a:
         print("line1\\nline2\\nline3\\nline4\\nline5")
@@ -61,8 +69,15 @@ elif a[:2] == ["run", "view"]:
         print(json.dumps(sc["run"]))
 elif a[:2] == ["pr", "checks"]:
     print(json.dumps(sc["checks"].get(a[2], [])))
+elif a[:2] == ["pr", "list"]:
+    rows = sc["fork_prs"]
+    for branch, nums in rows.items():
+        if any(branch in x for x in a):
+            for n in nums:
+                print(n)
 elif a[:2] == ["pr", "view"]:
-    print(json.dumps({{"comments": sc["comments"].get(a[2], []),
+    meta = sc["pr_meta"].get(a[2], {{}})
+    print(json.dumps({{**meta, "comments": sc["comments"].get(a[2], []),
                       "commits": [{{"messageHeadline": m}} for m in sc["commits"].get(a[2], [])]}}))
 elif a[:2] == ["pr", "comment"]:
     pass
@@ -80,9 +95,16 @@ else:
     return log
 
 
-def run_reactor(tmp_path: Path, args: list[str]):
+#: The owner identity a dispatch must carry (fix-bot's guard refuses `github-actions[bot]`, #510).
+OWNER_TOKEN = "ghp_owner_token_for_tests"
+
+
+def run_reactor(tmp_path: Path, args: list[str], dispatch_token: str | None = OWNER_TOKEN):
     env = dict(os.environ)
     env["PATH"] = f"{tmp_path / 'bin'}:{env['PATH']}"
+    env.pop("DISPATCH_TOKEN", None)
+    if dispatch_token is not None:
+        env["DISPATCH_TOKEN"] = dispatch_token
     return subprocess.run([sys.executable, str(REACTOR), *args], cwd=str(tmp_path),
                           env=env, capture_output=True, text=True, timeout=60)
 
@@ -250,3 +272,99 @@ def test_the_workflow_calls_the_reactor_through_a_make_target():
     perms = wf["permissions"]
     assert perms["issues"] == "write" and perms["actions"] == "write", perms
     assert "RUN_ID" in reactor_step["env"] and "REPO" in reactor_step["env"]
+
+
+# ---------------------------------------------------------------------------
+# Route A for a FORK-head run: the PR is resolved from the run itself (issue #555)
+# ---------------------------------------------------------------------------
+def _fork_rest(branch="feat/x", owner=None):
+    """The REST run object a fork `pull_request` run returns: NO pull_requests, but a head."""
+    return {"pull_requests": [], "head_branch": branch,
+            "head_repository": {"owner": {"login": owner or reactor.TRUSTED_FORK}}}
+
+
+def _open_pr_meta(num, branch="feat/x", owner=None, draft=False):
+    return {str(num): {"number": num, "title": f"PR {num}", "headRefName": branch,
+                       "headRepositoryOwner": {"login": owner or reactor.TRUSTED_FORK},
+                       "isDraft": draft, "state": "OPEN", "updatedAt": ""}}
+
+
+def test_a_red_fork_pr_run_dispatches_the_fix_bot_as_the_owner(tmp_path):
+    """Every agent PR lives in the fork; a red run on it must be repaired, not filed as an issue."""
+
+    # Given a fork run (empty pull_requests) whose head resolves to an open, red, non-draft PR
+    log = gh_stub(tmp_path, failed_run(event="pull_request"), [], rest=_fork_rest(),
+                  fork_prs={"feat/x": [260]}, checks={"260": RED},
+                  pr_meta=_open_pr_meta(260))
+
+    # When the reactor routes the run
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"])
+
+    # Then it claims that PR and dispatches the fix-bot for it, and files no issue
+    assert r.returncode == 0, r.stdout + r.stderr
+    calls = log.read_text().splitlines()
+    dispatch = [l for l in calls if l.startswith("workflow run")]
+    assert len(dispatch) == 1 and "pr_number=260" in dispatch[0], calls
+    assert "branch=feat/x" in dispatch[0], dispatch[0]
+    assert not [l for l in calls if l.startswith("issue create")], calls
+
+    # And   the dispatch carries the OWNER identity, never the job token (fix-bot's guard refuses
+    #       github-actions[bot]: run 39917926028)
+    assert f"token={OWNER_TOKEN}" in dispatch[0], dispatch[0]
+
+
+def test_a_missing_dispatch_token_is_loud_and_dispatches_nothing(tmp_path):
+    """A dispatch as `github-actions[bot]` would be refused by the guard: refuse to make it at all."""
+
+    # Given the same red fork PR, but no DISPATCH_TOKEN in the environment
+    log = gh_stub(tmp_path, failed_run(event="pull_request"), [], rest=_fork_rest(),
+                  fork_prs={"feat/x": [260]}, checks={"260": RED},
+                  pr_meta=_open_pr_meta(260))
+
+    # When  the reactor routes the run
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"],
+                    dispatch_token=None)
+
+    # Then  it fails loudly, naming the variable, and neither dispatches nor files anything
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "DISPATCH_TOKEN" in r.stderr, r.stderr
+    calls = log.read_text().splitlines()
+    assert not [l for l in calls if l.startswith("workflow run")], calls
+    assert not [l for l in calls if l.startswith("issue create")], calls
+
+
+def test_a_fifth_party_fork_run_is_not_dispatched(tmp_path):
+    """A stranger's fork cannot be pushed by any token we hold: report it, and file the issue."""
+
+    # Given a run whose head lives in someone else's fork
+    log = gh_stub(tmp_path, failed_run(event="pull_request"), [],
+                  rest=_fork_rest(owner="stranger"))
+
+    # When  the reactor routes the run
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"])
+
+    # Then  it does not dispatch, says why, and falls back to the deduped issue
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FIFTH-PARTY" in r.stdout, r.stdout
+    calls = log.read_text().splitlines()
+    assert not [l for l in calls if l.startswith("workflow run")], calls
+    assert len([l for l in calls if l.startswith("issue create")]) == 1, calls
+
+
+def test_a_draft_fork_pr_run_files_an_issue_instead(tmp_path):
+    """Draft means the author is still working: the fix-bot's own rules refuse it, so do we."""
+
+    # Given a fork run whose PR is still a draft
+    log = gh_stub(tmp_path, failed_run(event="pull_request"), [], rest=_fork_rest(),
+                  fork_prs={"feat/x": [260]}, checks={"260": RED},
+                  pr_meta=_open_pr_meta(260, draft=True))
+
+    # When  the reactor routes the run
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"])
+
+    # Then  the sweep's own rule is the one that refuses it, and the issue path still runs
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "not eligible: draft" in r.stdout, r.stdout
+    calls = log.read_text().splitlines()
+    assert not [l for l in calls if l.startswith("workflow run")], calls
+    assert len([l for l in calls if l.startswith("issue create")]) == 1, calls

@@ -596,7 +596,15 @@ architecture-bot: ## Run the architecture bot locally end to end: brief -> doc -
 # pushable same-repo PR -> claim it (scripts/bot_claims.py, #279/#285) and dispatch the EXISTING
 # fix-bot. Route B: no pushable PR -> file ONE marker-deduped issue labelled `agent:implement`.
 # It never repairs/commits/pushes/merges in the file-issue path; a run it cannot diagnose is loud.
-run-failure-reactor: ## Route a failed CI run to a remedy (issue #286): a pushable same-repo PR -> dispatch the fix-bot; else file ONE deduped issue labelled agent:implement (REPO=; RUN_ID=; DRY=1 previews)
+# The identity `gh workflow run` dispatches with (issue #555): the dispatched run's actor IS the
+# token's identity, and every guarded workflow here refuses `github-actions[bot]` (#510), so a
+# dispatch made with the job token produced a fix-bot run that died in its own guard (run
+# 39917926028). The owner PAT is passed by NAME in the environment only — never on argv, never in a
+# log. Locally it defaults to whatever GH_TOKEN the shell already holds.
+DISPATCH_TOKEN ?= $(GH_TOKEN)
+export DISPATCH_TOKEN
+
+run-failure-reactor: ## Route a failed CI run to a remedy (issue #286): a PR this bot can push (this repo, or the owner's fork) -> dispatch the fix-bot as the OWNER (DISPATCH_TOKEN); else file ONE deduped issue labelled agent:implement (REPO=; RUN_ID=; DRY=1 previews)
 	@test -n "$(REPO)" || { echo "Usage: make run-failure-reactor REPO=<owner/repo> RUN_ID=<run> [DRY=1]"; exit 1; }
 	@test -n "$(RUN_ID)" || { echo "Usage: make run-failure-reactor REPO=<owner/repo> RUN_ID=<run> [DRY=1]"; exit 1; }
 	python3 scripts/run_failure_reactor.py --repo "$(REPO)" --run-id "$(RUN_ID)" $(if $(DRY),--dry,)
