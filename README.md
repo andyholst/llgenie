@@ -715,7 +715,7 @@ oldest first, not already reviewed (`agent:refined`), not claimed for implementa
 linked to a pull request — i.e. an issue no PR answers yet. It opens **no PR at all**: its outcome is
 ONE comment plus the `agent:refined` label, which is what stops it reviewing the same issue twice.
 
-**The duplicate sweep (`issue-dedupe.yml`, issue #553) runs FOUR times a day** (`37 */6 * * *`) because
+**The duplicate sweep (`issue-dedupe.yml`, issue #553) runs FOUR times a day** (`51 */6 * * *`) because
 neither the refiner nor the implementer ever compares two issues: one improves an issue per run, the other
 implements one, so the same defect filed twice is implemented twice — or the better specification is retired.
 The host picks the most similar pair of **unclaimed** open issues deterministically (title+body token Jaccard,

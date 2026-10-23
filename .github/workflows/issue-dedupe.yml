@@ -2,7 +2,7 @@
 # refiner improves ONE issue per run and the implementer implements ONE — neither ever looks two issues at
 # once, so the same defect filed twice is implemented twice or the better specification is retired.
 #
-# FOUR TIMES A DAY (`37 */6 * * *`, every six hours at :37 — its own minute), ONE pair per run, in
+# FOUR TIMES A DAY (`51 */6 * * *`, every six hours at :51 — its own minute, issue #301), ONE pair per run, in
 # the same shape the refiner uses for one issue: the host picks the most similar pair of UNCLAIMED open
 # issues deterministically (scripts/issue_dedup.py, older as canonical), the agent decides whether they are
 # the same defect, and the host applies the verdict.
@@ -24,7 +24,7 @@ name: issue-dedupe — retires a duplicate of an issue, FOUR times a day, never 
 
 on:
   schedule:
-    - cron: "37 */6 * * *"   # 4x/day at an odd minute: one pair compared per run (issue #553)
+    - cron: "51 */6 * * *"   # 4x/day at an odd minute: one pair compared per run (issue #553)
   workflow_dispatch:
 
 permissions:

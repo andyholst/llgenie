@@ -92,7 +92,7 @@ Then  neither issue is edited or closed.
 
 ### Requirement: The sweep runs four times a day behind the shared guard
 
-`issue-dedupe.yml` SHALL run on `cron: "37 */6 * * *"` and by `workflow_dispatch` behind the byte-identical
+`issue-dedupe.yml` SHALL run on `cron: "51 */6 * * *"` and by `workflow_dispatch` behind the byte-identical
 owner/collaborator guard, deciding at most one pair per run, and SHALL be described in the README dispatch
 table.
 

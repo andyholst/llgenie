@@ -24,7 +24,7 @@ any two of them.
   queued with `agent:implement` when unqueued. A duplicate with no `EVIDENCE` is refused, and the apply path
   re-checks the copy for agent labels before touching it.
 - **`make issue-dedup-pick` / `issue-dedup` / `issue-dedup-apply`** — the three steps, one entry point each.
-- **`.github/workflows/issue-dedupe.yml`** — `cron: "37 */6 * * *"` (four times a day, its own minute) plus
+- **`.github/workflows/issue-dedupe.yml`** — `cron: "51 */6 * * *"` (four times a day, its own minute) plus
   `workflow_dispatch` behind the byte-identical owner/collaborator `guard` job; one pair per run; the agent leg
   inside the agent image with its transcript redacted (`scrubbed_run`).
 

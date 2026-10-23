@@ -20,7 +20,7 @@ workflow ran it either.
   + `REASON`; the apply path posts one comment citing the canonical, adds `agent:duplicate`, closes the copy,
   and queues the canonical with `agent:implement` when unqueued. No evidence, no close.
 - `make issue-dedup-pick` / `issue-dedup` / `issue-dedup-apply` — the three steps the workflow calls.
-- `issue-dedupe.yml`: `cron: "37 */6 * * *"` (**four times a day**, its own minute) + `workflow_dispatch` behind
+- `issue-dedupe.yml`: `cron: "51 */6 * * *"` (**four times a day**, its own minute) + `workflow_dispatch` behind
   the byte-identical owner/collaborator guard; one pair per run; the agent leg runs inside the agent image and
   its transcript is redacted (`scrubbed_run`). A crashed pick and an empty `dedup.md` both fail loudly instead
   of reporting a green no-op.

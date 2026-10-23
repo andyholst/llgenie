@@ -29,8 +29,10 @@ def test_every_unattended_prompt_forbids_asking_a_question():
     # Given the Makefile's agent prompts
     # When  each prompt body is read (the recipe line that starts with `hermes -z "`)
     # Then  every one carries the UNATTENDED rule
-    assert MAKEFILE.count("UNATTENDED: this run has no user") == 5, (
-        "expected the rule on all five hermes prompts (triage, implement, refine, architecture, fetch)")
+    prompts = MAKEFILE.count('hermes -z "')
+    assert prompts >= 5, "the Makefile's agent prompts disappeared"
+    assert MAKEFILE.count("UNATTENDED: this run has no user") == prompts, (
+        f"every one of the {prompts} hermes prompts must carry the rule")
     for name in PROMPTS:
         assert name in MAKEFILE, name
 
