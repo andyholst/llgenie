@@ -1221,10 +1221,17 @@ make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run>   # route a fail
 make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run> DRY=1   # preview, dispatch/file nothing
 ```
 
-- **Route A** — the failed run has a pushable **same-repo** PR: the reactor claims the PR
+- **Route A** — the failed run reports a PR this bot can **push**: the reactor claims the PR
   (`scripts/bot_claims.py`, issues #279/#285) and dispatches the **existing** `fix-bot` for it,
-  reusing `scripts/fix_bot_sweep.py`'s eligibility rules. A **fork** PR is never dispatched (the
-  token cannot push it).
+  reusing `scripts/fix_bot_sweep.py`'s eligibility rules. Pushable means this repository **or the
+  owner's fork** (`andyholst/llgenie`, where every agent PR lives): a fork `pull_request` run's REST
+  `pull_requests` array is empty (measured, #277/#170), so the PR is resolved from the run's
+  `head_branch` + `head_repository.owner.login` with `scripts/resolve_run_pr.py` — the resolver
+  auto-merge uses (issue #555). A **fifth-party** fork is still never dispatched: no token this
+  repository holds can push it. The dispatch carries the **owner** identity (`DISPATCH_TOKEN`, from
+  the environment only) because the dispatched run's actor is the token's identity and every guarded
+  workflow here refuses `github-actions[bot]` — a dispatch with the job token died in fix-bot's own
+  guard (run `39917926028`). A missing `DISPATCH_TOKEN` is a loud failure, never a red no-op run.
 - **Route B** — no pushable PR (a red `main` push, a red scheduled bot run, a red publish job):
   the reactor files **exactly ONE** issue whose title names the workflow + failing job, whose body
   carries the failing job, its step, and a tail of `gh run view --log-failed`, deduped by the
@@ -1818,8 +1825,9 @@ make check-strata-models     # fail when data/strata_models.json differs from St
 make queued-alarm      # report CI jobs stuck in `queued` too long (a runner that never picks them up, issue #254);
                        # COMMENT=1 delivers it to the run's pull request (else ONE deduped issue per stuck runner
                        # label, for runs no PR tracks) and a delivery that fails is exit 3, never silent; DRY=1 previews
-make run-failure-reactor  # route a failed CI run to a remedy (REPO=; RUN_ID=; DRY=1 previews): a pushable same-repo
-                       # PR -> dispatch the fix-bot; else file ONE deduped issue labelled agent:implement (issue #286)
+make run-failure-reactor  # route a failed CI run to a remedy (REPO=; RUN_ID=; DRY=1 previews): a PR this bot can push
+                       # (this repo or the owner's fork) -> dispatch the fix-bot as the OWNER (DISPATCH_TOKEN); else file
+                       # ONE deduped issue labelled agent:implement (issue #286, fork routing #555)
 make openspec-validate NAME=<change>   # validate an OpenSpec change
 make openspec-new NAME=<change>        # create a change dir (the OpenSpec CLI, containerized)
 make openspec-status                   # list the changes and their task state

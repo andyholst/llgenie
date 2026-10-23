@@ -8,10 +8,17 @@ reacts to a run's conclusion.
 The route decision lives HERE, in a stdlib-only, no-LLM script (unit-testable, like
 `scripts/fix_bot_sweep.py`), never in a job `if:` that can silently skip (issue #107):
 
-  * Route A — the failed run has non-empty `pull_requests` and the PR head is in THIS repo and
-    pushable: dispatch the EXISTING `fix-bot` for that PR (reusing `scripts/fix_bot_sweep.py`'s
-    eligibility rules; do NOT duplicate or rewrite them). A FORK-head PR must NOT be dispatched
-    (the token cannot push it).
+  * Route A — the failed run reports a PR this bot can PUSH: dispatch the EXISTING `fix-bot` for
+    that PR (reusing `scripts/fix_bot_sweep.py`'s eligibility rules; do NOT duplicate or rewrite
+    them). Pushable means this repository OR the owner's fork (`TRUSTED_FORK`), which is where every
+    agent PR lives — and a fork `pull_request` run's REST `pull_requests` array is EMPTY (measured,
+    #277/#170), so the PR is resolved from the run's `head_branch` + `head_repository.owner.login`
+    (`scripts/resolve_run_pr.py`, the resolver auto-merge uses). A FIFTH-PARTY fork is still refused:
+    no token we hold can push it (issue #555).
+  * The dispatch must carry the OWNER identity. The dispatched run's actor is the token's identity,
+    and every guarded bot refuses `github-actions[bot]` (#510) — with `github.token` the dispatched
+    fix-bot died in its own guard (run `39917926028`). So `gh workflow run` uses `DISPATCH_TOKEN`
+    from the environment, never argv, and a missing one is a LOUD failure (issue #555).
   * Route B — no pushable PR (a red main push, a red scheduled bot run, a red publish job): file
     exactly ONE issue whose title names the workflow plus the failing job, and whose body carries
     the failing job, its step, and a tail of the failing log (`gh run view RUNID --log-failed`).
@@ -45,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bot_claims  # the shared protocol (issue #279)
 import fix_bot_sweep  # the eligibility rules we REUSE, never duplicate (issue #222)
+import resolve_run_pr  # the run -> PR resolver auto-merge uses (#509), reused, never rewritten
 
 #: This bot, as the claim marker names it (scripts/bot_claims.py). The name is the workflow's bot
 #: name (`run-failure-reactor.yml` -> `run-failure-reactor`) so a claim reads as the thing a
@@ -62,6 +70,15 @@ IMPLEMENT_LABEL = "agent:implement"
 
 #: The dedupe marker prefix. The full marker is `<!-- run-fixer: WORKFLOW/JOB@SHORTSHA -->`.
 MARKER_PREFIX = "run-fixer:"
+
+#: The fork owner whose PRs this bot may push: every agent PR is pushed there, and the fix-bot's
+#: own sweep repairs it (`fix_bot_sweep.eligible(..., own_fork=...)`, issue #477).
+TRUSTED_FORK = "andyholst"
+
+#: The credential `gh workflow run` carries. The dispatched run's actor is the token's identity, and
+#: every guarded workflow of this repo refuses `github-actions[bot]` (#510) — so the dispatch needs
+#: the OWNER, by env var name only, never on argv (issue #555).
+DISPATCH_TOKEN_ENV = "DISPATCH_TOKEN"
 
 #: How many lines of the failing log tail to carry in the issue body.
 LOG_TAIL_LINES = 40
@@ -89,15 +106,19 @@ def marker(workflow: str, job: str, head_sha: str) -> str:
     return f"<!-- {MARKER_PREFIX} {workflow}/{job}@{short} -->"
 
 
-def run_pull_requests(repo: str, run_id: int) -> list[dict]:
-    """The PR(s) this run reports on, from the REST run object's `pull_requests` array.
+def run_rest(repo: str, run_id: int) -> dict:
+    """The REST run object: `pull_requests`, `head_branch`, `head_repository`, `event`.
 
     `gh run view --json` rejects a `pullRequests` field outright (measured, #277), so the PRs come
-    from the REST endpoint. A fork-PR run's array is EMPTY here (measured, #277/#170) — which is
-    exactly the shape this reactor must not dispatch — so a fork PR is never routed to the fix-bot.
+    from the REST endpoint — and a fork-PR run's array is EMPTY there (measured, #277/#170), which
+    is why the head branch + head repository are read from the same object (issue #555).
     """
-    data = json.loads(_gh(["api", f"/repos/{repo}/actions/runs/{run_id}"]) or "{}")
-    return data.get("pull_requests") or []
+    return json.loads(_gh(["api", f"/repos/{repo}/actions/runs/{run_id}"]) or "{}")
+
+
+def run_pull_requests(repo: str, run_id: int) -> list[dict]:
+    """The PR(s) the REST run object names. Empty for a fork `pull_request` run (#277/#170)."""
+    return run_rest(repo, run_id).get("pull_requests") or []
 
 
 def run_detail(repo: str, run_id: int) -> dict:
@@ -164,41 +185,95 @@ def claim_pr(repo: str, pr: dict) -> None:
 
 
 def dispatch_fix_bot(repo: str, pr: dict, check: str = "make ci-unit") -> None:
-    """Dispatch the EXISTING fix-bot for this PR (the same argv the sweep uses)."""
+    """Dispatch the EXISTING fix-bot for this PR, as the OWNER (issue #555).
+
+    The dispatched run's actor IS the identity of the token `gh` carries, and every guarded workflow
+    of this repo refuses `github-actions[bot]` — a dispatch with `github.token` produced a fix-bot run
+    that died in its own guard (measured: run `39917926028`). So the dispatch takes its credential
+    from the environment (`DISPATCH_TOKEN`), never from argv, and a missing one fails LOUDLY instead
+    of producing a red no-op run we would then file an issue about.
+    """
+    token = (os.environ.get(DISPATCH_TOKEN_ENV) or "").strip()
+    if not token:
+        raise RuntimeError(
+            f"{DISPATCH_TOKEN_ENV} is empty: a dispatch with the job token makes the fix-bot run's "
+            f"actor `github-actions[bot]`, which its own guard refuses (issue #555). Nothing was "
+            f"dispatched for PR #{pr.get('number')}.")
     r = subprocess.run(["gh", "workflow", "run", "fix-bot.yml", "--repo", repo,
                         "-f", f"pr_number={pr['number']}", "-f", f"branch={pr['headRefName']}",
                         "-f", f"check={check}", "-f", "rounds=3"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=dict(os.environ, GH_TOKEN=token))
     if r.returncode != 0:
         raise RuntimeError(f"dispatch failed: {r.stderr.strip()}")
 
 
-def _pr_from_run(repo: str, run: dict, run_id: int) -> dict | None:
-    """The pushable same-repo PR this run reports on, or None.
+def _fork_pr(repo: str, rest: dict, run_id: int) -> dict | None:
+    """The open PR a FORK run reports on, or None (issue #555).
 
-    Reuses `fix_bot_sweep`'s eligibility rules (open, non-draft, head in THIS repo, not `main`,
-    at least one failing check, fewer than the attempt cap) — never duplicates them. A fork PR
-    (head owner != repo owner) is refused here, exactly as the sweep refuses it.
+    A fork `pull_request` run's REST `pull_requests` array is empty (#277/#170), so the PR is
+    resolved from the run's own head branch + head repository owner — the resolver auto-merge uses
+    (`scripts/resolve_run_pr.py`). Only the owner's fork is pushable here; a fifth-party fork cannot
+    be pushed by any token this repository holds, so it is reported and left to a human.
     """
-    prs = run_pull_requests(repo, run_id)
-    if not prs:
+    branch = rest.get("head_branch") or ""
+    owner = ((rest.get("head_repository") or {}).get("owner") or {}).get("login") or ""
+    if not branch or not owner:
         return None
-    # The REST `pull_requests` array carries number + head ref + head repo; map to the shape the
-    # sweep's `eligible` expects.
-    for p in prs:
+    if owner.lower() != TRUSTED_FORK:
+        print(f"[run-fixer] run {run_id} is a FIFTH-PARTY fork PR (head owner {owner}): not ours "
+              f"to push - leaving it to a human", flush=True)
+        return None
+    number = resolve_run_pr.open_pr_for_head(repo, owner, branch)
+    if number is None:
+        print(f"[run-fixer] run {run_id} reports no OPEN PR for {owner}:{branch} - nothing to "
+              f"repair", flush=True)
+        return None
+    out = _gh(["pr", "view", str(number), "--repo", repo, "--json",
+               "number,title,headRefName,headRepositoryOwner,isDraft,state,updatedAt"])
+    detail = json.loads(out or "{}") or {}
+    if (detail.get("state") or "").upper() != "OPEN":
+        print(f"[run-fixer] PR #{number} is {detail.get('state') or '?'}: nothing to repair",
+              flush=True)
+        return None
+    return {"number": detail.get("number") or number,
+            "headRefName": detail.get("headRefName") or branch,
+            "headRepositoryOwner": detail.get("headRepositoryOwner") or {"login": owner},
+            "isDraft": bool(detail.get("isDraft")),
+            "title": detail.get("title") or f"PR {number}",
+            "updatedAt": detail.get("updatedAt") or ""}
+
+
+def _pr_from_run(repo: str, run: dict, run_id: int) -> dict | None:
+    """The PR this run reports on that this bot can PUSH, or None.
+
+    Reuses `fix_bot_sweep`'s eligibility rules (open, non-draft, pushable head, not `main`, at least
+    one failing check, fewer than the attempt cap) — never duplicates them. Two sources, because a
+    fork run reports no PR at all:
+
+      * the REST `pull_requests` array (a same-repo PR);
+      * for an EMPTY array, the run's head branch + head owner (`_fork_pr`): the owner's fork is
+        pushable (`own_fork=`), a fifth-party fork is not (issue #555).
+    """
+    rest = run_rest(repo, run_id)
+    repo_owner = repo.split("/")[0]
+    candidates: list[dict] = []
+    for p in rest.get("pull_requests") or []:
         head = p.get("head") or {}
-        head_repo = head.get("repo") or {}
-        owner = (head_repo.get("owner") or {}).get("login") or ""
-        repo_owner = repo.split("/")[0]
+        owner = ((head.get("repo") or {}).get("owner") or {}).get("login") or ""
         if owner and owner.lower() != repo_owner.lower():
-            print(f"[run-fixer] run {run_id} reports on a FORK PR (head owner {owner}): "
-                  f"the token cannot push it - leaving it to a human", flush=True)
+            print(f"[run-fixer] run {run_id} reports on a FORK PR (head owner {owner}): not ours "
+                  f"to push - leaving it to a human", flush=True)
             continue
-        pr = {"number": p.get("number"), "headRefName": head.get("ref"),
-              "headRepositoryOwner": {"login": owner or repo_owner},
-              "isDraft": False, "title": p.get("title") or f"PR {p.get('number')}",
-              "updatedAt": ""}
-        ok, why = fix_bot_sweep.eligible(repo, pr)
+        candidates.append({"number": p.get("number"), "headRefName": head.get("ref"),
+                           "headRepositoryOwner": {"login": owner or repo_owner},
+                           "isDraft": False, "title": p.get("title") or f"PR {p.get('number')}",
+                           "updatedAt": ""})
+    if not candidates:
+        fork_pr = _fork_pr(repo, rest, run_id)
+        if fork_pr:
+            candidates.append(fork_pr)
+    for pr in candidates:
+        ok, why = fix_bot_sweep.eligible(repo, pr, own_fork=TRUSTED_FORK)
         if ok:
             return pr
         print(f"[run-fixer] run {run_id} PR #{pr['number']} not eligible: {why}", flush=True)
@@ -213,7 +288,7 @@ def issue_body(run: dict, job: dict, log_tail: str, marker: str) -> str:
             step = s.get("name") or ""
             break
     lines = [
-        f"A CI run failed and no open same-repo PR can be repaired for it, so this issue tracks "
+        f"A CI run failed and no PR this bot can repair was found for it, so this issue tracks "
         f"the failure as a work item for the issue-bot.",
         "",
         f"- **workflow:** `{run.get('workflowName') or '?'}`",
