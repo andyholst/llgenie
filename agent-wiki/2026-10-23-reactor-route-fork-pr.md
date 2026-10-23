@@ -1,6 +1,6 @@
 # A failed fork-PR run is repaired, not filed
 
-Issue: #555. PR: (opened with this change).
+Issue: #555. PR: #556.
 
 The reactor's Route A never fired on this repository: it reads the REST run object's `pull_requests`,
 which is empty for a fork `pull_request` run (#277/#170), and it refused a fork head outright — while every
