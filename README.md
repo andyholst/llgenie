@@ -92,6 +92,13 @@ A bot never works from a stale base:
   to** (`make fix-bot-sweep OWN_FORK=andyholst`, issue #340). Every llgenie PR is opened from the
   fork, so without the allowlist the scheduled sweep passed over every PR and repaired nothing;
   the branch is now checked out from — and pushed to — the PR's own head remote.
+- **The fix-bot is woken by the failure it repairs** (issue #538). `fix-bot.yml` runs on `workflow_run` for
+  `CI` when a `pull_request` run concluded `failure`, resolves that run's PR with `make auto-merge-resolve`,
+  captures the failed run's log, and dispatches the repair for **that** PR (`make fix-bot-sweep PR=<n>`). The
+  hourly sweep stays as a fallback. Up to **5** attempts per head (`FIX_ROUNDS`/`rounds`, counted by the PR's
+  `fix(bot):` commits); a failure this runner cannot reproduce (a macOS-only job, a GPU-only image test) is
+  repaired from the captured log and marked **UNVERIFIED** — CI re-runs and re-triggers, so a real flake is
+  retried instead of being dropped because a Linux check was green.
 
 Driven by `scripts/bot_sync_main.sh`; `tests/test_bot_sync.py` runs the rules through a real
 scratch git repository.
@@ -1230,7 +1237,7 @@ from the pipeline that will run.
 | `code-review-bot.yml` | reviews the tree and the pipelines and files one issue per finding (never edits code) | `dry` (optional, default `false`) — Preview the issues it would file (owner only) |
 | `engine-bump-rebase.yml` | rebases every open engine-bump PR onto the latest main | `dry` (optional, default `false`) — print the PRs it would rebase and push nothing (no branch is touched) |
 | `engine-bump.yml` | bumps pinned engines to their newest upstream release and opens the PR | `engine` (optional) — Only bump this engine (id); empty = all |
-| `fix-bot.yml` | repairs a failing PR branch until its checks pass (never merges) | `pr_number` (optional) — PR number whose branch should be repaired<br>`branch` (optional) — PR head branch (used when pr_number is empty)<br>`check` (optional, default `make ci-unit`) — the deterministic check to drive the loop<br>`rounds` (optional, default `3`) — repair attempts (default 3) |
+| `fix-bot.yml` | repairs a failing PR branch until its checks pass (never merges) | `pr_number` (optional) — PR number whose branch should be repaired<br>`branch` (optional) — PR head branch (used when pr_number is empty)<br>`check` (optional, default `make ci-unit`) — the deterministic check to drive the loop<br>`rounds` (optional, default `5`) — repair attempts (default 5)<br>`report_file` (optional) — path to the failed run's captured log (repair context; empty = run the check locally) |
 | `issue-bot.yml` | implements ONE issue per run as a reviewable PR (never merges) | `issue_number` (optional) — Issue to implement (owner only). Leave BLANK and the bot picks the oldest agent:implement issue itself - one issue per run, exactly like the schedule |
 | `issue-refiner.yml` | reviews ONE not-yet-implemented issue, never opens a PR | none — the bot decides by itself which ONE issue to review (scripts/issue_refiner.py); |
 | `publish-agent-image.yml` | builds + pushes the Hermes agent image when its hash is not on GHCR yet | `force` (optional, default `false`) — Rebuild + push even if the hash tag is already on GHCR |
