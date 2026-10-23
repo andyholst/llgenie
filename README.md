@@ -1154,9 +1154,9 @@ Two things make a deferral honest rather than silent (issue #491):
   that never converges defers with the state it stayed stuck in, never an empty reason.
 - **Every deferral posts one comment per head SHA** with the reason and what would unblock it, so the PR
   answers "why is this not merged?" itself. `make auto-merge-explain` prints the same verdict at any time. **A deferral is retried, not parked**
-(issue #545): `make auto-merge-recheck` (scheduled every 30 minutes) re-runs the same decision for every open PR
-whose deferral marker names its current head, so a blocker that clears without a push — a secret added, a review
-posted, `do-not-merge` removed, a pending check finished — is finished by the next sweep.
+(issue #545): `make auto-merge-recheck` (on every `CI` completion, and on a 30-minute cron backstop) re-runs the same
+decision for every open PR whose deferral marker names its current head, so a blocker that clears without a push — a secret added, a review
+posted, `do-not-merge` removed, a pending check finished — is finished by the next sweep. A read that answers `mergeable: UNKNOWN` — GitHub computes it asynchronously right after a run — is **waited for** (`settle_mergeable`, bounded 6 × 5 s) instead of being treated as a verdict (issue #558).
 
 The agent still never runs `gh pr merge` itself (AGENTS.md rule 7): it pushes, drives the PR green and
 stops — CI lands it, or a human does when the job defers.

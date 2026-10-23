@@ -97,7 +97,13 @@ jobs:
   recheck:
     # The retry half of the same gate (issue #545): only the PRs whose deferral marker names their CURRENT
     # head are re-evaluated, through the same make target.
-    if: github.event_name == 'schedule'
+    #
+    # It runs on EVERY CI completion as well as on the cron (issue #558): the scheduled trigger has never
+    # fired for this workflow in this repository (measured: 0 `schedule` runs, while issue-refiner.yml's
+    # hourly cron runs fine), so a deferral used to wait for a push that may never come. `always()` is what
+    # makes it run after the merge job whether that job merged, deferred or was skipped.
+    needs: [merge]
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
