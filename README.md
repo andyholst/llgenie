@@ -1251,6 +1251,19 @@ make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run> DRY=1   # previe
   marker `<!-- run-fixer: WORKFLOW/JOB@SHORTSHA -->` (searched `in:body`), and labelled
   `agent:implement` so the issue-bot picks it up. An OPEN issue already carrying the marker files
   nothing.
+- **Route B files only work that is still work (issue #565).** "No pushable PR" covers two very
+  different states and only one of them is a work item. A `pull_request`-event run is filed only
+  while an **open** PR exists for its head — a draft, or a PR whose repair attempts are spent. A
+  merged/closed PR (its branch deleted) is history: nothing is left to repair. A `push` run is filed
+  only when no **later run of the same workflow on the same branch concluded `success`**, because a
+  later green run on that branch proves the failure was transient or already fixed. The verdict is
+  printed — `[run-fixer] run <id> is SUPERSEDED: <reason> - filing nothing` — never a silent skip,
+  and an unreadable answer (a failed `gh` read) is UNKNOWN, never a supersede. Measured on
+  2026-10-23: **6 of 6** open `agent:implement` issues the reactor had filed were this second state,
+  and with the issue-bot's `MAX_PER_DAY = 3` they were two days of agent runs spent re-deriving
+  failures that were green before their issues existed. The sha-scoped marker stays: a same-job
+  failure on a *different* head can be a different defect (`macos / unit` failed on the engine-image
+  digest, the README dispatch table and a cron collision within six hours).
 
 `.github/workflows/run-failure-reactor.yml` runs it on every completed run. It **never** repairs,
 commits, pushes or merges in the file-issue path — it files; the issue-bot owns implementation, the
