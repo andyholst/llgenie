@@ -66,7 +66,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	issue-bot-triage issue-bot-changed issue-bot-verdict implement-issue hermes-smoke agent-jev-preflight code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply check-dispatch-forms dispatch-forms-report \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params build-engine run-engine stop-engine list-engine-images ci-lint ci-unit ci-agents-read \
@@ -377,6 +377,22 @@ _issue-refiner: # (internal) the host recipe the agent image runs: the review, n
 issue-refiner-apply: ## Apply the review in refine.md: ONE comment on the issue + the agent:refined label (never a PR; refuses a `refined` verdict with no RESTATED block)
 	@test -n "$(ISSUE)" || { echo "Usage: make issue-refiner-apply ISSUE=<n> [REPO=<owner/repo>]"; exit 1; }
 	python3 scripts/issue_refiner.py apply refine.md --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) --issue $(ISSUE)
+
+issue-dedup-pick: ## Which two unclaimed open issues look like the same defect? -> dedup-in.md, older as canonical (DRY=1 previews; REPO= picks the repo; issue #553)
+	python3 scripts/issue_dedup.py pick --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
+issue-dedup: ## Hermes decides whether the picked pair is the SAME defect (reads dedup-in.md) and writes dedup.md; no comment, no close, nothing else touched; runs INSIDE the agent image; the transcript is REDACTED before it prints (issue #553)
+	@python3 scripts/require_env.py NOUS_API_KEY
+	@$(MAKE) --no-print-directory agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=NOUS_API_KEY
+	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
+	  -e NOUS_API_KEY -e HERMES_REASONING -e REPO \
+	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
+	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_IMAGE) bash -lc 'make _issue-dedup')
+_issue-dedup: # (internal) the host recipe the agent image runs: the decision, not the change
+	hermes -z "Load AGENTS.md for rules. Read dedup-in.md at the repo root: it carries two open issues of this repository (an older candidate canonical and a newer candidate copy), the token similarity that paired them, and what to answer. Decide whether they describe the SAME defect. If they do, write dedup.md with a DUPLICATE: #<older> line and an EVIDENCE: block naming the shared behaviour (quote both titles/bodies; 'similar words' is not evidence). If they do not, write dedup.md with DISTINCT: and a REASON: block. HARD RULES: this is a TRIAGE, not an implementation - do NOT write code, do NOT create a branch, do NOT push, do NOT open a PR, do NOT comment on or close an issue yourself, and do NOT modify any file other than dedup.md. A duplicate close retires the COPY only; the older issue is queued by the host. UNATTENDED: this run has no user - NEVER ask a question and never wait for input; if the decision is genuinely open, choose DISTINCT (it changes nothing) and say why. A question fails the run." $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
+issue-dedup-apply: ## Apply dedup.md: retire the COPY with a comment citing the canonical + agent:duplicate, close it, and queue the canonical (COPY=<n>; never touches a claimed issue; refuses a duplicate without EVIDENCE)
+	@test -n "$(COPY)" || { echo "Usage: make issue-dedup-apply COPY=<n> [FILE=dedup.md] [REPO=<owner/repo>] [DRY=1]"; exit 1; }
+	python3 scripts/issue_dedup.py apply $(if $(FILE),$(FILE),dedup.md) --copy $(COPY) --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
 
 issue-bot-dispatch: ## The issue-implementer's dispatcher: cap (3/day) -> pick one labeled/ready issue -> claim -> write issue.md + branch (REPO= issue-bot.yml sets it; FORCE_ISSUE= pins a manual run; DRY=1 previews)
 	python3 scripts/issue_implementer.py dispatch --repo "$(REPO)" $(if $(FORCE_ISSUE),--force-issue $(FORCE_ISSUE),) $(if $(DRY),--dry,) $(if $(TODAY),--today $(TODAY),)
