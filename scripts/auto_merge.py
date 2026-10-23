@@ -304,6 +304,30 @@ RECHECK_ATTEMPTS = 6
 RECHECK_DELAY = 5.0
 
 
+def settle_mergeable(gh: str, repo: str, pr: int, attempts: int = 0,
+                     delay: float = -1.0) -> dict:
+    """Wait for GitHub to COMPUTE `mergeable`, instead of reading `UNKNOWN` and giving up (issue #558).
+
+    GitHub computes `mergeable` asynchronously: a read immediately after a run finishes can answer
+    `UNKNOWN`, which is neither "conflicts" nor "mergeable". Measured on PR #552 (run 39931464102): the run
+    read `mergeable: UNKNOWN`, deferred with "GitHub has not finished computing it", and nothing retried it —
+    the PR was green, clean and merged by the next run that happened to look.
+    """
+    n = attempts or RECHECK_ATTEMPTS
+    wait = RECHECK_DELAY if delay < 0 else delay
+    state = pr_state(gh, repo, pr)
+    for attempt in range(1, n + 1):
+        if (state.get("mergeable") or "").upper() != "UNKNOWN":
+            return state
+        if attempt == n:
+            break
+        print(f"[auto-merge] PR #{pr}: GitHub has not computed `mergeable` yet "
+              f"(UNKNOWN, {attempt}/{n}); waiting instead of deferring")
+        time.sleep(wait)
+        state = pr_state(gh, repo, pr)
+    return state
+
+
 def wait_for_merge_state(gh: str, repo: str, pr: int, attempts: int = 0,
                          delay: float = -1.0) -> dict:
     """Re-read the PR until its merge state reflects the approval, or the attempts run out.
@@ -367,6 +391,8 @@ def _clear_review(gh: str, repo: str, pr: int, head_sha: str, state: dict, dry: 
 def run(gh: str, repo: str, pr: int, head_sha: str, dry: bool = False,
         approve_when_review_required: bool = False, actor: str = "") -> int:
     state = pr_state(gh, repo, pr)
+    if (state.get("mergeable") or "").upper() == "UNKNOWN" and not dry:
+        state = settle_mergeable(gh, repo, pr)
     fields = ("state", "isDraft", "mergeable", "mergeStateStatus", "reviewDecision", "headRefOid")
     print(f"[auto-merge] PR #{pr}: " + json.dumps({k: state.get(k) for k in fields}))
     refused = author_may_merge(gh, repo, state, actor=actor)

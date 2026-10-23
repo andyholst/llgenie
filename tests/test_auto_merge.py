@@ -45,7 +45,8 @@ def _state(**kw) -> dict:
 
 def _fake_gh(tmp_path: Path, pr: dict, issues: dict | None = None, token_login: str = "asimov-agent",
              permissions: dict | None = None, tokens: dict | None = None, merge_rc: int = 0,
-             settle_after: int = 0, prs: list | None = None, views: dict | None = None):
+             settle_after: int = 0, prs: list | None = None, views: dict | None = None,
+             unknown_reads: int = 0):
     """A `gh` answering `pr view` / `pr review` / `pr merge` / `issue view` / `api user` / permission.
 
     It records every argv (the assertion surface) and flips the PR's state through marker files, so a test
@@ -69,6 +70,7 @@ TOKEN = {token_login!r}
 TOKENS = json.loads({json.dumps(tokens or {})!r})
 MERGE_RC = {merge_rc!r}
 SETTLE = {settle_after!r}
+UNKNOWN_READS = {unknown_reads!r}
 PRS = json.loads({json.dumps(prs or [])!r})
 VIEWS = json.loads({json.dumps(views or {})!r})
 if os.path.exists({str(log)!r} + ".approved"):
@@ -86,6 +88,13 @@ if args[:2] == ["pr", "list"]:
     print(json.dumps(PRS)); sys.exit(0)
 if args[:2] == ["pr", "view"] and len(args) > 2 and args[2] in VIEWS:
     print(json.dumps(VIEWS[args[2]])); sys.exit(0)
+if args[:2] == ["pr", "view"]:
+    _reads = {str(log)!r} + ".reads"
+    _n = (int(open(_reads).read()) if os.path.exists(_reads) else 0) + 1
+    open(_reads, "w").write(str(_n))
+    if UNKNOWN_READS and _n <= UNKNOWN_READS:
+        _st = dict(PR); _st["mergeable"] = "UNKNOWN"; _st["mergeStateStatus"] = "UNKNOWN"
+        print(json.dumps(_st)); sys.exit(0)
 if args[:2] == ["pr", "view"]:
     if SETTLE and os.path.exists({str(log)!r} + ".approved"):
         counter = pathlib.Path({str(log)!r} + ".views")
@@ -868,3 +877,50 @@ def test_the_recheck_is_scheduled_and_runs_the_make_target():
     assert "APPROVER_TOKEN" in MERGE_WF, "the sweep needs the other identity to approve"
     assert "\nauto-merge-recheck:" in MAKEFILE, "the target is the one entry point"
     assert "scripts/auto_merge.py recheck" in MAKEFILE
+
+
+# ---- GitHub's asynchronous `mergeable` must not become a deferral (issue #558) ----
+
+def test_an_unknown_mergeable_is_waited_for_not_deferred(tmp_path):
+    """#552: the run read `mergeable: UNKNOWN`, deferred, and nothing retried it — the PR was green."""
+
+    # Given a green PR whose first reads answer `mergeable: UNKNOWN` (GitHub has not computed it yet)
+    gh = _fake_gh(tmp_path, _state(headRepository={"nameWithOwner": "asimov-agent/llgenie"}),
+                  unknown_reads=2)
+
+    # When  the gate runs
+    rc = am.run(str(gh), "asimov-agent/llgenie", 552, HEAD, approve_when_review_required=True,
+                actor="andyholst")
+
+    # Then  it waits, then merges normally — it does not fall back to --admin and does not defer
+    calls = _calls(tmp_path / "gh.log")
+    merges = [c for c in calls if c[:2] == ["pr", "merge"]]
+    assert rc == 0
+    assert merges and "--admin" not in merges[0], merges
+    assert [c for c in calls if c[:2] == ["pr", "view"]] and len([c for c in calls if c[:2] == ["pr", "view"]]) >= 3
+
+
+def test_settle_mergeable_gives_up_after_its_attempts(tmp_path):
+    """A state that never settles returns the last read, so the caller still defers with a real reason."""
+
+    # Given a PR that answers UNKNOWN forever
+    gh = _fake_gh(tmp_path, _state(), unknown_reads=99)
+
+    # When  the settle helper runs with two attempts and no delay
+    state = am.settle_mergeable(str(gh), "asimov-agent/llgenie", 552, attempts=2, delay=0)
+
+    # Then  it returns UNKNOWN and spends exactly two reads
+    assert (state.get("mergeable") or "").upper() == "UNKNOWN"
+    assert len([c for c in _calls(tmp_path / "gh.log") if c[:2] == ["pr", "view"]]) == 2
+
+
+def test_the_recheck_runs_on_every_ci_completion_too():
+    """The cron has never fired for this workflow (0 schedule runs measured), so CI completions must sweep."""
+
+    # Given the merge workflow on main
+    # When  the recheck job's trigger is read
+    # Then  it runs after the merge job on any outcome, and the cron is still declared
+    assert "schedule:" in MERGE_WF and "*/30 * * * *" in MERGE_WF
+    recheck = MERGE_WF.split("recheck:", 1)[1]
+    assert "needs: [merge]" in recheck
+    assert "always()" in recheck, "a workflow_run completion must sweep too"
