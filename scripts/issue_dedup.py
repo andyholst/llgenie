@@ -52,6 +52,10 @@ STOPWORDS = frozenset(
     than that the their them then there these they this those to too under up use used using very was we
     were what when where which while who why will with would you your""".split())
 TOKEN = re.compile(r"[a-z0-9][a-z0-9._:/-]{2,}")
+#: A machine-generated tracker issue carries its generator's marker in the body (`<!-- architecture-bot:… -->`).
+#: Those issues are near-identical BY CONSTRUCTION — every run says "refresh X for the tree at <stamp>" — so a
+#: token comparison pairs them at 0.78 and asks the agent a question with no answer (measured: #494 <- #517).
+GENERATED = re.compile(r"<!--\s*[a-z-]+-bot:", re.IGNORECASE)
 
 
 def _gh(gh: str, args: list[str], token: str | None = None) -> str:
@@ -74,6 +78,11 @@ def is_protected(issue: dict) -> bool:
     return any(n in PROTECTED_LABELS for n in labels(issue))
 
 
+def is_generated(issue: dict) -> bool:
+    """A bot-generated tracker issue is not a duplicate of anything: it is one run's output (issue #553)."""
+    return bool(GENERATED.search(issue.get("body") or ""))
+
+
 def tokens(issue: dict) -> set[str]:
     text = f"{issue.get('title') or ''}\n{issue.get('body') or ''}".lower()
     return {t for t in TOKEN.findall(text) if t not in STOPWORDS}
@@ -91,12 +100,16 @@ def candidates(gh: str, repo: str) -> list[dict]:
     out = _gh(gh, ["issue", "list", "--repo", repo, "--state", "open", "--limit", "200",
                    "--json", "number,title,body,labels,createdAt"])
     issues = json.loads(out or "[]")
-    free = [i for i in issues if not is_protected(i)]
+    free = [i for i in issues if not is_protected(i) and not is_generated(i)]
     skipped = [i["number"] for i in issues if is_protected(i)]
+    generated = [i["number"] for i in issues if not is_protected(i) and is_generated(i)]
     if skipped:
         print(f"[issue-dedup] {len(skipped)} claimed issue(s) left alone (agent label): "
               + ", ".join(f"#{n}" for n in skipped[:10])
               + (" …" if len(skipped) > 10 else ""))
+    if generated:
+        print(f"[issue-dedup] {len(generated)} bot-generated tracker issue(s) left alone (a marker in the "
+              "body): " + ", ".join(f"#{n}" for n in generated[:10]) + (" …" if len(generated) > 10 else ""))
     return free
 
 

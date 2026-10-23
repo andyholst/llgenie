@@ -723,7 +723,10 @@ older as canonical) and the agent decides `DUPLICATE: #<older>` with an `EVIDENC
 `REASON:`. A duplicate close retires the **copy** only — one comment citing the canonical, the
 `agent:duplicate` label, the close — and the canonical issue is queued (`agent:implement`) when it carries no
 queue label, so the work is never lost. **An issue carrying any agent label is never a candidate and never a
-target**: `agent:implement`, `agent:ready`, `agent:refined`, `agent:closed`, `agent:duplicate`. The sweep
+target**: `agent:implement`, `agent:ready`, `agent:refined`, `agent:closed`, `agent:duplicate` — and a
+**bot-generated tracker issue** (its body carries a `<!-- <name>-bot:` marker) is skipped too, because two
+architecture-refresh issues are near-identical by construction and would pair at 0.78 with no real answer
+(measured: #494/#517); the first live run then picked #411/#423, which really are the same filed-twice failure. The sweep
 therefore cannot race the implementer or the refiner, and cannot re-open a decision.
 The only thing it refuses to do is race the implementer: while an issue is *waiting* for it
 (labelled `agent:implement`/`agent:ready` with no PR yet) the run says so and yields; once that issue

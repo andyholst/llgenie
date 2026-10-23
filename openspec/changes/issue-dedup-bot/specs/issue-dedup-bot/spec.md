@@ -26,6 +26,22 @@ Then  nothing is closed.
 
 - **Test:** `tests/test_issue_dedup.py::test_the_copy_is_never_touched_when_it_carries_an_agent_label`
 
+### Requirement: A bot-generated tracker issue is not a duplicate
+
+An issue whose body carries a generator marker (`<!-- <name>-bot:`) SHALL be excluded from the candidate set:
+those issues are near-identical by construction, so pairing them asks a question with no answer.
+
+WHEN candidates are listed
+THEN a generated tracker issue is skipped and the human issues remain.
+
+#### Scenario: two architecture-refresh issues never pair
+
+Given two bot-generated refresh issues and one human issue
+When  candidates are listed
+Then  only the human issue is a candidate.
+
+- **Test:** `tests/test_issue_dedup.py::test_a_bot_generated_tracker_issue_is_not_a_candidate`
+
 ### Requirement: The pair is deterministic and the older issue is canonical
 
 The sweep SHALL pair open unclaimed issues by title+body token Jaccard (threshold 0.30) and SHALL treat the

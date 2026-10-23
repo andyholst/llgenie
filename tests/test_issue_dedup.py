@@ -187,3 +187,20 @@ def test_a_distinct_verdict_leaves_both_issues_open(tmp_path):
 
     # Then  neither issue is edited or closed
     assert not [c for c in _calls(tmp_path / "gh.log") if c[:2] in (["issue", "close"], ["issue", "edit"])]
+
+
+def test_a_bot_generated_tracker_issue_is_not_a_candidate(tmp_path):
+    """Two architecture-refresh issues are near-identical by construction, not duplicates (measured #494/#517)."""
+
+    # Given two bot-generated trackers and one human issue
+    gen = "<!-- architecture-bot:20261021T1814 -->\n\nIssue: docs/ARCHITECTURE.md is stale"
+    issues = [_issue(494, "docs(architecture): refresh docs/ARCHITECTURE.md for the tree at A", gen, "2026-10-21T00:00:00Z"),
+              _issue(517, "docs(architecture): refresh docs/ARCHITECTURE.md for the tree at B", gen, "2026-10-22T00:00:00Z"),
+              _issue(500, "the top-tier job flakes on macos", "intermittent failure", "2026-10-20T00:00:00Z")]
+    gh = _fake_gh(tmp_path, issues)
+
+    # When  candidates are listed
+    free = dedup.candidates(str(gh), REPO)
+
+    # Then  only the human issue remains — a generated pair can never be "the same defect"
+    assert [i["number"] for i in free] == [500]

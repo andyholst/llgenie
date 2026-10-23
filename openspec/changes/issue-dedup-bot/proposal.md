@@ -16,7 +16,9 @@ any two of them.
 
 - **`scripts/issue_dedup.py`** — the cross-issue decision: candidates are the open, **unclaimed** issues
   (any agent label excludes an issue: `agent:implement`, `agent:ready`, `agent:refined`, `agent:closed`,
-  `agent:duplicate`); the pair is the highest title+body token Jaccard at/above 0.30, older as canonical; the
+  `agent:duplicate`), and a **bot-generated tracker issue** — its body carries a `<!-- <name>-bot:` marker —
+  is excluded as well, since two generated refresh issues are near-identical by construction (measured
+  #494/#517 at 0.78, which the first live run produced before this rule); the pair is the highest title+body token Jaccard at/above 0.30, older as canonical; the
   agent answers `DUPLICATE: #<older>` + `EVIDENCE` or `DISTINCT:` + `REASON`; and the apply path retires the
   **copy** only — a comment citing the canonical, the `agent:duplicate` label, the close, then the canonical
   queued with `agent:implement` when unqueued. A duplicate with no `EVIDENCE` is refused, and the apply path
