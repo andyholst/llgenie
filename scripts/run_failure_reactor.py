@@ -26,6 +26,16 @@ The route decision lives HERE, in a stdlib-only, no-LLM script (unit-testable, l
     chars of the head sha), searched with `gh issue list --search ... in:body`. If an OPEN issue
     already carries that marker, file NOTHING. Label the issue `agent:implement` so the issue-bot
     can pick it up.
+  * Route B files only WORK THAT IS STILL WORK (issue #565). "No pushable PR" covers two very
+    different states, and only one of them is a work item:
+      - the PR is OPEN but not pushable right now (a draft, or its repair attempts are spent) -
+        the failure is live, so it is filed;
+      - no OPEN PR exists for the head at all (merged, closed, branch deleted), or a push run on a
+        branch that a LATER run of the same workflow already turned green - the failure is history,
+        and filing it hands the implementer a defect fixed before the issue existed.
+    Measured on 2026-10-23: all six open `agent:implement` issues this reactor had filed were the
+    second state, and the issue-bot's 3/day budget made them two days of wasted runs. The verdict is
+    printed (`is SUPERSEDED: <reason> - filing nothing`), never a silent skip.
 
 The reactor is a WRITER (it files issues / dispatches fix-bot), so it joins the claim protocol in
 `scripts/bot_claims.py` (issues #279/#285): it consults claims before acting and writes its own
@@ -83,6 +93,13 @@ DISPATCH_TOKEN_ENV = "DISPATCH_TOKEN"
 #: How many lines of the failing log tail to carry in the issue body.
 LOG_TAIL_LINES = 40
 
+#: The conclusion of a LATER run on the same branch that proves an earlier failure is no longer live
+#: (issue #565). Anything else (a later failure, a cancellation) leaves the failure standing.
+SUPERSEDING_CONCLUSION = "success"
+
+#: How many of a branch's newest runs to read when deciding whether a failure was superseded.
+SUPERSEDE_SCAN = 10
+
 
 def _gh(args: list[str]) -> str:
     """One `gh` call, its stdout. Raises with the real stderr when gh fails."""
@@ -122,10 +139,89 @@ def run_pull_requests(repo: str, run_id: int) -> list[dict]:
 
 
 def run_detail(repo: str, run_id: int) -> dict:
-    """The run's conclusion, head sha, event, workflow name and jobs (one `gh run view`)."""
+    """The run's conclusion, head sha, event, workflow name, creation time and jobs (one `gh run view`).
+
+    `createdAt` is what orders this run against the branch's newer ones, which is how a superseded
+    failure is recognised (issue #565).
+    """
     out = _gh(["run", "view", str(run_id), "--repo", repo,
-               "--json", "conclusion,headSha,event,workflowName,displayTitle,jobs"])
+               "--json", "conclusion,headSha,event,workflowName,displayTitle,createdAt,jobs"])
     return json.loads(out or "{}")
+
+
+def open_pr_exists(repo: str, branch: str) -> "bool | None":
+    """Whether ANY open PR has this head branch, whatever repository owns it.
+
+    Deliberately unfiltered: `resolve_run_pr.open_pr_for_head` narrows by owner for the push decision,
+    and that narrowing would make a stranger's live PR look absent here (issue #565). Returns None
+    when the read failed — an unreadable answer is UNKNOWN, never "no open PR".
+    """
+    out = _gh_soft(["pr", "list", "--repo", repo, "--state", "open", "--search",
+                    f"head:{branch}", "--limit", "20", "--json", "number", "--jq", ".[].number"])
+    if out is None:
+        return None
+    return bool(out.strip())
+
+
+def superseded(repo: str, run: dict, rest: dict) -> str | None:
+    """Why this failure is no longer work to do, or None while it still is (issue #565).
+
+    Route B files a work item for "a failed run with no PR this bot can repair". Two very different
+    states land there, and only one is work:
+
+      * a PR that is OPEN but not pushable right now - a draft, or its repair attempts are spent:
+        the failure is live, so it is filed;
+      * NO OPEN PR for the head at all - merged, closed, branch deleted - or a push run on a branch
+        that a LATER run of the same workflow already turned green: the failure is history.
+
+    An unreadable answer is UNKNOWN, never "superseded": a failed read must not drop a real failure.
+    """
+    event = (run.get("event") or "").lower()
+    branch = rest.get("head_branch") or ""
+
+    if event == "pull_request":
+        if not branch:
+            return None
+        repo_owner = repo.split("/")[0]
+        owner = (((rest.get("head_repository") or {}).get("owner") or {}).get("login")
+                 or repo_owner)
+        if owner.lower() not in (repo_owner.lower(), TRUSTED_FORK.lower()):
+            # A fifth-party fork: no token this repository holds can read or push it, so its PR
+            # state is UNKNOWN here. Route B has already reported it; an unknown never supersedes.
+            return None
+        # An OPEN PR for this head, whoever owns it. A merged/closed PR and a deleted branch both
+        # answer "none", which is the only thing this check may conclude from absence.
+        exists = open_pr_exists(repo, branch)
+        if exists is None:
+            print(f"[run-fixer] the open-PR state of `{branch}` could not be read - not declaring "
+                  f"this failure superseded on an unknown", flush=True)
+            return None
+        if not exists:
+            return (f"the PR it ran on (head `{owner}:{branch}`) is merged or closed - no branch is "
+                    f"left to repair")
+        return None
+
+    if event != "push" or not branch:
+        return None
+    workflow = run.get("workflowName") or ""
+    if not workflow:
+        return None
+    out = _gh_soft(["run", "list", "--repo", repo, "--branch", branch, "--workflow", workflow,
+                    "--limit", str(SUPERSEDE_SCAN), "--json", "databaseId,conclusion,createdAt"])
+    if out is None:
+        print(f"[run-fixer] the run list for `{branch}` could not be read - not declaring this "
+              f"failure superseded on an unknown", flush=True)
+        return None
+    mine = run.get("createdAt") or ""
+    for row in json.loads(out or "[]"):
+        if (row.get("conclusion") or "").lower() != SUPERSEDING_CONCLUSION:
+            continue
+        later = row.get("createdAt") or ""
+        # Without this run's own timestamp the order is unknown; an unknown is not a supersede.
+        if not mine or not later or later <= mine:
+            continue
+        return f"a later run of {workflow} on `{branch}` succeeded at {later}"
+    return None
 
 
 def failing_jobs(run: dict) -> list[dict]:
@@ -243,7 +339,7 @@ def _fork_pr(repo: str, rest: dict, run_id: int) -> dict | None:
             "updatedAt": detail.get("updatedAt") or ""}
 
 
-def _pr_from_run(repo: str, run: dict, run_id: int) -> dict | None:
+def _pr_from_run(repo: str, run: dict, run_id: int, rest: dict | None = None) -> dict | None:
     """The PR this run reports on that this bot can PUSH, or None.
 
     Reuses `fix_bot_sweep`'s eligibility rules (open, non-draft, pushable head, not `main`, at least
@@ -253,8 +349,11 @@ def _pr_from_run(repo: str, run: dict, run_id: int) -> dict | None:
       * the REST `pull_requests` array (a same-repo PR);
       * for an EMPTY array, the run's head branch + head owner (`_fork_pr`): the owner's fork is
         pushable (`own_fork=`), a fifth-party fork is not (issue #555).
+
+    `rest` is the run object `route()` already read, so the same API answer is not fetched twice and
+    the superseded decision (#565) sees exactly what the routing decision saw.
     """
-    rest = run_rest(repo, run_id)
+    rest = rest if rest is not None else run_rest(repo, run_id)
     repo_owner = repo.split("/")[0]
     candidates: list[dict] = []
     for p in rest.get("pull_requests") or []:
@@ -353,7 +452,8 @@ def route(repo: str, run_id: int, check: str = "make ci-unit", dry: bool = False
         return 0
 
     # Route A: a pushable same-repo PR -> claim + dispatch the existing fix-bot.
-    pr = _pr_from_run(repo, run, run_id)
+    rest = run_rest(repo, run_id)
+    pr = _pr_from_run(repo, run, run_id, rest)
     if pr is not None:
         why = occupied_pr(repo, pr)
         if why:
@@ -367,7 +467,14 @@ def route(repo: str, run_id: int, check: str = "make ci-unit", dry: bool = False
               flush=True)
         return 0
 
-    # Route B: no pushable PR -> file ONE deduped issue.
+    # Route B: no pushable PR -> file ONE deduped issue, but only for a failure that is still work
+    # (issue #565). A merged PR's run, or a push a later run already turned green, is history: filing
+    # it hands the implementer a defect that was fixed before the issue was written.
+    why = superseded(repo, run, rest)
+    if why:
+        print(f"[run-fixer] run {run_id} is SUPERSEDED: {why} - filing nothing", flush=True)
+        return 0
+
     jobs = failing_jobs(run)
     if not jobs:
         # A failed run with no failing job is a startup refusal (issue #330): the run's `name` is
