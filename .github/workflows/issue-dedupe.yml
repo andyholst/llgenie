@@ -1,0 +1,135 @@
+# The issue-dedupe sweep (issue #553): the backlog is compared ACROSS issues, four times a day, because the
+# refiner improves ONE issue per run and the implementer implements ONE — neither ever looks two issues at
+# once, so the same defect filed twice is implemented twice or the better specification is retired.
+#
+# FOUR TIMES A DAY (`51 */6 * * *`, every six hours at :51 — its own minute, issue #301), ONE pair per run, in
+# the same shape the refiner uses for one issue: the host picks the most similar pair of UNCLAIMED open
+# issues deterministically (scripts/issue_dedup.py, older as canonical), the agent decides whether they are
+# the same defect, and the host applies the verdict.
+#
+# NEVER TOUCHES A CLAIMED ISSUE. An issue carrying any agent label — agent:implement, agent:ready,
+# agent:refined, agent:closed, agent:duplicate — is excluded as BOTH candidate and target, so the sweep can
+# neither race the implementer/refiner nor re-open a decision (the refiner enforces the same rule through
+# SKIP_LABELS). A duplicate close retires the COPY only: the canonical issue is queued (agent:implement) when
+# it carries no queue label, so the work is never lost (the lesson of #521).
+#
+# Trigger surface: its own schedule and `workflow_dispatch` by hand (owner/collaborator).
+# Flow: guard (owner/collaborator, BEFORE any secret is read) -> make issue-dedup-pick (the pair, or none) ->
+#       make issue-dedup (the agent reads dedup-in.md and writes dedup.md) -> make issue-dedup-apply (comment
+#       citing the canonical + agent:duplicate on the copy, then queue the canonical).
+# Never: never opens a PR, never creates a branch, never edits an issue body, never merges, never closes an
+#        issue the implementer or the refiner has claimed, never acts on a duplicate without EVIDENCE.
+# dispatch: no inputs — the bot decides by itself which ONE pair to compare (scripts/issue_dedup.py).
+name: issue-dedupe — retires a duplicate of an issue, FOUR times a day, never a claimed one
+
+on:
+  schedule:
+    - cron: "51 */6 * * *"   # 4x/day at an odd minute: one pair compared per run (issue #553)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: issue-dedupe
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Owner / collaborator trigger guard
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          # The run's head repository: empty for every non-PR event (issue #510).
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            # The repository's own bot is a GitHub App login, so it is never a collaborator and the
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
+            if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
+              echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+  dedup:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: "Checkout main (read-only for this bot - it pushes nothing)"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BUMP_TOKEN }}
+
+      - name: Decide (which pair of unclaimed issues looks the same -> dedup-in.md)
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          out=$(make issue-dedup-pick REPO="$REPO")
+          rc=$?
+          echo "$out"
+          if [ "$rc" != "0" ]; then
+            echo "::error::the dedupe sweep's pick failed (make issue-dedup-pick rc=$rc); a crashed decision is not 'no pair'"
+            exit 1
+          fi
+          action=$(printf '%s\n' "$out" | sed -n 's/^action=//p' | tail -1)
+          canonical=$(printf '%s\n' "$out" | sed -n 's/^canonical=//p' | tail -1)
+          copy=$(printf '%s\n' "$out" | sed -n 's/^copy=//p' | tail -1)
+          echo "action=${action:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "canonical=$canonical" >> "$GITHUB_OUTPUT"
+          echo "copy=$copy" >> "$GITHUB_OUTPUT"
+          [ "$action" = "pick" ] && echo "picked=true" >> "$GITHUB_OUTPUT" || echo "picked=false" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Prove the JEV engine is active — the decision does not start without it (issue #238)
+        if: steps.pick.outputs.picked == 'true'
+        run: make agent-jev-preflight NERVE_REQUIRE=1
+
+      - name: Prove the agent's shell can see this job's credentials (issue #358)
+        if: steps.pick.outputs.picked == 'true'
+        run: make agent-shell-keys-check AGENT_SHELL_CHECK_KEYS="NOUS_API_KEY"
+
+      - name: Decide whether the pair is the SAME defect (Hermes reads dedup-in.md and writes dedup.md)
+        id: decide
+        if: steps.pick.outputs.picked == 'true'
+        run: |
+          set +e
+          make issue-dedup
+          rc=$?
+          if [ "$rc" != "0" ]; then
+            echo "::error::the dedupe agent leg failed for #${{ steps.pick.outputs.canonical }} <- #${{ steps.pick.outputs.copy }} (make issue-dedup rc=$rc)"
+            exit 1
+          fi
+          test -s dedup.md || { echo "::error::the agent wrote no dedup.md for #${{ steps.pick.outputs.copy }}; nothing to apply"; exit 1; }
+          exit 0
+
+      - name: Apply the verdict (retire the copy with evidence, queue the canonical)
+        if: steps.pick.outputs.picked == 'true' && steps.decide.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make issue-dedup-apply COPY="${{ steps.pick.outputs.copy }}" REPO="$REPO"

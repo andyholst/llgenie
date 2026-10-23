@@ -717,11 +717,28 @@ rebase fails is aborted (`make rebase-bot-abort`), reported, and the run carries
 make issue-refiner-pick   # keep the backlog implementable: spare capacity -> the oldest issue that is not decided/claimed
 make issue-refiner        # step 1: Hermes REVIEWS that issue (refine-in.md) and writes its verdict to refine.md
 make issue-refiner-apply ISSUE=<n>  # step 2: ONE comment + the agent:refined label (never a PR)
+make issue-dedup-pick               # which two UNCLAIMED open issues look like the same defect -> dedup-in.md
+make issue-dedup                    # the agent decides: DUPLICATE: #<older> + EVIDENCE, or DISTINCT: + REASON
+make issue-dedup-apply COPY=<n>      # retire the copy (comment citing the canonical + agent:duplicate) and queue the canonical
 **A companion bot reviews the backlog — the issues that have not been implemented yet.** It is a
 separate workflow (`issue-refiner.yml`) that runs **hourly** and reviews **one issue per run**: open,
 oldest first, not already reviewed (`agent:refined`), not claimed for implementation, and not already
 linked to a pull request — i.e. an issue no PR answers yet. It opens **no PR at all**: its outcome is
 ONE comment plus the `agent:refined` label, which is what stops it reviewing the same issue twice.
+
+**The duplicate sweep (`issue-dedupe.yml`, issue #553) runs FOUR times a day** (`51 */6 * * *`) because
+neither the refiner nor the implementer ever compares two issues: one improves an issue per run, the other
+implements one, so the same defect filed twice is implemented twice — or the better specification is retired.
+The host picks the most similar pair of **unclaimed** open issues deterministically (title+body token Jaccard,
+older as canonical) and the agent decides `DUPLICATE: #<older>` with an `EVIDENCE:` block or `DISTINCT:` with a
+`REASON:`. A duplicate close retires the **copy** only — one comment citing the canonical, the
+`agent:duplicate` label, the close — and the canonical issue is queued (`agent:implement`) when it carries no
+queue label, so the work is never lost. **An issue carrying any agent label is never a candidate and never a
+target**: `agent:implement`, `agent:ready`, `agent:refined`, `agent:closed`, `agent:duplicate` — and a
+**bot-generated tracker issue** (its body carries a `<!-- <name>-bot:` marker) is skipped too, because two
+architecture-refresh issues are near-identical by construction and would pair at 0.78 with no real answer
+(measured: #494/#517); the first live run then picked #411/#423, which really are the same filed-twice failure. The sweep
+therefore cannot race the implementer or the refiner, and cannot re-open a decision.
 The only thing it refuses to do is race the implementer: while an issue is *waiting* for it
 (labelled `agent:implement`/`agent:ready` with no PR yet) the run says so and yields; once that issue
 has a PR it is not waiting for anyone and the next hourly run proceeds. Hermes does the *review* —
@@ -1243,6 +1260,7 @@ from the pipeline that will run.
 | `engine-bump.yml` | bumps pinned engines to their newest upstream release and opens the PR | `engine` (optional) — Only bump this engine (id); empty = all |
 | `fix-bot.yml` | repairs a failing PR branch until its checks pass (never merges) | `pr_number` (optional) — PR number whose branch should be repaired<br>`branch` (optional) — PR head branch (used when pr_number is empty)<br>`check` (optional, default `make ci-unit`) — the deterministic check to drive the loop<br>`rounds` (optional, default `5`) — repair attempts (default 5)<br>`report_file` (optional) — path to the failed run's captured log (repair context; empty = run the check locally) |
 | `issue-bot.yml` | implements ONE issue per run as a reviewable PR (never merges) | `issue_number` (optional) — Issue to implement (owner only). Leave BLANK and the bot picks the oldest agent:implement issue itself - one issue per run, exactly like the schedule |
+| `issue-dedupe.yml` | retires a duplicate of an issue, FOUR times a day, never a claimed one | none — the bot decides by itself which ONE pair to compare (scripts/issue_dedup.py). |
 | `issue-refiner.yml` | reviews ONE not-yet-implemented issue, never opens a PR | none — the bot decides by itself which ONE issue to review (scripts/issue_refiner.py); |
 | `publish-agent-image.yml` | builds + pushes the Hermes agent image when its hash is not on GHCR yet | `force` (optional, default `false`) — Rebuild + push even if the hash tag is already on GHCR |
 | `queued-alarm.yml` | reports CI jobs queued far too long, once per affected run | `minutes` (optional, default `30`) — report jobs queued longer than this many minutes |
