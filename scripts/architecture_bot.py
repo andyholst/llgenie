@@ -40,6 +40,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import module_name_guard  # the shared rename rule (#573): the same check `make test-unit` runs
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOC_DEFAULT = "docs/ARCHITECTURE.md"
 BRANCH_PREFIX = "agent/architecture-"
@@ -291,7 +295,12 @@ def brief(root: Path = REPO_ROOT, doc: str = DOC_DEFAULT) -> str:
         "image that the surface does not list.",
         "4. Write facts, not aspirations. If the surface does not show something, leave it "
         "out rather than guessing.",
-        f"5. Modify no file except `{doc}`. Do not create a branch, do not commit, do not "
+        "5. Never name the retired CLI module — the deprecated shim that sits next to "
+        "`scripts/llgenie_serve.py`. The rename guard (#251) refuses that spelling in ANY live "
+        "file, this doc included, and the deterministic step below checks the doc against it "
+        "before it commits (issue #573): describe the launcher as `scripts/llgenie_serve.py` "
+        "only, and leave the shim unmentioned.",
+        f"6. Modify no file except `{doc}`. Do not create a branch, do not commit, do not "
         "push, do not open an issue or a PR — the deterministic step does that.",
     ]
     return "\n".join(out) + "\n"
@@ -436,6 +445,16 @@ def publish(root: Path, repo: str, doc: str = DOC_DEFAULT, stamp: str = "",
     if len(text) < MIN_DOC_CHARS:
         raise ValueError(f"{doc} is only {len(text)} characters (minimum {MIN_DOC_CHARS}) — "
                          "refusing to publish a stub")
+    # The same rule `make test-unit` enforces, applied to the WRITER (issue #573): the doc refresh
+    # wrote the retired CLI module's name into the doc, and the violation only surfaced 25 minutes
+    # later as two red unit jobs on PR #572. Checked here, it costs seconds and nothing is written.
+    named = module_name_guard.offenders(text)
+    if named:
+        raise ValueError(
+            f"{doc} names the retired CLI module ({', '.join(sorted(set(named)))}): the rename "
+            f"guard refuses that spelling in any live file (issue #251), so this refresh would land "
+            f"red on both unit jobs (issue #573). Nothing was committed or pushed — describe the "
+            f"launcher as scripts/llgenie_serve.py only.")
     if not doc_is_dirty(root, doc):
         return {"action": "none", "reason": f"{doc} is identical to HEAD — no drift to publish"}
 

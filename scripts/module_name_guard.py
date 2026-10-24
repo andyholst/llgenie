@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""The renamed-module guard: the old CLI name must not come back into a live file (issues #251, #573).
+
+The CLI is `scripts/llgenie_serve.py`. The file next to it under the OLD name stays as a deprecated
+alias — and that shim is the only place the old spelling may appear, together with the dated history
+(`agent-wiki/`, `openspec/changes/`) and this module (which has to spell the name it forbids). Every
+other live text file is refused, `docs/ARCHITECTURE.md` included.
+
+The rule lives HERE rather than inside a test because two things enforce it, and one code path keeps
+them from drifting:
+
+  * `make test-unit` (`tests/test_rename_llgenie_serve.py`) — the reviewer;
+  * the architecture bot, whose 6-hourly doc refresh wrote the old name into `docs/ARCHITECTURE.md`
+    and only found out 25 minutes later, as two red unit jobs on PR #572 (issue #573) — the writer.
+
+So the writer is checked by the same function as the reviewer, before it commits anything.
+
+Commands (stdlib only):
+
+    check [--root DIR] [PATH ...]   # the paths that name the old module (exit 1); no PATH = whole tree
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+#: The old module name, but NOT `llama_server`/`llama-server` (llama.cpp's binary).
+OLD_MODULE = re.compile(r"\bllama_serve\b")
+
+#: Directories that are never source: VCS, build output, scratch, venvs.
+SKIP_DIRS = {".git", "__pycache__", "node_modules", ".ci-home", ".venv"}
+
+#: The shim keeps the old name on purpose, history keeps whatever was true then, and this module has
+#: to be able to name what it forbids.
+ALLOWED_PREFIXES = ("scripts/llama_serve.py", "scripts/module_name_guard.py", "agent-wiki/",
+                    "openspec/changes/")
+
+#: Binary/media files are not text to a reader.
+SKIP_SUFFIXES = {".pyc", ".png", ".jpg", ".gif", ".woff", ".woff2", ".gz", ".bin"}
+
+
+def offenders(text: str) -> list[str]:
+    """The old-name spellings in ONE file's text (empty when clean)."""
+    return [m.group(0) for m in OLD_MODULE.finditer(text or "")]
+
+
+def is_clean(text: str) -> bool:
+    """Whether ONE text names the old module nowhere."""
+    return not offenders(text)
+
+
+def hits(root: Path, paths: list[Path] | None = None,
+         exclude: list[Path] | None = None) -> list[str]:
+    """The repo-relative paths of live files that name the old module (empty when clean).
+
+    `paths` restricts the read to those files (relative to `root`, absolute, or repo-relative);
+    without it the whole tree is read. `exclude` names files a caller must not judge — the guard's
+    own test spells the name it forbids, so it excludes itself rather than weakening the rule. The
+    allowed prefixes apply either way, so a caller cannot check itself into a false pass.
+    """
+    root = Path(root).resolve()
+    skip = {Path(p).resolve() for p in (exclude or [])}
+    if paths:
+        candidates = [Path(p) if Path(p).is_absolute() else root / p for p in paths]
+    else:
+        candidates = [p for p in sorted(root.rglob("*")) if p.is_file()]
+    out: list[str] = []
+    for p in candidates:
+        p = Path(p).resolve()
+        if p in skip:
+            continue
+        try:
+            rel = str(p.relative_to(root))
+        except ValueError:
+            rel = str(p)
+        if set(Path(rel).parts) & SKIP_DIRS:
+            continue
+        if any(rel.startswith(pre) for pre in ALLOWED_PREFIXES):
+            continue
+        if p.suffix.lower() in SKIP_SUFFIXES:
+            continue
+        try:
+            text = p.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if not is_clean(text):
+            out.append(rel)
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Refuse the old CLI module name in a live file.")
+    parser.add_argument("command", choices=["check"])
+    parser.add_argument("--root", default=".", help="the tree to read (default: the current dir)")
+    parser.add_argument("paths", nargs="*", help="files to check instead of the whole tree")
+    args = parser.parse_args(argv)
+
+    found = hits(Path(args.root), [Path(p) for p in args.paths] or None)
+    if found:
+        print("[module-name] REFUSED: these live files name the retired CLI module:", file=sys.stderr)
+        for rel in found:
+            print(f"  {rel}", file=sys.stderr)
+        print("[module-name] describe the launcher as scripts/llgenie_serve.py; the old spelling "
+              "belongs to the deprecated shim and the dated history only (issue #251, #573).",
+              file=sys.stderr)
+        return 1
+    print("[module-name] OK: no live file names the retired CLI module.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -26,12 +26,14 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import env_seam  # noqa: E402
 import detect_server  # noqa: E402
+import module_name_guard as guard  # noqa: E402
 
-# The old module name, but NOT `llama_server`/`llama-server` (llama.cpp's binary).
-OLD_MODULE = re.compile(r"\bllama_serve\b")
-SKIP_DIRS = {".git", "__pycache__", "node_modules", ".ci-home", ".venv"}
-# The shim keeps the old name on purpose; history keeps whatever was true then.
-ALLOWED_PREFIXES = ("scripts/llama_serve.py", "agent-wiki/", "openspec/changes/")
+# ONE rule, shared with the writer (issue #573): the architecture bot's doc refresh is checked by
+# `guard.offenders()` before it commits, so a rule fixed here cannot leave the bot writing what this
+# test refuses.
+OLD_MODULE = guard.OLD_MODULE
+SKIP_DIRS = guard.SKIP_DIRS
+ALLOWED_PREFIXES = guard.ALLOWED_PREFIXES
 
 
 def live_files():
@@ -47,7 +49,7 @@ def live_files():
         rel = str(p.relative_to(REPO))
         if any(rel.startswith(pre) for pre in ALLOWED_PREFIXES):
             continue
-        if p.suffix in {".pyc", ".png", ".jpg", ".gif", ".woff", ".woff2", ".gz", ".bin"}:
+        if p.suffix.lower() in guard.SKIP_SUFFIXES:
             continue
         try:
             yield rel, p.read_text()
@@ -56,7 +58,12 @@ def live_files():
 
 
 def test_no_live_file_mentions_the_old_module_name():
-    hits = [rel for rel, text in live_files() if OLD_MODULE.search(text)]
+    """The tree is clean — the same check the architecture bot runs before it publishes (#573)."""
+
+    # Given the whole tree, with this guard test excluded (it spells the name it forbids)
+    hits = guard.hits(REPO, exclude=[Path(__file__)])
+
+    # Then  no live file names the retired module
     assert not hits, (
         "the CLI module is scripts/llgenie_serve.py (#251); these files still name it "
         f"llama_serve: {hits}"
@@ -148,3 +155,36 @@ def test_detect_server_writes_the_new_spelling_for_its_children():
     """--backend/--ram-gb export the new names, so child processes see one convention."""
     src = (REPO / "scripts" / "detect_server.py").read_text()
     assert 'os.environ["LLGENIE_BACKEND"]' in src and 'os.environ["LLGENIE_RAM_BYTES"]' in src
+
+
+def test_the_shared_rule_reads_one_text():
+    """The rule the bot runs before it publishes is the rule this suite enforces (#573)."""
+
+    # Given a line naming the retired module — BUILT, never spelled: this file must stay clean for
+    # the guard it tests
+    retired = "llama" + "_serve"
+
+    # When  the shared rule reads it
+    found = guard.offenders(f"| `{retired}.py` (deprecated alias) |")
+
+    # Then  it is named, and the new module name is not
+    assert found == [retired], found
+    assert guard.is_clean("the launcher is `scripts/llgenie_serve.py`") is True
+
+
+def test_the_shared_rule_allows_the_shim_and_the_dated_history(tmp_path):
+    """The shim, the work record and a merged change say whatever was true then; a doc may not."""
+
+    # Given a tree with the shim, a history entry, and a live doc that all name it
+    retired = "llama" + "_serve"
+    for d in ("scripts", "agent-wiki", "docs"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "scripts" / f"{retired}.py").write_text(f"# {retired}\n")
+    (tmp_path / "agent-wiki" / "2026-01-01-x.md").write_text(f"# {retired}\n")
+    (tmp_path / "docs" / "ARCHITECTURE.md").write_text(f"# {retired}\n")
+
+    # When  the tree is checked
+    found = guard.hits(tmp_path)
+
+    # Then  only the live doc is a hit
+    assert found == ["docs/ARCHITECTURE.md"], found
