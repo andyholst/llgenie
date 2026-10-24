@@ -26,6 +26,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -335,6 +336,120 @@ def test_a_detached_worktree_on_another_commit_is_never_removed(tmp_path):
     assert result.returncode == 0, result.stderr
     assert tree.is_dir(), "a detached worktree on an unrelated commit is not ours to delete"
     assert "feat/elsewhere" not in _git(work, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+
+
+def test_apply_turns_a_branch_held_by_a_worktree_into_a_keep(tmp_path, monkeypatch):
+    """A refusal naming a worktree we may not touch is a KEEP, never an Error 2 (issue #593).
+
+    git's own refusal is the only evidence for this association (the porcelain listing shows such a
+    worktree as pure `detached` with no branch line), so the decision is driven here against the real
+    `apply()` and the exact message git produces.
+    """
+
+    # Given a merged branch whose delete is refused by a worktree that is NOT our debris
+    sys.path.insert(0, str(REPO / "scripts"))
+    import worktree_prune as wp
+
+    def fake_git(args, *, cwd=None, check=True):
+        if args[:2] == ["branch", "-D"]:
+            raise wp.PruneError("cannot delete branch 'feat/x' used by worktree at '/wt/held'")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(wp, "_git", fake_git)
+    monkeypatch.setattr(wp, "_detached_and_clean", lambda path, cwd=None: False)
+    decisions = [wp.Decision("feat/x", "prune", "PR #1 merged, its merge commit is on origin/main", pr=1)]
+
+    # When  the plan is applied
+    outcome = wp.apply(decisions)
+
+    # Then  nothing errors, the branch is kept, and the reason names the holding worktree
+    assert outcome.errors == [], outcome.errors
+    assert decisions[0].action == "keep", decisions[0]
+    assert "/wt/held" in decisions[0].reason, decisions[0].reason
+    assert outcome.removed_branches == []
+
+
+def test_apply_removes_a_clean_detached_holder_and_retries_once(tmp_path, monkeypatch):
+    """Removable debris is removed first, then the delete is retried exactly once."""
+
+    # Given a refusal by a clean, branch-less, detached worktree
+    sys.path.insert(0, str(REPO / "scripts"))
+    import worktree_prune as wp
+
+    calls: list[list[str]] = []
+    refusals = {"left": 1}
+
+    def fake_git(args, *, cwd=None, check=True):
+        calls.append(list(args))
+        if args[:2] == ["branch", "-D"] and refusals["left"]:
+            refusals["left"] -= 1
+            raise wp.PruneError("cannot delete branch 'feat/x' used by worktree at '/wt/clean'")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(wp, "_git", fake_git)
+    monkeypatch.setattr(wp, "_detached_and_clean", lambda path, cwd=None: True)
+    decisions = [wp.Decision("feat/x", "prune", "PR #1 merged, its merge commit is on origin/main", pr=1)]
+
+    # When  the plan is applied
+    outcome = wp.apply(decisions)
+
+    # Then  the worktree is removed, the branch is deleted, and the retry happened ONCE
+    assert outcome.errors == [], outcome.errors
+    assert ["worktree", "remove", "/wt/clean"] in calls, calls
+    assert calls.count(["branch", "-D", "feat/x"]) == 2, calls
+    assert outcome.removed_worktrees == ["/wt/clean"]
+    assert outcome.removed_branches == ["feat/x"]
+
+
+def test_apply_still_errors_when_a_refusal_names_no_worktree(tmp_path, monkeypatch):
+    """A refusal we cannot attribute is not silenced: it stays an error, loudly."""
+
+    # Given a `branch -D` failure that names no worktree
+    sys.path.insert(0, str(REPO / "scripts"))
+    import worktree_prune as wp
+
+    def fake_git(args, *, cwd=None, check=True):
+        if args[:2] == ["branch", "-D"]:
+            raise wp.PruneError("cannot delete branch 'feat/x': not fully merged")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(wp, "_git", fake_git)
+    decisions = [wp.Decision("feat/x", "prune", "merged", pr=1)]
+
+    # When  the plan is applied
+    outcome = wp.apply(decisions)
+
+    # Then  it is an error and the branch is not reported as pruned
+    assert outcome.errors and "could not delete the branch" in outcome.errors[0], outcome.errors
+    assert outcome.removed_branches == []
+
+
+def test_the_refusal_helpers_read_gits_own_evidence(tmp_path):
+    """The retry path acts only on a worktree git reports as detached, branch-less and clean."""
+
+    # Given a repository with one named worktree and one clean detached worktree
+    work = _repo(tmp_path)
+    _git(work, "switch", "-c", "feat/named", "main")
+    _git(work, "switch", "main")          # the main checkout gives the branch up to its own worktree
+    named = tmp_path / "wt-named"
+    _git(work, "worktree", "add", str(named), "feat/named")
+    detached = tmp_path / "wt-detached"
+    _git(work, "worktree", "add", "--detach", str(detached), _git(work, "rev-parse", "main"))
+
+    # When  a refusal message names one of them
+    sys.path.insert(0, str(REPO / "scripts"))
+    import worktree_prune as wp
+    message = f"error: cannot delete branch 'feat/x' used by worktree at '{named}'"
+
+    # Then  the path is read out of git's own message
+    assert wp._refused_by_worktree(message) == str(named)
+    assert wp._refused_by_worktree("error: branch not found") is None
+
+    # And   only the detached, branch-less, clean one is removable debris
+    assert wp._detached_and_clean(str(detached), cwd=str(work)) is True
+    assert wp._detached_and_clean(str(named), cwd=str(work)) is False, "a named worktree is another checkout"
+    (detached / "dirty.txt").write_text("wip\n")
+    assert wp._detached_and_clean(str(detached), cwd=str(work)) is False, "a dirty worktree is never debris"
 
 
 def test_dry_run_prunes_nothing_and_prints_the_plan(tmp_path):
