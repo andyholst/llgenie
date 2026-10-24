@@ -134,6 +134,38 @@ jobs:
           echo "hard_fail=$hf" >> "$GITHUB_OUTPUT"
           deps=$(echo "$out" | sed -n 's/^\[engine-bump\] DEPS //p' | head -1)
           echo "deps=$deps" >> "$GITHUB_OUTPUT"
+      # The documentation review of the params the bump just derived (issue #583). The deterministic
+      # half writes the input (the engine's docs at the new pin + the params this repo builds with),
+      # Hermes proposes only parameters whose flag AND quote are in the upstream tree, and the apply
+      # step validates and writes them to the skill, then regenerates params + Dockerfiles.
+      #
+      # It never blocks the bump: a review that fails or proposes nothing still opens the PR, and the
+      # body says so. What it MAY change is exactly what the docs quote proves; anything else is
+      # dropped and listed in the body.
+      - name: Documentation review of the derived params (issue #583)
+        id: review
+        continue-on-error: true
+        env:
+          NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          ENGINE: ${{ matrix.id }}
+        run: |
+          set +e
+          make engine-params-review-brief ENGINE="$ENGINE"
+          brief_rc=$?
+          if [ "$brief_rc" != "0" ]; then
+            echo "::warning::the review brief failed for $ENGINE (rc=$brief_rc); no documentation review this run"
+            exit 0
+          fi
+          make agent-jev-preflight NERVE_REQUIRE=1 || echo "::warning::the JEV layer is not active; the review leg still runs"
+          make engine-params-review ENGINE="$ENGINE"
+          review_rc=$?
+          if [ "$review_rc" != "0" ]; then
+            echo "::warning::the review leg exited $review_rc for $ENGINE; the PR opens without its proposals"
+          fi
+          make engine-params-review-apply ENGINE="$ENGINE" || \
+            echo "::warning::the review apply step failed for $ENGINE; nothing was applied"
+          exit 0
       - name: Open / update the bump PR
         env:
           GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
@@ -163,6 +195,11 @@ jobs:
           fi
           if [ -n "$DEPS" ]; then
             body="$(printf '%b' "${body}" '\n' '- **Dependencies:** ' "$DEPS")"
+          fi
+          # The documentation review of the derived params (issue #583): what the engine's own docs
+          # proved, and every proposal the host refused. Written by the review step above.
+          if [ -s params-review-section.md ]; then
+            body="$(printf '%b' "${body}" '\n')$(cat params-review-section.md)"
           fi
           if gh pr view "$branch" --json state -q .state 2>/dev/null | grep -q OPEN; then
             gh pr edit "$branch" --title "chore(engine): bump ${ID} to ${REF}@${NEW:0:8}" --body "$body"

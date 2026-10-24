@@ -39,6 +39,9 @@ RUN_INPUTS = {
     "refine-in.md": "the refiner's input (issue + thread + instruction)",
     "refine.md": "the refiner's verdict",
     "comment.md": "the outcome comment posted on the issue",
+    "params-review-in.md": "the engine-bump documentation review's brief (issue #583)",
+    "params-review.md": "the documentation review's proposals",
+    "params-review-section.md": "the review section the bump PR body carries",
 }
 
 

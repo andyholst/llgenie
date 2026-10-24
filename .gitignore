@@ -59,6 +59,11 @@ issue.md
 triage.md
 refine-in.md
 refine.md
+# the engine-bump documentation review (issue #583): the brief the agent reads, its proposals,
+# and the PR-body section the apply step writes
+params-review-in.md
+params-review.md
+params-review-section.md
 comment.md
 pr-body.md
 
