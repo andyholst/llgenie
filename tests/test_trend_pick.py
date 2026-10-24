@@ -373,7 +373,10 @@ def test_weight_budget_rules():
 @pytest.mark.parametrize("model_id,fmt,repo_part,file_part", [
     ("qwen3.8-27b", "gguf", "Qwen3.8-27B-GGUF", "Qwen3.8-27B-"),
     ("bonsai-2-27b", "gguf", "prism-ml/Ternary-Bonsai-2-27B-gguf", "Ternary-Bonsai-2-27B-"),
-    ("gemma-4-e2b", "litertlm", "litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it.litertlm"),
+    # The FILE NAME is not ours: upstream renamed it to gemma-4-E2B-it_NPU_Uncompiled.litertlm on
+    # 2026-10-24 and reddened every PR (#575). The invariant is the FORMAT and the repo; which
+    # build the repo serves is upstream's business.
+    ("gemma-4-e2b", "litertlm", "litert-community/gemma-4-E2B-it-litert-lm", ".litertlm"),
     ("ravenx-conjecture-qwen3-8b-mlx", "mlx-safetensors", "deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX", ""),
     ("qwen3-8b", "gguf", "Qwen/Qwen3-8B-GGUF", "Qwen3-8B-"),
 ])

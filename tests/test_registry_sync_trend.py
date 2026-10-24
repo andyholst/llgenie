@@ -230,8 +230,14 @@ def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_syn
     assert not ranked_names & no_image
     qwen = next(m for m in new["models"] if m["id"] == "qwen3.8-27b")
     raw = max(mp._num(e.get("tps")) for e in qwen["engines"])
-    assert raw > after_by["qwen3.8-27b"][4]
-    assert any(e["engine"] in no_skill and mp._num(e.get("tps")) == raw for e in qwen["engines"])
+    hottest = {e["engine"] for e in qwen["engines"] if mp._num(e.get("tps")) == raw}
+    # The raw maximum is NOT what the list shows, and the engine that owns it is not the
+    # recommendation for that model. Asserting the engine is also UNSKILLED is upstream's business:
+    # measured 2026-10-24, every engine the live registry lists for qwen3.8-27b is installed by a
+    # skill, so that half of the claim had no witness left and reddened every PR (#575). The skill
+    # rule itself is the `not ranked_names & no_image` assertion above, which still holds.
+    assert raw > after_by["qwen3.8-27b"][4], (raw, after_by["qwen3.8-27b"])
+    assert hottest and after_by["qwen3.8-27b"][2] not in hottest, (hottest, after_by["qwen3.8-27b"])
 
     # And the dated decisions accept that registry while the strict validate names the gap.
     # A LIVE registry may carry an engine upstream added after the decisions were dated:
