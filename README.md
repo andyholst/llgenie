@@ -865,9 +865,21 @@ make issue-bot-image       # the same image, for the issue-bot (alias of agent-i
 ```
 
 - **Build** (`containers/agent/Dockerfile` → `scripts/install_nerve_ci.sh`): the plugin is
-  installed at an immutable commit (`hermes plugins install keeltrace/hermes-nerve --ref
-  <40-char sha> --yes-deps --enable`, the v0.3.1 release commit). The wiring follows the plugin's
-  own `docs/SETUP.md` and mirrors the host:
+  installed at an immutable commit (the v0.3.1 release commit) in **three steps, not one** (issue
+  #585): `hermes plugins install keeltrace/hermes-nerve --ref <40-char sha> --no-deps` clones and
+  records provenance without resolving anything, the script then **drops the plugin's optional
+  `laya` extra** from the installed `pyproject.toml`, and `hermes plugins enable nerve` resolves
+  what is left. Why: `--yes-deps` makes Hermes take a **universal** `uv lock` (every marker split,
+  not just this image's), and `laya==0.3.3` requires `torch>=2.0.0`, which publishes no wheels for
+  `python_full_version >= '3.14'` or `sys_platform == 'android'` — so the lock had no solution, the
+  plugin was never admitted, and **every agent image build failed** (which is every bot job, since
+  `agent-jev-preflight` is each one's first step). The extra is dead weight here: the bots run the
+  plugin's default `reflex_backend` (`jev`), never the Laya sidecar backend, and the plugin imports
+  laya lazily inside a function. Adding `[tool.uv] environments` to the plugin's own pyproject does
+  **not** help (measured) — Hermes generates its own workspace and does not inherit it. The removal
+  is asserted, not assumed: a pin that stops declaring `laya` fails the build and names #585 instead
+  of resolving extras blind. The wiring follows the plugin's own `docs/SETUP.md` and mirrors the
+  host:
   - the documented **nervous-system block** under `plugins.entries.nerve.settings` (a value
     written one level up is never read): `nervous_enabled`, `nervous_turn_admission`,
     `nervous_mode: correct_next`, `nervous_challenge_confidence: 0.86`,

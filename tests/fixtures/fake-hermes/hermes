@@ -109,6 +109,39 @@ def _save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state))
 
 
+#: The pyproject the pinned plugin really carries (`keeltrace/hermes-nerve` @ 3de7d949). The `laya`
+#: extra is the one the install script removes (issue #585), so the stand-in writes the same file
+#: instead of an empty bundle — the removal step must be exercised against a real pyproject.
+PLUGIN_PYPROJECT = """\
+[project]
+name = "hermes-nerve"
+version = "0.3.1"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["hermes_nerve*"]
+
+[project.optional-dependencies]
+dev = ["PyYAML>=6,<7"]
+laya = ["laya==0.3.3"]
+"""
+
+
+def _enable(bundle_name: str = "nerve") -> None:
+    """Mark the plugin enabled, the way `hermes plugins enable` does."""
+    state = _state()
+    state["enabled"] = True
+    _save_state(state)
+    cfg = _read_config()
+    plugins = cfg.setdefault("plugins", {})
+    plugins.setdefault("disabled", [])
+    names = plugins.setdefault("enabled", [])
+    if bundle_name not in names:
+        names.append(bundle_name)
+    _write_config(cfg)
+
+
 def plugins_install(args: list[str]) -> int:
     identifier = args[0] if args else ""
     ref = args[args.index("--ref") + 1] if "--ref" in args else ""
@@ -116,16 +149,38 @@ def plugins_install(args: list[str]) -> int:
     bundle = HOME / "plugins" / "nerve"
     bundle.mkdir(parents=True, exist_ok=True)
     (bundle / "plugin.yaml").write_text('name: nerve\nversion: "0.3.1"\n')
-    _save_state({"ref": ref, "enabled": enabled})
-    cfg = _read_config()
-    plugins = cfg.setdefault("plugins", {})
-    plugins.setdefault("disabled", [])
-    names = plugins.setdefault("enabled", [])
-    if enabled and "nerve" not in names:
-        names.append("nerve")
-    _write_config(cfg)
+    (bundle / "pyproject.toml").write_text(PLUGIN_PYPROJECT)
+    _save_state({"ref": ref, "enabled": False})
+    if enabled:
+        _enable()
+        _save_state({"ref": ref, "enabled": True})
     print(f"✓ Plugin installed: {identifier} (pinned {ref[:8]})")
-    print("✓ Plugin nerve enabled." if enabled else "Plugin installed disabled.")
+    if "--no-deps" in args and not enabled:
+        print("--no-deps: skipping dependency consent; the plugin stays disabled.")
+        print("Plugin installed but not enabled. Run `hermes plugins enable nerve` to activate.")
+    else:
+        print("✓ Plugin nerve enabled." if enabled else "Plugin installed disabled.")
+    return 0
+
+
+def plugins_enable(args: list[str]) -> int:
+    """`hermes plugins enable <name>`: the real command RESOLVES the plugin's dependencies here.
+
+    The failure this repo hit (issue #585) happened at exactly this step, so the stand-in models
+    the contract, not the resolution: it enables a bundle that is on disk and refuses one that is
+    not.
+    """
+    name = args[0] if args else "nerve"
+    if not (HOME / "plugins" / name / "plugin.yaml").exists():
+        print(f"fake-hermes: plugin '{name}' is not installed", file=sys.stderr)
+        return 1
+    state = _state()
+    state["enabled"] = True
+    _save_state(state)
+    _enable(name)
+    print("  → Resolving Python dependencies…")
+    print("  ✓ Resolving Python dependencies")
+    print(f"✓ Plugin {name} enabled.")
     return 0
 
 
@@ -190,13 +245,28 @@ def config_unset(key: str) -> int:
     return 0
 
 
+def _record(argv: list[str]) -> None:
+    """Append this invocation to `$HERMES_HOME/.fake-hermes-calls.jsonl`.
+
+    A test asserts the FLAGS the install script actually passes (`--no-deps`, never
+    `--yes-deps`) from what the CLI received, not from the script's text (issue #585).
+    """
+    path = HOME / ".fake-hermes-calls.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        fh.write(json.dumps(argv) + "\n")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("usage: hermes <group> <command> ...", file=sys.stderr)
         return 2
+    _record(argv)
     group, command, rest = argv[0], argv[1], argv[2:]
     if group == "plugins" and command == "install":
         return plugins_install(rest)
+    if group == "plugins" and command == "enable":
+        return plugins_enable(rest)
     if group == "plugins" and command in ("list", "ls"):
         return plugins_list(rest)
     if group == "config" and command == "set":

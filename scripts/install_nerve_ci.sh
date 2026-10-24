@@ -55,10 +55,52 @@ done
 command -v hermes >/dev/null 2>&1 || fail "no hermes on PATH: install the CLI before the plugin"
 
 echo "[nerve-ci] installing ${PLUGIN}@${REF:0:8} into ${HERMES_HOME} (provider=${PROVIDER})"
-# `hermes plugins install` writes the plugin under ${HERMES_HOME}/plugins/<name> and records
-# provenance; --yes-deps answers the Python-dependency consent question so a non-interactive
-# build finishes in one run, and --enable turns it on without a prompt.
-hermes plugins install "$PLUGIN" --ref "$REF" --yes-deps --enable
+#
+# THREE STEPS, NOT ONE (issue #585). `--yes-deps` made Hermes take a UNIVERSAL `uv lock` for the
+# plugin's workspace: it resolves every marker split, not just this image's. The pinned plugin
+# declares an OPTIONAL extra `laya = ["laya==0.3.3"]`, and laya requires `torch>=2.0.0`, which
+# publishes no wheels for `python_full_version >= '3.14'` or `sys_platform == 'android'`. With no
+# solution uv exits 1, Hermes refuses to admit the plugin ("Resolver: uv lock exited 1"), and so
+# EVERY agent image build failed — which is every bot job, because `agent-jev-preflight` is the
+# first step of each one (measured: run 40099608144 / job 120888884874).
+#
+# The extra is dead weight in THIS image, on two independent grounds: the bots run the plugin's
+# default `reflex_backend` (`jev`) and this script writes no `reflex_backend`, so the Laya sidecar
+# backend is never selected; and the plugin imports laya LAZILY, inside a function
+# (`hermes_nerve/reflex/laya_service.py`), so an install without the extra still imports and
+# serves jev. Adding `[tool.uv] environments` to the plugin's own pyproject does NOT help —
+# measured against this exact pin: Hermes generates its own workspace and does not inherit it.
+#
+# So: clone without resolving (`--no-deps`), remove that one extra from the INSTALLED copy, then
+# enable — which resolves a graph that now has a solution. The removal is ASSERTED, not assumed:
+# a plugin that stops declaring `laya` fails the build and names this decision, because a silent
+# pass would turn a deliberate scoping into a guess about what the next bump contains.
+hermes plugins install "$PLUGIN" --ref "$REF" --no-deps
+python3 - "$HERMES_HOME/plugins/nerve/pyproject.toml" <<'PY' || exit 1
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+if not path.is_file():
+    sys.exit(f"[nerve-ci] {path} is missing: the bundle carries no pyproject to scope (issue #585)")
+out, in_optional, dropped = [], False, False
+for line in path.read_text().splitlines(True):
+    stripped = line.strip()
+    if stripped.startswith("["):
+        in_optional = stripped == "[project.optional-dependencies]"
+    if in_optional and re.match(r"^laya\s*=", stripped):
+        dropped = True
+        continue
+    out.append(line)
+if not dropped:
+    sys.exit("[nerve-ci] the pinned plugin no longer declares a `laya` extra: revisit issue #585 "
+             "instead of resolving its extras blind")
+path.write_text("".join(out))
+print("[nerve-ci] dropped the unused `laya` extra (laya==0.3.3 -> torch has no py3.14/android "
+      "wheels, so a universal lock has no solution)")
+PY
+hermes plugins enable nerve
 
 # The settings the HOST runs with (issue #238 records the host values verbatim). Hermes reads
 # a plugin's options from plugins.entries.<id>.settings.<key>; a value written one level up is
