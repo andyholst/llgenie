@@ -482,3 +482,42 @@ def test_a_real_pr_create_failure_names_the_orphans(tmp_path, monkeypatch):
     # Then it fails loudly, naming the issue and branch a human must finish
     assert "issue #7" in raised and "agent/architecture-20261021T1200" in raised
     assert "no PR exists for that branch" in raised
+
+
+def test_publish_refuses_a_doc_that_names_the_retired_module(tmp_path, monkeypatch):
+    """Issue #573: PR #572 went red on both unit jobs 25 minutes after the doc was pushed."""
+
+    # Given a dirty doc that names the retired CLI module — BUILT, never spelled, so this file
+    # stays clean for the guard it exercises
+    root = _repo(tmp_path)
+    gh, log = _fake_gh(tmp_path)
+    monkeypatch.setenv("GH_LOG", str(log))
+    retired = "llama" + "_serve"
+    _dirty_doc(root, LONG_DOC + f"\nThe shim `{retired}.py` is a deprecated alias.\n")
+
+    # When  publish runs
+    try:
+        ab.publish(root, "owner/repo", DOC, stamp="20261021T1200", gh=str(gh))
+        raised = ""
+    except ValueError as exc:
+        raised = str(exc)
+
+    # Then  it refused before writing anything: no GitHub call, no branch, no commit
+    assert "retired CLI module" in raised, raised
+    assert log.read_text() == "", log.read_text()
+    assert _git(root, "branch", "--list", "agent/architecture*").strip() == ""
+    assert _git(root, "log", "--oneline", "-1", "--format=%s").strip() == "feat: seed the tree"
+
+
+def test_the_brief_states_the_rename_rule(tmp_path):
+    """The rule must be where the WRITER reads it, not only where the reviewer checks it (#573)."""
+
+    # Given a real tree
+    root = _repo(tmp_path)
+
+    # When  the brief is derived
+    text = ab.brief(root, DOC)
+
+    # Then  it tells the agent about the rename guard, without spelling the forbidden name
+    assert "retired CLI module" in text, text
+    assert not ab.module_name_guard.offenders(text), "the brief itself must stay clean"

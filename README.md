@@ -1200,6 +1200,14 @@ make architecture-bot-publish REPO=asimov-agent/llgenie  # ONE issue + ONE PR, n
   crons, `data/`, `skills/`, `containers/`, `tests/`) and the drift: the commit that last wrote
   the doc, the commits after it, and the paths that changed. No model call, and it writes only
   the brief. A doc with no history is a **full rebuild**.
+- **The rename guard is applied to the WRITER, before anything is written** (issue #573). The
+  CLI was renamed to `scripts/llgenie_serve.py` (#251) and the retired spelling may appear only in
+  its deprecated shim, `agent-wiki/` and `openspec/changes/` — a doc that names it fails
+  `make test-unit`. The rule lives once, in `scripts/module_name_guard.py`, imported by both
+  `tests/test_rename_llgenie_serve.py` and `publish()`, which runs it on the regenerated doc and
+  refuses **loudly** (no branch, no commit, no PR) instead of discovering it 25 minutes later as
+  two red unit jobs (PR #572). The brief also tells the agent the rule, so the refresh should not
+  trip it in the first place.
 - **One agent leg, one writable file.** `make architecture-bot-doc` runs Hermes inside the
   pinned agent image with a prompt that may modify `docs/ARCHITECTURE.md` and nothing else — no
   branch, no commit, no push, no issue. Its transcript goes through the `scrubbed_run` seam and
