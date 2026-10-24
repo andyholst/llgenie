@@ -2019,8 +2019,13 @@ make worktree-prune    # remove the worktrees and local branches whose PR alread
                        # of main and `git branch --merged` calls landed work unmerged forever. A branch is
                        # pruned only when it is a MERGED PR's head AND that PR's merge commit is on the base
                        # (origin/main; BASE= overrides). Kept, with its reason printed: an OPEN/CLOSED PR, no
-                       # PR at all, a merge commit off the base, a dirty worktree, a detached worktree, and the
-                       # main checkout. DRY=1 prints the plan and mutates nothing; SLUG= picks the owner/name
+                       # PR at all, a merge commit off the base, a dirty worktree, and the main checkout. A
+                       # worktree git reports as DETACHED carries no branch name, so it is matched by HEAD: one
+                       # detached worktree parked on the pruned branch's own tip IS that branch's checkout and is
+                       # removed before the branch, while a detached worktree on any other commit is left alone
+                       # (issue #570 — the plan used to promise "prune 1 branches, 0 worktrees" for a branch that
+                       # had one, and `git branch -D` then failed the whole sweep forever).
+                       # DRY=1 prints the plan and mutates nothing; SLUG= picks the owner/name
                        # gh reads (default asimov-agent/llgenie — REPO is the checkout path, which gh rejects)
 make test-clean        # prune stopped orphaned test containers (always)
 ```

@@ -144,6 +144,67 @@ def test_prunes_a_squash_merged_branch_and_its_clean_worktree(tmp_path):
     assert "pruned 1 branches, 1 worktrees" in result.stdout
 
 
+def test_one_run_prunes_every_merged_branch_and_its_worktree(tmp_path):
+    """Two merged branches and their worktrees are gone after ONE run (issue #570).
+
+    Measured on a real checkout: the first run removed both worktrees and deleted neither branch
+    ("pruned 0 branches, 2 worktrees"), and a second run deleted the branches. A prune that needs two
+    runs is a prune that reports the wrong thing about the tree it just touched.
+    """
+
+    # Given two squash-merged branches, each with its own clean worktree
+    work = _repo(tmp_path)
+    prs = []
+    trees = []
+    for i, name in enumerate(("feat/one", "feat/two"), start=1):
+        squash = _merged_branch(work, name)
+        tree = tmp_path / f"wt-{i}"
+        _git(work, "worktree", "add", str(tree), name)
+        trees.append(tree)
+        prs.append(_pr(i, name, "MERGED", squash))
+
+    # When  the prune runs ONCE
+    result = _run(tmp_path, work, prs)
+
+    # Then  both worktrees and both branches are gone, and the summary says so
+    assert result.returncode == 0, result.stderr
+    for tree in trees:
+        assert not tree.exists(), f"{tree} survived"
+    heads = _git(work, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    assert "feat/one" not in heads and "feat/two" not in heads, heads
+    assert "pruned 2 branches, 2 worktrees" in result.stdout, result.stdout
+
+
+def test_a_detached_worktree_of_a_merged_branch_is_pruned_in_one_run(tmp_path):
+    """A worktree git reports as DETACHED still holds its branch: match it, remove it, delete it.
+
+    Measured on the real checkout (issue #570): the plan said `would prune 1 branches, 0 worktrees`
+    for a branch that HAS a worktree, `git worktree remove` was skipped (path None), and
+    `git branch -D` then failed with "used by worktree at …", so the sweep exited 2 forever.
+    """
+
+    # Given a squash-merged branch whose worktree is attached to the branch but checked out detached
+    work = _repo(tmp_path)
+    squash = _merged_branch(work, "fix/detached")
+    tree = tmp_path / "wt-detached"
+    _git(work, "worktree", "add", str(tree), "fix/detached")
+    tip = _git(tree, "rev-parse", "HEAD")
+    _git(tree, "checkout", "--detach", tip)
+    assert "detached" in _git(work, "worktree", "list", "--porcelain")
+
+    # When  the prune runs once
+    result = _run(tmp_path, work, [_pr(9, "fix/detached", "MERGED", squash)])
+
+    # Then  it succeeds, and BOTH the worktree and the branch are gone
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not tree.exists(), "the detached worktree must be removed with its branch"
+    heads = _git(work, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    assert "fix/detached" not in heads, heads
+
+    # And   the summary never promises "0 worktrees" for a branch that has one
+    assert "pruned 1 branches, 1 worktrees" in result.stdout, result.stdout
+
+
 def test_a_dirty_worktree_is_kept_and_says_so(tmp_path):
     """An uncommitted change blocks both the worktree removal and the branch deletion."""
 
@@ -232,8 +293,13 @@ def test_the_main_checkout_is_never_removed(tmp_path):
     assert "checked out in the repository's main checkout" in result.stdout
 
 
-def test_a_detached_worktree_is_never_removed(tmp_path):
-    """A detached worktree holds no branch, so no merge can license deleting it."""
+def test_a_detached_worktree_on_the_merged_tip_is_removed_with_its_branch(tmp_path):
+    """A detached worktree parked on the merged branch's tip IS that branch's checkout (issue #570).
+
+    The old rule kept the directory and deleted the branch, which leaves a checkout git associates with
+    nothing — the stranding the module's own apply() warns about. The merge licenses both: the work is
+    on the base, and the directory is that work's checkout.
+    """
 
     # Given a detached-HEAD worktree at a merged branch's tip
     work = _repo(tmp_path)
@@ -245,10 +311,30 @@ def test_a_detached_worktree_is_never_removed(tmp_path):
     # When  the prune runs
     result = _run(tmp_path, work, [_pr(12, "feat/detached", "MERGED", squash)])
 
-    # Then  the detached worktree still exists, and the branch itself is pruned
+    # Then  the worktree and the branch are BOTH gone, and the plan never promised 0 worktrees
     assert result.returncode == 0, result.stderr
-    assert tree.is_dir()
+    assert not tree.exists(), "the merged branch's own checkout must not be stranded"
     assert "feat/detached" not in _git(work, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    assert "pruned 1 branches, 1 worktrees" in result.stdout, result.stdout
+
+
+def test_a_detached_worktree_on_another_commit_is_never_removed(tmp_path):
+    """A detached worktree parked somewhere else holds no branch of ours, so nothing licenses it."""
+
+    # Given a detached-HEAD worktree at an unrelated commit, and a merged branch with no worktree
+    work = _repo(tmp_path)
+    squash = _merged_branch(work, "feat/elsewhere")
+    root = _git(work, "rev-list", "--max-parents=0", "HEAD")
+    _git(work, "worktree", "add", "--detach", str(tmp_path / "wt-old"), root)
+    tree = tmp_path / "wt-old"
+
+    # When  the prune runs for the merged branch
+    result = _run(tmp_path, work, [_pr(13, "feat/elsewhere", "MERGED", squash)])
+
+    # Then  the unrelated detached worktree survives and the branch is still pruned
+    assert result.returncode == 0, result.stderr
+    assert tree.is_dir(), "a detached worktree on an unrelated commit is not ours to delete"
+    assert "feat/elsewhere" not in _git(work, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 
 
 def test_dry_run_prunes_nothing_and_prints_the_plan(tmp_path):
