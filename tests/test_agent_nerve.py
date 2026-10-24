@@ -165,6 +165,128 @@ def _with_fake_hermes(tmp_path: Path, **extra: str) -> dict:
     return {"PATH": f"{bin_dir}:{os.environ['PATH']}", **extra}
 
 
+
+# ---------------------------------------------------------------------------
+# the image resolves no extra it never uses (issue #585)
+# ---------------------------------------------------------------------------
+def _calls(home: Path) -> list[list[str]]:
+    """The argv every `hermes` invocation received during the build half."""
+    path = home / ".fake-hermes-calls.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_the_build_installs_without_resolving_the_plugins_extras(tmp_path):
+    """A universal `uv lock` over an unused extra is what broke every agent image build."""
+
+    # Given a home and a CLI that records what it is asked to do
+    home = _home(tmp_path, plugin=False)
+    r = _run(INSTALL, {**_with_fake_hermes(tmp_path), "HERMES_HOME": str(home)})
+
+    # When the build half runs end to end
+    assert r.returncode == 0, r.stderr + r.stdout
+
+    # Then the install call never asks for dependency resolution — the flag that failed the build
+    installs = [c for c in _calls(home) if c[:2] == ["plugins", "install"]]
+    assert len(installs) == 1, installs
+    assert "--no-deps" in installs[0], installs[0]
+    assert "--yes-deps" not in installs[0], (
+        "`--yes-deps` makes Hermes take a universal uv lock, which the plugin's laya extra "
+        "cannot satisfy (issue #585)")
+
+    # And   the plugin is enabled in a SEPARATE, explicit step
+    enables = [c for c in _calls(home) if c[:2] == ["plugins", "enable"]]
+    assert enables and enables[0][2] == "nerve", enables
+
+
+def test_the_build_drops_the_unused_laya_extra_and_enables_the_plugin(tmp_path):
+    """The extra is what makes the lock unsatisfiable, so it must be gone before `enable`."""
+
+    # Given a home whose install writes the same pyproject the pinned plugin carries
+    home = _home(tmp_path, plugin=False)
+    r = _run(INSTALL, {**_with_fake_hermes(tmp_path), "HERMES_HOME": str(home)})
+
+    # When the build half installs, scopes and enables
+    assert r.returncode == 0, r.stderr + r.stdout
+
+    # Then the installed pyproject no longer declares the laya extra...
+    pyproject = (home / "plugins" / "nerve" / "pyproject.toml").read_text()
+    assert "laya = " not in pyproject, pyproject
+    assert "torch" not in pyproject, pyproject
+
+    # And   it still carries the other extras, so the removal is scoped and not a truncation
+    assert 'dev = ["PyYAML>=6,<7"]' in pyproject, pyproject
+
+    # And   the plugin ended ENABLED, which is what the rest of the script proves
+    assert "  - nerve" in (home / "config.yaml").read_text()
+    assert "dropped the unused `laya` extra" in r.stdout, r.stdout
+
+
+def test_dropping_a_missing_extra_is_a_loud_failure(tmp_path):
+    """A silent pass would turn a deliberate scoping into a guess about the next pin."""
+
+    # Given the REAL removal step, extracted from the script that runs in the image
+    import re as _re
+    script = INSTALL.read_text()
+    m = _re.search(r"python3 - \"\$HERMES_HOME/plugins/nerve/pyproject\.toml\" <<'PY'[^\n]*\n(.*?)\nPY\n",
+                   script, _re.DOTALL)
+    assert m, "the install script must carry the extra-removal step this test drives"
+    step = tmp_path / "step.py"
+    step.write_text(m.group(1))
+
+    # When  it runs against a pyproject that declares no `laya` extra
+    target = tmp_path / "pyproject.toml"
+    target.write_text('[project]\nname = "hermes-nerve"\ndependencies = []\n')
+    proc = subprocess.run([sys.executable, str(step), str(target)],
+                          capture_output=True, text=True, timeout=60)
+
+    # Then  it fails loudly and names the decision that must be revisited
+    assert proc.returncode != 0, proc.stdout
+    assert "no longer declares a `laya` extra" in proc.stderr
+    assert "585" in proc.stderr
+
+    # And   the file it refused is untouched
+    assert target.read_text() == '[project]\nname = "hermes-nerve"\ndependencies = []\n'
+
+
+def test_the_removal_step_drops_only_the_laya_line(tmp_path):
+    """The step edits one line inside the optional-dependencies table and nothing else."""
+
+    # Given a pyproject shaped like the pinned plugin's, with a `laya` line before and after
+    # other sections (so a naive whole-file delete would be caught)
+    step = tmp_path / "step.py"
+    import re as _re
+    m = _re.search(r"python3 - \"\$HERMES_HOME/plugins/nerve/pyproject\.toml\" <<'PY'[^\n]*\n(.*?)\nPY\n",
+                   INSTALL.read_text(), re.DOTALL)
+    step.write_text(m.group(1))
+    target = tmp_path / "pyproject.toml"
+    original = (
+        "[project]\n"
+        "name = \"hermes-nerve\"\n"
+        "laya = [\"not-an-extra\"]\n"
+        "\n"
+        "[project.optional-dependencies]\n"
+        "dev = [\"PyYAML>=6,<7\"]\n"
+        "laya = [\"laya==0.3.3\"]\n"
+        "\n"
+        "[tool.setuptools.packages.find]\n"
+        "include = [\"hermes_nerve*\"]\n"
+    )
+    target.write_text(original)
+
+    # When  the removal step runs
+    proc = subprocess.run([sys.executable, str(step), str(target)],
+                          capture_output=True, text=True, timeout=60)
+
+    # Then  only the extra is gone — the `[project]` line of the same name and the other
+    #       tables survive
+    assert proc.returncode == 0, proc.stderr
+    got = target.read_text()
+    assert 'laya = ["laya==0.3.3"]' not in got, got
+    assert 'laya = ["not-an-extra"]' in got, "the step must only edit the optional-dependencies table"
+    assert 'dev = ["PyYAML>=6,<7"]' in got and "hermes_nerve*" in got, got
+
 def test_the_build_wires_the_hosts_settings_and_keeps_gate_mode_a_string(tmp_path):
     """The settings land where Hermes reads them — and `off` stays the string, not YAML false."""
 
