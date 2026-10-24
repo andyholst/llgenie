@@ -355,7 +355,10 @@ for flag in "$@"; do
     $TO "$path" "$flag" >"$out" 2>&1
   fi
   rc=$?
-  bytes=$(wc -c <"$out" 2>/dev/null || echo 0)
+  # BSD `wc -c` pads its count with spaces ("      12") while GNU does not, so strip them here: a
+  # padded count broke the verdict parser on the macOS runner (issue #580, caught by macos / unit).
+  bytes=$(wc -c <"$out" 2>/dev/null | tr -d ' ' || true)
+  [ -n "$bytes" ] || bytes=0
   # One verdict per flag: the caller decides, this probe never short-circuits.
   echo "LG-FLAG $flag $rc $bytes"
   echo "LG-OUT-BEGIN $flag"
@@ -378,8 +381,9 @@ HELP_FAMILY = ("-h", "--help")
 # manifest documents nothing (issue #580). See TYPED_FLAGS for the always-probed set.
 FALLBACK_FLAGS = ("--version", "-h", "--help")
 
-#: One verdict line per flag, as BINARY_PROBE prints it.
-_LG_FLAG = re.compile(r"^LG-FLAG (\S+) (-?\d+) (\d+)$")
+#: One verdict line per flag, as BINARY_PROBE prints it. `\s+` on purpose: a platform's own `wc` may
+#: pad its count, and a probe whose parser only understands Linux spacing is a green Linux / red macOS.
+_LG_FLAG = re.compile(r"^LG-FLAG (\S+)\s+(-?\d+)\s+(\d+)$")
 _LG_OUT_BEGIN = re.compile(r"^LG-OUT-BEGIN (\S+)$")
 _LG_OUT_END = re.compile(r"^LG-OUT-END (\S+)$")
 
@@ -462,13 +466,15 @@ def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flag
                             f"{' '.join(probed)}")
         return {"ok": False, "failures": failures, "note": note}
 
-    if not any(_answered(verdicts, f) for f in HELP_FAMILY if f in verdicts):
-        failures.append("the help family answers to neither "
-                        f"{' nor '.join(f for f in HELP_FAMILY if f in verdicts)}: a user typing "
-                        "either gets nothing")
-    if not any(_answered(verdicts, f) for f in VERSION_FAMILY if f in verdicts):
-        failures.append(f"the version family answers to neither "
-                        f"{' nor '.join(f for f in VERSION_FAMILY if f in verdicts)}")
+    # A family is judged only over the members that were PROBED: `binary_file_works` always probes all
+    # of TYPED_FLAGS, so an absent member here is a caller that never ran it — not an engine failing.
+    help_probed = [f for f in HELP_FAMILY if f in verdicts]
+    if help_probed and not any(_answered(verdicts, f) for f in help_probed):
+        failures.append(f"the help family answers to neither {' nor '.join(help_probed)}: a user "
+                        "typing either gets nothing")
+    version_probed = [f for f in VERSION_FAMILY if f in verdicts]
+    if version_probed and not any(_answered(verdicts, f) for f in version_probed):
+        failures.append(f"the version family answers to neither {' nor '.join(version_probed)}")
 
     return {"ok": not failures, "failures": failures, "note": note}
 

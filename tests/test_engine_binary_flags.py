@@ -85,6 +85,25 @@ def test_the_probe_reports_every_flag_instead_of_stopping_at_the_first(tmp_path)
     print(f"[probe] reported {sorted(verdicts)} — --help exit {verdicts['--help']['rc']}")
 
 
+def test_the_parser_accepts_a_padded_byte_count(tmp_path):
+    """BSD `wc -c` pads its count; a parser that only understands GNU spacing reds macOS (issue #580)."""
+
+    # Given a verdict line whose byte count is padded, as BSD `wc -c` prints it
+    text = "\n".join([
+        "LG-FLAG --version 0       12",
+        "LG-OUT-BEGIN --version",
+        "fake-engine 1.2.3",
+        "LG-OUT-END --version",
+    ])
+
+    # When  it is parsed
+    verdicts = ei.parse_probe(text)
+
+    # Then  the flag is recorded with its real numbers
+    assert verdicts == {"--version": {"rc": 0, "bytes": 12, "output": "fake-engine 1.2.3"}}, verdicts
+    assert ei.decide([], verdicts, "device")["ok"]
+
+
 def test_a_missing_binary_file_is_still_the_probe_failure(tmp_path):
     """The exit-code contract survives: 1 means the file is missing, not 'a flag failed'."""
 
