@@ -2024,7 +2024,11 @@ make worktree-prune    # remove the worktrees and local branches whose PR alread
                        # detached worktree parked on the pruned branch's own tip IS that branch's checkout and is
                        # removed before the branch, while a detached worktree on any other commit is left alone
                        # (issue #570 — the plan used to promise "prune 1 branches, 0 worktrees" for a branch that
-                       # had one, and `git branch -D` then failed the whole sweep forever).
+                       # had one, and `git branch -D` then failed the whole sweep forever). When git still refuses
+                       # the delete because a worktree holds the branch, the refusal is split two ways (issue #593):
+                       # a worktree that is detached, branch-less and clean is debris and is removed before a
+                       # single retry, while one with a branch checked out or uncommitted/unmerged work makes the
+                       # branch a KEEP with that reason printed — never an `Error 2` that reds the whole sweep.
                        # DRY=1 prints the plan and mutates nothing; SLUG= picks the owner/name
                        # gh reads (default asimov-agent/llgenie — REPO is the checkout path, which gh rejects)
 make test-clean        # prune stopped orphaned test containers (always)

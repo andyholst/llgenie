@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -189,6 +191,31 @@ def _merged(entries: list[dict]) -> dict | None:
     return None
 
 
+#: The path git names in `cannot delete branch '…' used by worktree at '<path>'` (issue #593).
+_REFUSED_BY = re.compile(r"used by worktree at '([^']+)'")
+
+
+def _refused_by_worktree(message: str) -> str | None:
+    """The worktree path a `git branch -D` refusal names, or None when it names none."""
+    m = _REFUSED_BY.search(message or "")
+    return m.group(1) if m else None
+
+
+def _detached_and_clean(path: str, cwd: str | None = None) -> bool:
+    """Whether `path` is a worktree git reports as branch-line-less and detached, holding no changes.
+
+    That is the only shape `apply()` may remove on a `branch -D` refusal: no branch is checked out
+    there, so nothing of anyone's work depends on the directory, and a dirty one is refused (the same
+    rule the planner applies to every other worktree).
+    """
+    for tree in worktrees(cwd):
+        if os.path.realpath(tree.path) == os.path.realpath(path):
+            if tree.branch or not tree.detached:
+                return False
+            return not is_dirty(tree.path, cwd=cwd)
+    return False
+
+
 def plan(
     base: str,
     branches: list[str],
@@ -283,6 +310,36 @@ def apply(decisions: list[Decision], cwd: str | None = None) -> Outcome:
         try:
             _git(["branch", "-D", decision.branch], cwd=cwd)
         except PruneError as exc:
+            # `git branch -D` is the only authority on which worktree holds a branch: the planner read
+            # `worktree list`, and a worktree can refuse a delete while that listing shows it as pure
+            # `detached` with no branch line (issue #593). When the refusal names such a worktree —
+            # detached, branch-less, clean — that directory is debris of the branch being pruned: remove
+            # it and retry the delete ONCE. A named worktree is another checkout and is never touched.
+            holder = _refused_by_worktree(str(exc))
+            if holder and _detached_and_clean(holder, cwd=cwd):
+                try:
+                    _git(["worktree", "remove", holder], cwd=cwd)
+                    outcome.removed_worktrees.append(holder)
+                    _git(["branch", "-D", decision.branch], cwd=cwd)
+                except PruneError as retry_exc:
+                    outcome.errors.append(
+                        f"{decision.branch}: could not delete the branch even after removing the "
+                        f"detached worktree {holder}: {retry_exc}")
+                    continue
+                print(f"{TAG} removed the detached worktree {holder} holding {decision.branch} "
+                      f"(issue #593), then deleted the branch")
+                outcome.removed_branches.append(decision.branch)
+                continue
+            if holder:
+                # A worktree that git says holds the branch and that is NOT removable debris — a
+                # branch checked out there, or uncommitted/unmerged work in it — is the planner's
+                # own KEEP case ("a dirty worktree"): say so and move on. Erroring here is what made
+                # `make worktree-prune` exit 2 forever on this checkout (issue #593), and refusing to
+                # touch someone's half-merged tree is the correct behaviour, not a failure.
+                decision.action = "keep"
+                decision.reason = (f"held by the worktree {holder} (a branch is checked out there, "
+                                   f"or it holds uncommitted/unmerged work)")
+                continue
             outcome.errors.append(f"{decision.branch}: could not delete the branch: {exc}")
             continue
         outcome.removed_branches.append(decision.branch)
