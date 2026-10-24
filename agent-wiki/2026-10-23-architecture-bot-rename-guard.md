@@ -1,6 +1,6 @@
 # The rename rule reaches the writer
 
-Issue: #573. PR: (opened with this change).
+Issue: #573. PR: #574.
 
 PR #572 (the architecture bot's doc refresh) went red on both unit jobs with
 `tests/test_rename_llgenie_serve.py::test_no_live_file_mentions_the_old_module_name` — the regenerated
