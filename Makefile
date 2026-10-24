@@ -64,6 +64,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	secret-scan secret-scan-history secret-scan-self-test \
 	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict implement-issue hermes-smoke agent-jev-preflight code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
+	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
@@ -409,6 +410,27 @@ _issue-dedup: # (internal) the host recipe the agent image runs: the decision, n
 issue-dedup-apply: ## Apply dedup.md: retire the COPY with a comment citing the canonical + agent:duplicate, close it, and queue the canonical (COPY=<n>; never touches a claimed issue; refuses a duplicate without EVIDENCE)
 	@test -n "$(COPY)" || { echo "Usage: make issue-dedup-apply COPY=<n> [FILE=dedup.md] [REPO=<owner/repo>] [DRY=1]"; exit 1; }
 	python3 scripts/issue_dedup.py apply $(if $(FILE),$(FILE),dedup.md) --copy $(COPY) --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
+
+# The documentation review of an engine's DERIVED build parameters (issue #583). The bump proves the
+# params COMPILE; this leg checks them against the engine's own docs for the arch being built. The host
+# stays the writer: the agent may only propose a `-D` flag whose evidence it quotes from the upstream
+# tree at the pin, and the apply step drops anything it cannot find there.
+engine-params-review-brief: ## Issue #583: write params-review-in.md — the engine's upstream docs at its pinned sha + the params this repo builds with (deterministic; ENGINE=<id>)
+	@test -n "$(ENGINE)" || { echo "Usage: make engine-params-review-brief ENGINE=<id>"; exit 1; }
+	python3 scripts/engine_params_review.py brief --engine "$(ENGINE)"
+engine-params-review: ## Issue #583: Hermes reviews the derived params against the engine's own documentation and writes params-review.md (may propose only documented -D flags; runs INSIDE the agent image; the transcript is REDACTED before it prints)
+	@python3 scripts/require_env.py NOUS_API_KEY
+	@$(MAKE) --no-print-directory agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=NOUS_API_KEY
+	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
+	  -e NOUS_API_KEY -e HERMES_REASONING \
+	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
+	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_IMAGE) bash -lc 'make _engine-params-review')
+_engine-params-review: # (internal) the host recipe the agent image runs: the review, not the change
+	hermes -z "Follow the preloaded skill engine-params-review. Its Input is params-review-in.md and its Output is params-review.md, in the PROPOSE/NO REVIEW shape the skill prints. Propose only parameters whose flag AND quoted evidence appear in the named upstream file; the host drops anything else." -s engine-params-review,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
+engine-params-review-apply: ## Issue #583: validate params-review.md (the flag AND its quote must be in the named upstream file), append accepted flags to the skill, regenerate params/Dockerfiles and write the PR section (ENGINE=; DRY=1 previews, mutating nothing)
+	@test -n "$(ENGINE)" || { echo "Usage: make engine-params-review-apply ENGINE=<id> [DRY=1]"; exit 1; }
+	python3 scripts/engine_params_review.py apply --engine "$(ENGINE)" $(if $(DRY),--dry,)
 
 issue-bot-dispatch: ## The issue-implementer's dispatcher: cap (3/day) -> pick one labeled/ready issue -> claim -> write issue.md + branch (REPO= issue-bot.yml sets it; FORCE_ISSUE= pins a manual run; DRY=1 previews)
 	python3 scripts/issue_implementer.py dispatch --repo "$(REPO)" $(if $(FORCE_ISSUE),--force-issue $(FORCE_ISSUE),) $(if $(DRY),--dry,) $(if $(TODAY),--today $(TODAY),)

@@ -412,6 +412,10 @@ make engine-bump-plan [ENGINE=<id>]   # which engines moved upstream (git ls-rem
 make engine-derive ENGINE=<id> [SHA=] # derive build params from the upstream tree (no LLM)
 make engine-bump ENGINE=<id>          # pin + derive + apply + regen (no push)
 make engine-bump-daily [DRY=1]        # plan -> bump every moved engine; DRY=1 prints only
+make engine-params-review-brief ENGINE=<id>   # the engine's own docs at its pin + current params -> params-review-in.md
+make engine-params-review ENGINE=<id>         # Hermes reviews them against those docs (proposes only cited -D flags)
+make engine-params-review-apply ENGINE=<id>   # validate proposals (flag AND quote must be in the upstream file),
+                                              # apply accepted ones to the skill, regenerate, write the PR section
 make test-engine-bump-live            # the TensorFold v1.0.5 release archive as a live end-to-end: list,
                                       # classify, checksum and RUN it (the archive path an engine bump takes)
 make test-hub-live                    # the two live-Hub checks kept OUT of `make test-unit` (issue #438):
@@ -421,6 +425,20 @@ make test-strata-live                 # the Strata download/serve checks kept OU
                                       # choices come from the live Hub, and Strata's real server answers
 ```
 
+**The derived params are also reviewed against the engine's own documentation (issue #583).** The
+bump proves the params *compile*; it cannot prove they are *right for this engine version and this
+arch* — the derive is structural (CMake options, renames, recipe `-D` flags, toolchain pins), so a
+flag upstream's docs now recommend but the old params never had is invisible to it. After
+`make engine-bump` and before the PR opens, the bump job runs the three targets above:
+`engine-params-review-brief` writes `params-review-in.md` (the engine's README/`docs/`/backend recipe/
+`CMakeLists.txt` at the pinned sha, plus the params this repo builds with), the `engine-params-review`
+agent leg (Hermes, project skill `.hermes/skills/engine-params-review/`) writes `params-review.md` as
+one `PROPOSE <backend> <-DFLAG> DOC <path> "<quote>" WHY <reason>` line per documented parameter, and
+`engine-params-review-apply` decides. **The host stays the writer**: a proposal is applied only when
+its backend is one the engine builds, the named file exists at the pin, the flag's `NAME` is in it and
+the quoted evidence is a substring of it. Anything else is dropped and listed in the PR body under
+`Documentation review`, together with what was applied and from which document. A review that
+proposes nothing says so; a review that fails never blocks the bump (the PR still opens).
 The `engine-bump-rebase` workflow (daily cron `41 5 * * *`, issue #208) keeps
 those open `chore/engine-bump-*` PRs current with the latest `main`: it finds
 every open engine-bump PR and, when one is behind `main`, forward-merges the
