@@ -380,6 +380,11 @@ make test-strata-live    # Strata's pinned commit is fetched, its GGUF choices c
                          # and its real server answers "hi" on /v1/chat/completions
 ```
 
+A live read that stays IN the gate asserts the invariant it exists for, never a value upstream may
+rename or remeasure: the litertlm download plan pins the format and repo (not the build's file name) and
+the live-registry ranking case pins "the raw maximum is not the recommendation" (not that some engine is
+still unskilled) — both reddened every PR when upstream moved (issue #575).
+
 `tests/test_strata_live_target.py` pins that boundary hermetically: the file is out of the gate the
 aggregator computes, `make test-strata-live` names it and is `.PHONY`, the roster entry names issue #437
 and its target, and the file still carries the live work the decision describes.
