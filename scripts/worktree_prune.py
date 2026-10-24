@@ -205,6 +205,15 @@ def plan(
     """
     main_checkout = trees[0].path if trees else None
     tree_by_branch = {t.branch: t for t in trees if t.branch}
+    # A DETACHED worktree carries no branch name, so `tree_by_branch` can never match it — while git
+    # still refuses `git branch -D` for a branch that worktree holds, and removing the branch first
+    # strands the directory with no ref (issue #570: the plan said "prune 1 branches, 0 worktrees" and
+    # `branch -D` then failed the whole sweep forever). Match it by HEAD instead: one detached
+    # worktree parked on this branch's tip IS its checkout, and it is removed before the branch.
+    detached_by_head: dict[str, list[Worktree]] = {}
+    for t in trees:
+        if t.detached and t.head:
+            detached_by_head.setdefault(t.head, []).append(t)
     decisions: list[Decision] = []
 
     for branch in branches:
@@ -233,6 +242,12 @@ def plan(
             continue
 
         tree = tree_by_branch.get(branch)
+        if tree is None:
+            # The branch may still be checked out somewhere detached at exactly its tip.
+            tip = _git(["rev-parse", "--verify", branch], cwd=cwd, check=False).stdout.strip()
+            candidates = detached_by_head.get(tip) or []
+            if len(candidates) == 1:
+                tree = candidates[0]
         if tree is not None and main_checkout is not None and tree.path == main_checkout:
             decisions.append(Decision(branch, "keep", "checked out in the repository's main checkout", pr=number))
             continue
