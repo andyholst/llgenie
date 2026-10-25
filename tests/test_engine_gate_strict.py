@@ -153,3 +153,24 @@ def test_the_two_broken_detects_no_longer_produce_a_false_version():
         assert entry["flags"] == ["--version", "--help"], (variant, entry)
     for variant, spec in laurent["variants"].items():
         assert "grep -E '^version:'" in spec["detect"], (variant, spec["detect"])
+
+
+def test_the_gate_report_separates_what_each_row_proves():
+    """`make engine-gate-report` is the census a reviewer reads instead of 27 logs (issue #625)."""
+
+    import engine_gate_report as report  # noqa: PLC0415 (scripts/ is on sys.path above)
+
+    # Given the committed params + manifest
+    table = report.rows()
+
+    # When  the census is taken
+    by_verdict = {}
+    for row in table:
+        by_verdict.setdefault(row["verdict"], []).append((row["engine"], row["variant"]))
+
+    # Then  every cell is classified, and the exempt ones are exactly the measured DEVICE_ONLY cells
+    assert set(by_verdict) <= {"flag-proven", "device-exempt", "disabled"}, by_verdict
+    assert sorted(by_verdict.get("device-exempt", [])) == sorted(ei.DEVICE_ONLY), by_verdict
+    # And  the sweep's row count is reproduced: proven + exempt (disabled cells are not built)
+    assert len(by_verdict["flag-proven"]) + len(by_verdict["device-exempt"]) == 27, \
+        {k: len(v) for k, v in by_verdict.items()}
