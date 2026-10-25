@@ -63,9 +63,12 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     # git/gh/docker tooling a bot job needs. Its inputs include the install script it COPYs.
     # every file the Dockerfile COPYs belongs here: the hash tag is what makes "the image a job
     # uses" the image of THIS commit, so a changed install script must move the tag.
+    # scripts/nerve_profile_check.py is a hash input because the build RUNS it (issue #611): a setting
+    # whose module the selected profile does not register would be written and never read.
     "agent": ("containers/agent/Dockerfile", ("scripts/install_hermes_ci.sh",
                                               "scripts/hermes_skills_register.py",
                                               "scripts/install_nerve_ci.sh",
+                                              "scripts/nerve_profile_check.py",
                                               "scripts/agent_jev_preflight.sh")),
 }
 
