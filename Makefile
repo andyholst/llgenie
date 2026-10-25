@@ -70,7 +70,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
-	engine-bump-rebase generate-engine-params check-engine-params build-engine run-engine stop-engine list-engine-images ci-lint ci-unit ci-agents-read \
+	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
 	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk test-engine-stage bot-sync-main bot-sync-branch ci-wait-engine-images \
 	ci-install-dry ci-install-run ci-install-uninstall test-env test-top-tier test-top-tier-ci test-top-tier-cli-ci test-top-tier-serve test-top-tier-serve-ci \
 	check-agent-model model-pin-report check-agent-skills agent-skills-report test-agent-skills-live hermes-skills-register \
@@ -877,6 +877,10 @@ generate-engine-params: ## Regenerate containers/engines/params/*.json + binarie
 	python3 scripts/engine_skills.py params $(if $(ENGINE),--only $(ENGINE),)
 check-engine-params: ## CI: fail if committed engine params or the binaries manifest differ from what the skills generate
 	python3 scripts/engine_skills.py params --check
+check-engine-source: ## CI: fail if a cell claims a source build (prebuilt=false) but its install steps only download a wheel/archive
+	python3 scripts/engine_source_guard.py check
+engine-source-report: ## Print the source-vs-prebuilt census of every engine x arch cell, and every tracked exception
+	python3 scripts/engine_source_guard.py report
 build-engine-base: ## Build the shared toolchain base image for BACKEND (cpu|cuda|rocm|vulkan; PUSH=1 publishes + caches in LLGENIE_REGISTRY)
 	@test -n "$(BACKEND)" || { echo "Usage: make build-engine-base BACKEND=cpu|cuda|rocm|vulkan [PUSH=1]"; exit 1; }
 	python3 scripts/engine_image.py build-base "$(BACKEND)" $(if $(FORCE),--force,) $(if $(PUSH),--push,)
@@ -913,10 +917,12 @@ build-engine-%: ## Build one engine x arch image from its generated Dockerfile (
 	$(MAKE) build-engine ENGINE=$(patsubst %-$(lastword $(subst -, ,$*)),%,$*) ARCH=$(lastword $(subst -, ,$*))
 run-engine-%: ## Run one engine x arch image (run-engine-<engine>-<arch> MODEL=…)
 	$(MAKE) run-engine ENGINE=$(patsubst %-$(lastword $(subst -, ,$*)),%,$*) ARCH=$(lastword $(subst -, ,$*))
-build-engines: ## Build every engine image for ARCH (cpu|cuda|rocm|vulkan) from the generated Dockerfiles
-	@test -n "$(ARCH)" || { echo "Usage: make build-engines ARCH=cpu|cuda|rocm|vulkan [PUSH=1]"; exit 1; }
-	@for e in $$(python3 scripts/engine_image.py matrix --json | python3 -c 'import json,sys;print(" ".join(r["engine"] for r in json.load(sys.stdin)["include"] if r["variant"]=="$(ARCH)"))'); do \
-		$(MAKE) build-engine ENGINE=$$e ARCH=$(ARCH) $(if $(PUSH),PUSH=1,) || exit 1; done
+build-engines: ## Build every engine x variant the committed params declare, in PARALLEL — all engines, or ENGINE=<id>, or ARCH=<backend>, or both (JOBS= parallel builds, default: nproc; VERIFY=1 also runs each built image's binary test)
+	@JOBS="$(if $(JOBS),$(JOBS),$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4))"; \
+	rows=$$(python3 scripts/engine_image.py matrix --json --ci $(if $(ENGINE),--engine "$(ENGINE)",) $(if $(ARCH),--arch "$(ARCH)",)); \
+	printf '%s' "$$rows" \
+	  | python3 -c 'import json,sys; [print(r["engine"]+" "+r["variant"]) for r in json.load(sys.stdin)["include"] if r["engine"] != "none"]' \
+	  | xargs -r -P "$$JOBS" -n 2 sh -c '$(MAKE) build-engine ENGINE=$$0 ARCH=$$1 $(if $(PUSH),PUSH=1,) $(if $(VERIFY),&& $(MAKE) test-engine-image ENGINE=$$0 ARCH=$$1,)' || exit 1
 generate-build-engine-params: generate-engine-params ## Alias of generate-engine-params
 engine-bump-plan: ## Issue #107: which engines moved upstream (git ls-remote only; ENGINE=<id> to scope)
 	@$(PY) scripts/engine_bump.py plan $(if $(ENGINE),--engine $(ENGINE),)
@@ -930,6 +936,8 @@ engine-bump-daily: ## Issue #107: plan -> bump every moved engine (DRY=1 prints 
 	@$(PY) scripts/engine_bump.py bump-daily $(if $(DRY),--dry,)
 list-engine-images: ## List every engine x arch variant (CI=1: only CI variants, JSON=1: GitHub matrix JSON; CHANGED=<ref> keeps only images whose tag differs from it)
 	@python3 scripts/engine_image.py matrix $(if $(CI),--ci,) $(if $(JSON),--json,) $(if $(CHANGED),--changed $(CHANGED),)
+engine-build-matrix: ## The JSON matrix the dispatched engine-build workflow builds: every engine x variant at its committed pin (ENGINE=<id>, ARCH=<backend> narrow it; CI variants only)
+	@python3 scripts/engine_image.py matrix --json --ci $(if $(ENGINE),--engine "$(ENGINE)",) $(if $(ARCH),--arch "$(ARCH)",)
 test-engine-image: ## GPU images on GPU-less CI: run tests/test_engine_version.py (entrypoint `version`; needs a GPU to serve)
 	@test -n "$(ENGINE)" || { echo "Usage: make test-engine-image ENGINE=<id> ARCH=cuda|rocm|vulkan"; exit 1; }
 	python3 scripts/engine_image.py test-image "$(ENGINE)" $(ARCH_ARGS)
@@ -1329,6 +1337,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json
 	$(MAKE) check-engine-skill-gap
 	$(MAKE) check-engine-params
+	$(MAKE) check-engine-source
 	$(MAKE) check-wiring
 	$(MAKE) check-secret-output
 	$(MAKE) check-docs
@@ -1410,10 +1419,11 @@ ci-free-disk: ## CI: free runner disk for the large engine images (Linux runner:
 	else echo "[ci-free-disk] $$(uname -s) runner: nothing to free"; fi
 	@df -h /
 
-test-engine-stage: ## CI engine-image post-build test, ONE step for every image: TEST=serve -> make test-engine (OpenAI API answers), TEST=detect -> make test-engine-image (engine version)
+test-engine-stage: ## CI engine-image post-build test, ONE step for every image: TEST=serve -> binary flags (make test-engine-image) AND the OpenAI API answer (make test-engine); TEST=detect -> binary flags only (make test-engine-image)
 	@test -n "$(ENGINE)" -a -n "$(ARCH)" || { echo "Usage: make test-engine-stage ENGINE=<id> ARCH=<arch> TEST=serve|detect"; exit 1; }
 	@case "$(TEST)" in \
-	  serve)  $(MAKE) test-engine ENGINE="$(ENGINE)" ARCH="$(ARCH)" ;; \
+	  serve)  $(MAKE) test-engine-image ENGINE="$(ENGINE)" ARCH="$(ARCH)" && \
+	          $(MAKE) test-engine ENGINE="$(ENGINE)" ARCH="$(ARCH)" ;; \
 	  detect) $(MAKE) test-engine-image ENGINE="$(ENGINE)" ARCH="$(ARCH)" ;; \
 	  *) echo "[test-engine-stage] TEST must be serve or detect, got '$(TEST)'"; exit 1 ;; \
 	esac

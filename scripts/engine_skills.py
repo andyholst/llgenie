@@ -62,6 +62,10 @@ SERVABLE_KEYS = ("install", "binary", "detect", "launch", "health", "alias_mode"
 # (issue #204). `make push-engine` probes exactly these inside the built image,
 # and the committed manifest containers/engines/binaries.json carries them.
 BINARY_FLAGS = ("--version", "--help", "-h")
+# `binary_probe` policies (#580 / #614): "flags" is the default (both families must answer),
+# "device" is a CLI that needs its device to answer a flag, "help" is a CLI with no version
+# flag at all — the help family must answer and the image's `detect` proves the version.
+BINARY_PROBES = ("device", "help")
 ALIAS_MODES = ("flag", "create", "config", "symlink", "any-name")
 
 
@@ -772,15 +776,18 @@ def documented_flags(skill: dict) -> list[str]:
 
 
 def probe_policy(skill: dict, backend: str) -> str:
-    """How this variant's binary is proven: "flags" (default) or "device".
+    """How this variant's binary is proven: "flags" (default), "device" or "help".
 
     `binary_probe: {cuda: device}` marks a backend whose CLI initialises the
     device at startup, so it cannot answer a flag on a device-less CI runner
     (vllm's cuda/rocm CLI, CI #106). Those variants still must CONTAIN the
     binary file; their version is proven by the image's own `detect`.
+    `binary_probe: {cpu: help}` marks a CLI whose parser has NO version flag at
+    all (argparse-only, e.g. mlx_lm.server): the help family must answer, and the
+    version is proven by `detect`.
     """
-    value = _per_backend(skill.get("binary_probe"), backend)
-    return "device" if str(value).strip() == "device" else "flags"
+    value = str(_per_backend(skill.get("binary_probe"), backend) or "").strip()
+    return value if value in ("device", "help") else "flags"
 
 
 def generate_params(skill: dict, manifest: dict | None = None) -> dict | None:
@@ -1148,11 +1155,12 @@ def validate(skills: dict, registry: dict | None = None, unsupported: dict | Non
                 errors.append(f"{where}: binary_flags must be one of {list(BINARY_FLAGS)}, got {bad}")
             probe_map = s.get("binary_probe")
             if probe_map and not isinstance(probe_map, dict):
-                errors.append(f"{where}: binary_probe must be a backend: device map")
+                errors.append(f"{where}: binary_probe must be a backend: policy map")
             for b, v in (probe_map or {}).items() if isinstance(probe_map, dict) else []:
-                if str(v).strip() != "device":
-                    errors.append(f"{where}: binary_probe.{b} must be 'device' "
-                                  f"(a CLI that needs its device to answer a flag)")
+                if str(v).strip() not in BINARY_PROBES:
+                    errors.append(f"{where}: binary_probe.{b} must be one of {list(BINARY_PROBES)} "
+                                  f"(device: needs its device to answer a flag; "
+                                  f"help: the CLI has no version flag, detect proves it)")
                 if b not in (s.get("backends") or []):
                     errors.append(f"{where}: binary_probe.{b} is not a backend of this engine")
             if s.get("alias_mode") not in ALIAS_MODES:

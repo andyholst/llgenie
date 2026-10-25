@@ -472,8 +472,11 @@ def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flag
     if help_probed and not any(_answered(verdicts, f) for f in help_probed):
         failures.append(f"the help family answers to neither {' nor '.join(help_probed)}: a user "
                         "typing either gets nothing")
+    # `probe: help` is for a CLI whose parser HAS no version flag at all (argparse-only, e.g.
+    # mlx_lm.server): the help family is still required, and the version is proven by the image's
+    # own `detect`. Any other policy must answer the version family (issue #580).
     version_probed = [f for f in VERSION_FAMILY if f in verdicts]
-    if version_probed and not any(_answered(verdicts, f) for f in version_probed):
+    if policy != "help" and version_probed and not any(_answered(verdicts, f) for f in version_probed):
         failures.append(f"the version family answers to neither {' nor '.join(version_probed)}")
 
     return {"ok": not failures, "failures": failures, "note": note}
@@ -785,7 +788,8 @@ def _current_tag(params: dict, variant: str, root=None) -> str:
     return f"llgenie/{params['id'].replace('.', '-')}:{str(params['pinned'])[:8]}-{digest}-{variant}"
 
 
-def matrix(ci: bool = False, changed: str = "", params_dir=None) -> list[dict]:
+def matrix(ci: bool = False, changed: str = "", params_dir=None,
+           engine: str = "", arch: str = "") -> list[dict]:
     out = []
     params_dir = params_dir or es.PARAMS_DIR
     # params live in <repo>/containers/engines/params: the repo root is two levels
@@ -793,7 +797,11 @@ def matrix(ci: bool = False, changed: str = "", params_dir=None) -> list[dict]:
     root = params_dir.parents[2]
     for path in sorted(params_dir.glob("*.json")):
         params = json.loads(path.read_text())
+        if engine and params["id"] != engine:
+            continue
         for key, v in params["variants"].items():
+            if arch and key != arch:
+                continue
             if ci and (key not in CI_VARIANTS or disabled(params["id"], key)):
                 continue
             if changed and _tag_at(changed, params["id"], key, root) == _current_tag(params, key, root):
@@ -868,6 +876,8 @@ def main(argv=None) -> int:
     m.add_argument("--json", action="store_true")
     m.add_argument("--ci", action="store_true", help="only the variants CI builds")
     m.add_argument("--changed", default="", help="ref: only images whose tag differs from it")
+    m.add_argument("--engine", default="", help="only this engine id (the dispatched sweep)")
+    m.add_argument("--arch", default="", help="only this backend/variant")
     a = ap.parse_args(argv)
 
     if a.cmd == "build-base":
@@ -877,7 +887,7 @@ def main(argv=None) -> int:
     if a.cmd == "ensure-env":
         return 0 if ensure_container_env() else 1
     if a.cmd == "matrix":
-        rows = matrix(a.ci, a.changed)
+        rows = matrix(a.ci, a.changed, engine=a.engine, arch=a.arch)
         print(json.dumps({"include": rows}) if a.json else
               "\n".join(f"{r['engine']:28} {r['variant']:18} {'smoke' if r['smoke'] else ''}" for r in rows))
         return 0
