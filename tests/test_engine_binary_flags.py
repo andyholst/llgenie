@@ -234,3 +234,21 @@ def test_a_device_probe_is_contained_only_for_a_named_cell(tmp_path):
 
 if __name__ == "__main__":
     raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-q"]))
+
+
+
+def test_the_engine_row_test_reuses_the_product_probe():
+    """One code path decides every row: the engine-row test may not re-implement it (issue #634)."""
+
+    # Given the engine-row test's real text
+    text = (REPO / "tests" / "test_engine_version.py").read_text()
+
+    # When  its flag case is read
+    case = text.split("def test_engine_binary_answers_the_flags_a_user_types", 1)[1]
+    case = case.split("\ndef ", 1)[0]
+
+    # Then  it calls the product function and carries no probe or decider of its own
+    assert "binary_file_works(spec)" in case, case
+    assert "BINARY_PROBE" not in case, case
+    assert "ei.decide(" not in case, case
+    assert "ei.parse_probe(" not in case, case
