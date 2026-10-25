@@ -301,13 +301,15 @@ def test_the_build_wires_the_hosts_settings_and_keeps_gate_mode_a_string(tmp_pat
     # And the config carries the host's settings under the path Hermes reads
     cfg = (home / "config.yaml").read_text()
     for line in ("jev_provider: typesafe", "typesafe_model: jev-latest", "nervous_enabled: true",
-                 "nervous_mode: correct_next", "gate_scope: all", "work_supervision_mode: advisory"):
+                 "nervous_mode: correct_next", "gate_scope: all", "work_supervision_mode: shadow",
+                 "allow_tool_override: false", "nerve_profile: operator"):
         assert line in cfg, f"{line!r} is missing from the config the build wrote"
     assert "  - nerve" in cfg, "the plugin is not in plugins.enabled"
 
-    # And gate_mode is the QUOTED STRING: a bare `off` is a YAML 1.1 boolean, and the plugin
-    # reads `gate_mode != "off"` as "turn the Action Gate ON"
-    assert "gate_mode: 'off'" in cfg, cfg
+    # And gate_mode is the QUOTED STRING: a bare word is a YAML 1.1 boolean, and the plugin reads
+    # `gate_mode != "off"` — a boolean `false` there means "turn the Action Gate ON". The host runs
+    # `advisory` (issue #611), so that is what the image writes, quoted.
+    assert "gate_mode: 'advisory'" in cfg, cfg
     assert "gate_mode: false" not in cfg, "the Action Gate would be ON: YAML read `off` as boolean false"
 
     # And the build reported the layer it verified
@@ -317,7 +319,7 @@ def test_the_build_wires_the_hosts_settings_and_keeps_gate_mode_a_string(tmp_pat
 def test_the_build_selects_the_hosts_profile_through_the_plugins_own_loader(tmp_path):
     """The settings only tune modules a PROFILE registered, so the sidecar is part of the setup.
 
-    The host runs `lean` (its `$HERMES_HOME/nerve/profile.json`), and the plugin's own loader is
+    The host runs `operator` (its `$HERMES_HOME/nerve/profile.json`), and the plugin's own loader is
     what the install script writes through — an invented document would be rejected at load time
     and the plugin would fail open to Legacy with only a log warning.
     """
@@ -329,20 +331,20 @@ def test_the_build_selects_the_hosts_profile_through_the_plugins_own_loader(tmp_
     # When the build half runs
     # Then it succeeds and reports the profile it selected
     assert r.returncode == 0, r.stderr + r.stdout
-    assert "nerve profile 'lean' selected" in r.stdout
+    assert "nerve profile 'operator' selected" in r.stdout
 
     # And the sidecar is at the documented path, in the plugin's own shape
     sidecar = home / "nerve" / "profile.json"
     assert sidecar.exists(), "the profile sidecar was not written"
     doc = json.loads(sidecar.read_text())
-    assert doc["version"] == 1 and doc["nerve_profile"] == "lean"
+    assert doc["version"] == 1 and doc["nerve_profile"] == "operator"
     assert doc["nerve_modules"] == {} and doc["advanced"] == {}
 
     # And the plugin's loader reports the same thing (the check the script itself makes)
     sys.path.insert(0, str(home / "plugins" / "nerve"))
     try:
         import hermes_nerve.profiles as profiles
-        assert profiles.load_profile(str(home))["nerve_profile"] == "lean"
+        assert profiles.load_profile(str(home))["nerve_profile"] == "operator"
     finally:
         sys.path.pop(0)
 
@@ -879,3 +881,98 @@ def test_a_provider_key_in_the_build_environment_fails_the_build(tmp_path):
     guard = DOCKERFILE.read_text()
     assert "^(TYPESAFE|OPENROUTER|OPENCODE)_API_KEY=" in guard, \
         "the Dockerfile build guard must name the whole provider-key namespace"
+
+
+# --- the profile and the settings must be ONE decision (issue #611) -------------------------------------
+#
+# The host runs nerve on `operator` with the gate in `advisory`; the image used to run `lean` with the gate
+# `off` while still writing `context_engine_mode: apply` / `context_curation_mode: apply`. For a NAMED
+# profile the module set comes verbatim from `hermes_nerve/profiles.py`, so those two settings were written
+# for a module (`context_governor`) `lean` does not register — configured on paper, off in the run, and the
+# action gate could not fire at all. These tests pin the host's profile/gate and the rule that catches a
+# mismatch.
+
+#: The plugin's own tables for the two profiles this image may run (hermes-nerve v0.3.1, profiles.py).
+NERVE_PROFILES = {
+    "operator": {"reflex": True, "nervous": True, "action_gate": True, "context_governor": True,
+                 "receipts": True, "local_learning": True, "work_supervision": False,
+                 "token_trajectory": False},
+    "lean": {"reflex": True, "nervous": True, "action_gate": False, "context_governor": False,
+             "receipts": True, "local_learning": False, "work_supervision": True,
+             "token_trajectory": True},
+}
+
+
+def test_the_bot_image_runs_the_hosts_nerve_profile_and_gate():
+    """The image's profile, gate and settings match the host the bots are modelled on (issue #611)."""
+
+    # Given the install script, the Dockerfile and the CI image inputs
+    install = INSTALL.read_text()
+    dockerfile = DOCKERFILE.read_text()
+    ci_images = CI_IMAGES.read_text()
+
+    # When  the nerve defaults are read
+    # Then  the profile is the host's `operator`, the gate is `advisory`, and the profile is in the
+    #       settings too (the host writes both places; the config is what a reader checks)
+    assert 'NERVE_PROFILE="${HERMES_NERVE_PROFILE:-operator}"' in install
+    assert 'ARG HERMES_NERVE_PROFILE="operator"' in dockerfile
+    assert 'set_setting gate_mode "${HERMES_NERVE_GATE_MODE:-advisory}"' in install
+    assert 'GATE_MODE="${HERMES_NERVE_GATE_MODE:-advisory}"' in install
+    assert 'set_setting nerve_profile "$NERVE_PROFILE"' in install
+
+    # And  the one host setting that forbids the model overriding the layer is written too
+    assert "set_setting allow_tool_override false" in install
+
+    # And  supervision is `shadow` by default: `operator` does not register `work_supervision`, so a
+    #      non-shadow mode would ask a module that is off to do something
+    assert 'set_setting work_supervision_mode "${HERMES_NERVE_WORK_SUPERVISION_MODE:-shadow}"' in install
+    assert 'ARG HERMES_NERVE_WORK_SUPERVISION_MODE="shadow"' in dockerfile
+
+    # And  the build runs the parity check against the INSTALLED plugin's table
+    assert "nerve_profile_check.py" in install
+    assert 'COPY nerve_profile_check.py /usr/local/bin/nerve_profile_check.py' in dockerfile
+    assert '"scripts/nerve_profile_check.py"' in ci_images, \
+        "the checker must be in the agent image's build context (ci_images.IMAGES['agent'])"
+
+    # And  `make nerve-profile-check` exercises the rule without an install
+    makefile = MAKEFILE.read_text()
+    assert re.search(r"^nerve-profile-check:.*\n\tpython3 scripts/nerve_profile_check\.py --self-test",
+                     makefile, re.M)
+
+
+def test_a_setting_without_its_module_fails_the_parity_check():
+    """A setting written for a module the profile does not register is a build failure, not a silent no-op."""
+
+    import nerve_profile_check as npc  # noqa: PLC0415 (scripts/ is on sys.path above)
+
+    # Given the settings the image writes
+    written = {"gate_mode": "advisory", "context_engine_mode": "apply",
+               "context_curation_mode": "apply", "work_supervision_mode": "shadow",
+               "nervous_enabled": "true"}
+
+    # When  they are checked against the host's profile
+    ok = npc.check("operator", written, NERVE_PROFILES)
+
+    # Then  nothing is inert: operator registers action_gate and context_governor
+    assert ok == [], ok
+
+    # When  the same settings are checked against the profile the image used to run
+    bad = npc.check("lean", written, NERVE_PROFILES)
+
+    # Then  the gate and BOTH curation settings are named as inert — the measured defect of #611
+    assert bad, "lean must be rejected: it registers neither action_gate nor context_governor"
+    assert any("action_gate" in f for f in bad), bad
+    assert sum("context_governor" in f for f in bad) == 2, bad
+
+    # And  a shadow/off setting asks nothing of its module, so `lean` accepts it
+    quiet = {"gate_mode": "off", "context_engine_mode": "shadow",
+             "context_curation_mode": "shadow", "work_supervision_mode": "advisory",
+             "nervous_enabled": "true"}
+    assert npc.check("lean", quiet, NERVE_PROFILES) == [], \
+        "lean registers work_supervision, so `advisory` there is legitimate"
+
+    # And  the rule's own both-directions proof is what the make target runs
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "nerve_profile_check.py"), "--self-test"],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert "self-test OK" in r.stdout

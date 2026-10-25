@@ -883,6 +883,8 @@ autonomous: nothing in this path may stop a run.
 
 ```bash
 make agent-jev-preflight   # report whether the layer is available for this run (never blocks)
+make nerve-profile-check   # prove the rule the build enforces: a setting whose module the profile
+                           # does not register is inert, so the build fails (issue #611)
 make agent-image           # the image: Hermes CLI + the pinned nerve plugin + its settings + the profile
 make agent-image-ref       # the GHCR ref of THIS commit's Dockerfile + install scripts (their hash)
 make issue-bot-image       # the same image, for the issue-bot (alias of agent-image)
@@ -910,16 +912,29 @@ make issue-bot-image       # the same image, for the issue-bot (alias of agent-i
     `nervous_call_threshold: 0.58`;
   - the provider: `jev_provider: typesafe`, `typesafe_model: jev-latest`;
   - `context_engine_mode`/`context_curation_mode: apply` (`apply` is where prompt tokens are won;
-    the schema default is `shadow`, which only measures) and `work_supervision_mode: advisory`
-    (advisory steers without blocking, which is what an autonomous bot needs; `enforce` is a
-    build arg);
-  - `gate_mode: off` is deliberate: SETUP.md calls the old synchronous pre-tool gate
-    compatibility behavior, not the recommended decision architecture — the nervous system above
-    is;
-  - the **profile sidecar** `${HERMES_HOME}/nerve/profile.json` = the host's profile `lean`
-    (reflex, nervous, work_supervision, token_trajectory, receipts), written through the plugin's
-    *own* `save_profile` so it is validated and atomic. A named profile is what decides which
-    modules register at all, so without it the settings above would tune modules nobody enabled.
+    the schema default is `shadow`, which only measures) — and they only do anything because the
+    profile below registers `context_governor`;
+  - the **action gate in `advisory`**, the host's mode: the pre-tool decision is logged and steered,
+    never blocked, so a run still opens its reviewable PR. It needs the `action_gate` module, which
+    the profile below registers (`gate_scope: all`, `allow_tool_override: false` — the model may not
+    overrule the layer);
+  - `work_supervision_mode: shadow` by default, because the host's `operator` profile does **not**
+    register `work_supervision`: a non-shadow mode would ask a module that is off to do something.
+    `advisory`/`enforce` are available as build args, together with a profile that enables it
+    (`lean`, `marie_kondo`);
+  - the **profile sidecar** `${HERMES_HOME}/nerve/profile.json` = the host's profile `operator`
+    (reflex, nervous, action_gate, context_governor, receipts, local_learning), written through the
+    plugin's *own* `save_profile` so it is validated and atomic, and carried in the settings as
+    `nerve_profile` too (the host writes both places). A named profile decides which modules
+    register at all — and settings cannot switch one **on**, only off — which is why issue #611
+    shipped "apply" curation and an advisory gate that were both inert under `lean`;
+  - the **parity check** (`scripts/nerve_profile_check.py`, run by the build against the *installed*
+    plugin's `PROFILES` table): it fails the build when a written setting's module is not enabled by
+    the profile (`gate_mode` ≠ `off` → `action_gate`; `context_engine_mode`/`context_curation_mode`
+    not `shadow|off` → `context_governor`; `work_supervision_mode` ≠ `shadow` → `work_supervision`;
+    `nervous_enabled` → `nervous`), and prints the resolved module set. `make nerve-profile-check`
+    runs the same rule on two synthetic tables, so `make test-unit` locks both directions without an
+    install.
   - the dead pre-0.3.1 block `plugins.entries.hermes-nerve` is removed if a base image has it:
     Hermes never reads it, and nerve warns about it at startup.
   The build **fails** when the plugin did not land, when the ref is not an immutable SHA, when the

@@ -38,8 +38,16 @@
 # pin is an immutable 40-char SHA (a tag would make this image's hash tag lie):
 #     --build-arg HERMES_NERVE_PLUGIN=keeltrace/hermes-nerve
 #     --build-arg HERMES_NERVE_REF=<40-char sha>          (default: the v0.3.1 release commit)
-#     --build-arg HERMES_NERVE_WORK_SUPERVISION_MODE=advisory|enforce   (bot policy decision)
-#     --build-arg HERMES_NERVE_PROFILE=lean|operator|marie_kondo|fat_cat  (default: lean, the host's profile)
+#     --build-arg HERMES_NERVE_GATE_MODE=advisory|off|enforce  (default: advisory, the host's mode)
+#     --build-arg HERMES_NERVE_PROFILE=operator|lean|marie_kondo|fat_cat  (default: operator, the host's)
+#     --build-arg HERMES_NERVE_WORK_SUPERVISION_MODE=shadow|advisory|enforce  (default: shadow — the
+#                    operator profile does not register the work_supervision module)
+#
+# The PROFILE and the SETTINGS are one decision, not two (issue #611): a named profile takes its module set
+# verbatim from the plugin's PROFILES table, so a setting written for a module the profile does not enable
+# is configured on paper and off in the run — `context_engine_mode: apply` under `lean` (which has no
+# `context_governor`) and `gate_mode: advisory` under `lean` (no `action_gate`) were exactly that. The build
+# runs scripts/nerve_profile_check.py against the installed plugin's table and FAILS on a mismatch.
 #
 # Secrets are NEVER baked: the KEY itself (NOUS_API_KEY), GH_TOKEN, HF_TOKEN and the JEV
 # provider key (TYPESAFE_API_KEY) arrive at run time (`docker run -e ...`, or `container:` +
@@ -71,11 +79,12 @@ ARG HERMES_CONTEXT_WINDOW="1048576"
 # The Nerve plugin pin and the provider it supervises through (see the header, issue #238).
 ARG HERMES_NERVE_PLUGIN="keeltrace/hermes-nerve"
 ARG HERMES_NERVE_REF="3de7d94982b7a2cb87c829e4b2366ced927d8fed"   # keeltrace/hermes-nerve v0.3.1
-ARG HERMES_NERVE_PROFILE="lean"
+ARG HERMES_NERVE_PROFILE="operator"
 ARG HERMES_NERVE_PROVIDER="typesafe"
-# advisory logs and steers without blocking; enforce can stop a run. The host runs advisory,
-# which is the default here too — a bot still has to be able to push a reviewable PR.
-ARG HERMES_NERVE_WORK_SUPERVISION_MODE="advisory"
+# `shadow` is the default because the `operator` profile does not register `work_supervision`: a
+# non-shadow mode would ask a module that is off to do something, which the build's parity check rejects.
+# Override to `advisory`/`enforce` only with a profile that enables it (lean, marie_kondo).
+ARG HERMES_NERVE_WORK_SUPERVISION_MODE="shadow"
 
 USER root
 
@@ -98,6 +107,7 @@ RUN set -eux; \
 COPY install_hermes_ci.sh /usr/local/bin/install_hermes_ci.sh
 COPY hermes_skills_register.py /usr/local/bin/hermes_skills_register.py
 COPY install_nerve_ci.sh /usr/local/bin/install_nerve_ci.sh
+COPY nerve_profile_check.py /usr/local/bin/nerve_profile_check.py
 COPY agent_jev_preflight.sh /usr/local/bin/agent_jev_preflight.sh
 ENV HERMES_INSTALL_URL=${HERMES_INSTALL_URL} HERMES_PACKAGE=${HERMES_PACKAGE} \
     HERMES_ALIAS=${HERMES_ALIAS} HERMES_MODEL_ID=${HERMES_MODEL_ID} HERMES_BASE_URL=${HERMES_BASE_URL} \

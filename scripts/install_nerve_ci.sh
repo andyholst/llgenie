@@ -110,6 +110,9 @@ set_setting() { hermes config set "plugins.entries.nerve.settings.$1" "$2" --for
 
 set_setting jev_provider "$PROVIDER"
 set_setting typesafe_model "${HERMES_NERVE_TYPESAFE_MODEL:-jev-latest}"
+# The layer must decide the tool call, not let the model overrule it: the host sets `false`, and a model
+# that can override the decision silently undoes the JEV call that was made to avoid a model call (#611).
+set_setting allow_tool_override false
 # The plugin's docs/SETUP.md "Nervous system defaults" block, verbatim: this is the RFC-ed
 # decision architecture (the thing that makes the JEV calls), and `nervous_turn_admission` is
 # part of it even though the plugin's schema default is already true — written explicitly so
@@ -119,10 +122,11 @@ set_setting nervous_turn_admission true
 set_setting nervous_mode correct_next
 set_setting nervous_challenge_confidence 0.86
 set_setting nervous_call_threshold 0.58
-# `gate_mode: off` is NOT a mistake and not a downgrade: SETUP.md calls the old synchronous
-# pre-tool gate "compatibility/special-purpose behavior, not the recommended v0.2 decision
-# architecture". The recommended path is the nervous system above.
-set_setting gate_mode "${HERMES_NERVE_GATE_MODE:-off}"
+# `advisory` is the host's mode and the one a bot can live with: the pre-tool decision is logged and
+# steered, never blocked, so a run still opens its reviewable PR. It only does anything when the profile
+# registers the `action_gate` module — `operator` does, `lean` does not (issue #611); the check at the end
+# of this script is what keeps the two from disagreeing.
+set_setting gate_mode "${HERMES_NERVE_GATE_MODE:-advisory}"
 set_setting gate_scope all
 # Context curation is where prompt tokens are won: `apply` lets the Jev engine anchor safe
 # candidates at the threshold, `shadow` only measures. Both default to `shadow` in the plugin
@@ -133,23 +137,31 @@ set_setting gate_scope all
 set_setting context_engine_mode apply
 set_setting context_curation_mode apply
 set_setting context_engine_register true
-# The supervision mode is the bot's policy decision (issue #238 leaves it to the maintainer):
-# `advisory` logs and steers without blocking, which is what the host runs and what a bot that
-# must still push a reviewable PR can live with. Override at build time to enforce.
-set_setting work_supervision_mode "${HERMES_NERVE_WORK_SUPERVISION_MODE:-advisory}"
+# Supervision is a policy decision, and under the host's `operator` profile its module is NOT registered:
+# `shadow` is the honest value for a module that does not run (it measures nothing and asks nothing).
+# Override it with `advisory|enforce` only together with a profile that enables `work_supervision`
+# (`lean`/`marie_kondo`) — the check at the end of this script fails the build when the two disagree
+# (issue #611).
+set_setting work_supervision_mode "${HERMES_NERVE_WORK_SUPERVISION_MODE:-shadow}"
 
 # The PROFILE SIDECAR (${HERMES_HOME}/nerve/profile.json) is the part that decides which modules
-# register at all: the settings above only tune modules a profile turned on. The host runs
-# `lean` — "factory-first nervous system with token-heavy extras off": reflex, nervous,
-# work_supervision, token_trajectory, receipts (the plugin's own PROFILES table). With no
-# sidecar the plugin falls back to Legacy registration, so leaving it out would silently ignore
-# the settings this script just wrote.
+# register at all: the settings above only tune modules a profile turned on, and for a NAMED profile the
+# module set comes verbatim from the plugin's PROFILES table — settings cannot switch a module on, the
+# only pass that reads them afterwards can switch one OFF. The host runs `operator` (reflex, nervous,
+# action_gate, context_governor, receipts, local_learning), which is the set the settings above are for:
+# without `context_governor` the `apply` curation below never runs, and without `action_gate` the gate
+# mode is inert (issue #611 — the image used to write exactly those settings under `lean`, where both
+# modules are off). With no sidecar the plugin falls back to Legacy registration, so leaving it out
+# would silently ignore the settings this script just wrote.
 #
 # It is written through the plugin's OWN `save_profile`, which validates the document strictly
 # (version 1, known profile name, known module ids) and writes it atomically — a document
 # invented here would be rejected at load time, and the plugin fails open to Legacy with only a
 # log warning, i.e. the layer would be off with nothing visibly broken.
-NERVE_PROFILE="${HERMES_NERVE_PROFILE:-lean}"
+NERVE_PROFILE="${HERMES_NERVE_PROFILE:-operator}"
+# The host carries the profile in BOTH places; the setting is what `hermes config get
+# plugins.entries.nerve.settings.nerve_profile` answers, so the image's config says what the run does.
+set_setting nerve_profile "$NERVE_PROFILE"
 python3 - "$NERVE_PROFILE" <<'PY' || exit 1
 import os, sys
 sys.path.insert(0, os.path.join(os.environ.get("HERMES_HOME", "/root/.hermes"), "plugins", "nerve"))
@@ -180,7 +192,7 @@ fi
 # bare write turns the Action Gate ON — the opposite of the intent, and silently. The host's
 # config carries the quoted string for exactly this reason. Normalise that one line, then prove
 # the loaded value is a string.
-GATE_MODE="${HERMES_NERVE_GATE_MODE:-off}"
+GATE_MODE="${HERMES_NERVE_GATE_MODE:-advisory}"
 python3 - "$HERMES_HOME/config.yaml" "$GATE_MODE" <<'PY' || exit 1
 import pathlib, re, sys
 path, want = pathlib.Path(sys.argv[1]), sys.argv[2]
@@ -227,11 +239,12 @@ case "$plugin" in
   *) fail "the installed nerve is not the pinned commit ${REF:0:8} (reported: ${plugin})" ;;
 esac
 for kv in "jev_provider ${PROVIDER}" "typesafe_model ${HERMES_NERVE_TYPESAFE_MODEL:-jev-latest}" \
+          "allow_tool_override false" "nerve_profile ${NERVE_PROFILE}" \
           "nervous_enabled true" "nervous_turn_admission true" "nervous_mode correct_next" \
           "nervous_challenge_confidence 0.86" "nervous_call_threshold 0.58" \
           "context_engine_mode apply" "context_curation_mode apply" \
-          "context_engine_register true" \
-          "gate_mode ${GATE_MODE}" "work_supervision_mode ${HERMES_NERVE_WORK_SUPERVISION_MODE:-advisory}"; do
+          "context_engine_register true" "gate_scope all" \
+          "gate_mode ${GATE_MODE}" "work_supervision_mode ${HERMES_NERVE_WORK_SUPERVISION_MODE:-shadow}"; do
   key="${kv%% *}"; want="${kv#* }"
   got="$(hermes config get "plugins.entries.nerve.settings.${key}" 2>/dev/null || true)"
   [ "$got" = "$want" ] \
@@ -246,3 +259,18 @@ fi
 
 echo "[nerve-ci] nerve ${REF:0:8} installed and enabled; settings wired under plugins.entries.nerve.settings"
 echo "[nerve-ci] provider key: run-time only (TYPESAFE_API_KEY) - scripts/agent_jev_preflight.sh wires it into the home"
+
+# THE PARITY CHECK (issue #611). Everything above wrote settings AND a profile, and for a NAMED profile the
+# module set comes verbatim from the plugin's `PROFILES` table: settings cannot switch a module on, the only
+# later pass that reads them can switch one OFF. So a setting can be written for a module the profile never
+# registers — `context_engine_mode: apply` under `lean` (no `context_governor`) and `gate_mode: advisory`
+# under `lean` (no `action_gate`) are exactly that: configured on paper, off in the run. The checker reads
+# the INSTALLED plugin's own table — not a copy of it — and fails this build when the two disagree.
+python3 "$(dirname "$0")/nerve_profile_check.py" \
+  --profile "$NERVE_PROFILE" \
+  --gate-mode "$GATE_MODE" \
+  --context-engine-mode apply \
+  --context-curation-mode apply \
+  --work-supervision-mode "${HERMES_NERVE_WORK_SUPERVISION_MODE:-shadow}" \
+  --nervous-enabled true
+echo "[nerve-ci] settings and profile agree: every active setting's module is registered by '${NERVE_PROFILE}'"

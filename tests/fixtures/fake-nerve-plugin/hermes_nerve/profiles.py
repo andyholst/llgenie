@@ -29,6 +29,22 @@ MODULES = ("reflex", "nervous", "work_submission", "work_supervision", "token_tr
            "receipts", "action_gate", "context_governor", "local_learning", "shadow_testing",
            "shared_context")
 
+#: The profile -> module table, as v0.3.1's `PROFILES` has it (`modules.py` ids). The image build reads
+#: this table through `scripts/nerve_profile_check.py` to prove that every setting it writes has its
+#: module enabled by the profile it selected (issue #611) — a named profile's modules come from HERE,
+#: verbatim, and settings cannot switch one on.
+PROFILES = {
+    "fat_cat": {module: module not in ("shadow_testing", "shared_context") for module in MODULES},
+    "operator": {module: module in ("reflex", "nervous", "action_gate", "context_governor",
+                                    "receipts", "local_learning") for module in MODULES},
+    "lean": {module: module in ("reflex", "nervous", "work_supervision", "token_trajectory",
+                                "receipts") for module in MODULES},
+    "marie_kondo": {module: module in ("reflex", "work_supervision", "token_trajectory",
+                                       "receipts") for module in MODULES},
+    "custom": {module: False for module in MODULES},
+    "legacy": {module: False for module in MODULES},
+}
+
 
 def hermes_home() -> Path:
     """The active Hermes home, resolved the way the real plugin resolves it."""
