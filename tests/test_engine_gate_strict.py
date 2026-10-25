@@ -174,3 +174,29 @@ def test_the_gate_report_separates_what_each_row_proves():
     # And  the sweep's row count is reproduced: proven + exempt (disabled cells are not built)
     assert len(by_verdict["flag-proven"]) + len(by_verdict["device-exempt"]) == 27, \
         {k: len(v) for k, v in by_verdict.items()}
+
+
+def test_sglang_reports_a_pin_when_its_own_metadata_is_a_placeholder():
+    """The rocm wheel's distribution version is `0.0.0`, so the detect must fall back to the pin (#625).
+
+    This is the regression the CI run after my first attempt caught (`FAIL sglang/rocm: entrypoint detect
+    proves no version (… installed sglang 0.0.0)`) — the earlier test only checked that the detect mentioned
+    `importlib.metadata`, which was not enough to keep a placeholder out of the gate.
+    """
+
+    # Given sglang's committed params for both backends
+    sglang = json.loads((REPO / "containers" / "engines" / "params" / "sglang.json").read_text())
+
+    # When  each detect command is read
+    # Then  it carries the placeholder fallback AND a pin to fall back to …
+    for variant, spec in sglang["variants"].items():
+        detect = spec["detect"]
+        assert "importlib.metadata" in detect, (variant, detect)
+        assert 'not in ("0.0.0", "")' in detect, \
+            f"{variant}: the detect must treat 0.0.0 as a placeholder, not a version: {detect}"
+        assert "pin " in detect, f"{variant}: no pin fallback in {detect}"
+
+    # And  the two shapes it can print are both accepted by the gate, while the placeholder is not
+    assert ei.version_proof("sglang 0.5.21") == "0.5.21"
+    assert ei.version_proof("sglang pin e00930c54890") == "pin e00930c54890"
+    assert ei.version_proof("sglang 0.0.0") == ""
