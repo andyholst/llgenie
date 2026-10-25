@@ -37,14 +37,51 @@ PROPOSE = re.compile(
     r'^PROPOSE\s+(?P<backend>[A-Za-z0-9_-]+)\s+(?P<flag>-D[A-Za-z0-9_]+(?:=[^\s]+)?)\s+'
     r'DOC\s+(?P<doc>\S+)\s+"(?P<quote>[^"]+)"\s+WHY\s+(?P<why>.+)$')
 
-#: How many bytes of an upstream file to carry into the brief. A README can be 100 KB; the review needs
-#: the build/doc sections, not the whole file, and the agent's context is the budget.
+#: How many bytes of one upstream file to carry into the brief.
 DOC_BUDGET = 20_000
+
+#: The TOTAL the brief may carry (issue #597). `brief` used to be bounded per file only, so an engine
+#: with a big doc tree produced 1.8 MB (214 files, 424 sections) of which the largest were benchmark
+#: result pages — an input the leg could not use. Selected highest-build-relevance first, until this.
+DOC_TOTAL_BUDGET = 80_000
+
+#: A file that PROVES a flag is not cut at the per-file cap: `CMakeLists.txt` carries its `option(...)`
+#: lines below 20 KB on real trees, and cutting them off is how the one authoritative file became the
+#: least useful one in the 1.8 MB brief (issue #597).
+ALWAYS_BUDGET = 60_000
+
+#: How much of the brief the flag-proving files may take TOGETHER. Their per-file cap alone let six
+#: Dockerfiles/CMakeLists consume every byte and leave no room for the documentation that explains the
+#: arch (issue #597, measured on strata).
+ALWAYS_TOTAL_BUDGET = 45_000
+
+#: Files whose content is build evidence, ranked ahead of everything else.
+ALWAYS_INCLUDE = re.compile(r"(^|/)(CMakeLists\.txt|Dockerfile[^/]*)$")
+
+#: Trees that are documentation only by accident of a glob: benchmark logs, examples, fixtures.
+NOISE_PREFIXES = ("bench/", "benchmarks/", "examples/", "tests/", "fixtures/", "assets/", "apps/")
+
+#: What makes a document worth the model's context: the vocabulary of building this engine.
+BUILD_SIGNALS = ("option(", "-D", "CMAKE_", "CUDA_ARCHITECTURES", "GPU_TARGETS", "cmake", "cuda",
+                 "rocm", "hip", "torch", "requires-python", "pip install", "apt-get", "build",
+                 "install", "compile")
+
+
+def _score(text: str) -> int:
+    """How much this file looks like build documentation. Counts signal occurrences, capped."""
+    low = text.lower()
+    return min(sum(low.count(s.lower()) for s in BUILD_SIGNALS), 400)
+
+
+def _is_noise(path: str) -> bool:
+    return path.startswith(NOISE_PREFIXES)
 
 #: The files whose content a proposal may cite: the engine's docs and its backend recipes. A quote that
 #: is not in one of these is not documentation.
-DOC_GLOBS = ("README.md", "README.rst", "docs/**/*.md", "docs/**/*.rst", "CMakeLists.txt",
-             "docker/**/Dockerfile*", "Dockerfile*", ".github/**/*.md")
+#: `Path.match` does not let `**` cross zero directories, so `docs/*.md` is listed EXPLICITLY: without
+#: it a `docs/BUILDING.md` — the page that documents the flags — was invisible to the brief (issue #597).
+DOC_GLOBS = ("README.md", "README.rst", "docs/*.md", "docs/*.rst", "docs/**/*.md", "docs/**/*.rst",
+             "CMakeLists.txt", "docker/**/Dockerfile*", "Dockerfile*", ".github/**/*.md")
 
 
 def _show(repo_dir: Path, sha: str, path: str) -> str:
@@ -65,19 +102,64 @@ def _clone(skill: dict) -> Path:
     return dest
 
 
-def _docs(repo_dir: Path, sha: str) -> dict[str, str]:
-    """{path: text} for the engine's documentation at `sha`, bounded per file."""
+def _docs(repo_dir: Path, sha: str) -> tuple[dict[str, str], int]:
+    """({path: text}, omitted) for the engine's docs at `sha`, ranked and bounded (issue #597).
+
+    Build evidence first — the root `CMakeLists.txt` and the backend Dockerfiles always qualify, then
+    whatever scores highest on the vocabulary of building this engine — until `DOC_TOTAL_BUDGET`. The
+    count of files the budget left out is returned so the brief can say the input is a selection.
+    """
     listing = subprocess.run(["git", "-C", str(repo_dir), "ls-tree", "-r", "--name-only", sha],
                              capture_output=True, text=True)
     paths = [p for p in listing.stdout.splitlines() if p.strip()]
+    matched = []
+    for raw in paths:
+        path = Path(raw)
+        if not any(path.match(glob) or str(path) == glob for glob in DOC_GLOBS):
+            continue
+        # The noise filter wins over the always-include rule: a Dockerfile inside a benchmark result
+        # directory is a bench artefact, not this engine's build evidence (issue #597).
+        if _is_noise(raw):
+            continue
+        matched.append(raw)
+
+    ranked: list[tuple[bool, int, str, str]] = []
+    for raw in matched:
+        text = _show(repo_dir, sha, raw)
+        if text:
+            ranked.append((bool(ALWAYS_INCLUDE.search(raw)), _score(text), raw, text))
+    # Build evidence first, and within it the ROOT files (the repository's own CMakeLists/Dockerfile)
+    # before a nested one; then the highest score, then a stable path order.
+    def _root_evidence(row) -> int:
+        return 0 if row[0] and "/" not in row[2] else 1
+
+    ranked.sort(key=lambda row: (not row[0], _root_evidence(row), -row[1], row[2]))
+
     out: dict[str, str] = {}
-    for glob in DOC_GLOBS:
-        for path in sorted(Path(p) for p in paths):
-            if path.match(glob) or str(path) == glob:
-                text = _show(repo_dir, sha, str(path))
-                if text:
-                    out[str(path)] = text[:DOC_BUDGET]
-    return out
+    total = 0
+    omitted = 0
+    # Phase 1: the files that PROVE a flag, within their own share of the budget — they may be cut at
+    # ALWAYS_BUDGET, but they may not eat the whole brief and starve the prose that explains the arch.
+    for always, _score_value, raw, text in ranked:
+        if not always:
+            continue
+        body = text[:ALWAYS_BUDGET]
+        if total + len(body) > ALWAYS_TOTAL_BUDGET:
+            omitted += 1
+            continue
+        out[raw] = body
+        total += len(body)
+    # Phase 2: everything else, highest build-relevance first, until the total budget is spent.
+    for always, _score_value, raw, text in ranked:
+        if always:
+            continue
+        body = text[:DOC_BUDGET]
+        if total + len(body) > DOC_TOTAL_BUDGET:
+            omitted += 1
+            continue
+        out[raw] = body
+        total += len(body)
+    return out, omitted
 
 
 def _params(skill: dict) -> dict:
@@ -92,7 +174,7 @@ def brief(engine: str, out: Path | None = None) -> Path:
     skill = es.get_skill(engine)
     sha = skill["pinned"]
     repo_dir = _clone(skill)
-    docs = _docs(repo_dir, sha)
+    docs, omitted = _docs(repo_dir, sha)
     out = out or Path("params-review-in.md")
     lines = [
         f"# Build-parameter documentation review — {skill['id']} @ {sha[:8]}",
@@ -107,6 +189,10 @@ def brief(engine: str, out: Path | None = None) -> Path:
         "```",
         "",
         "## Upstream documentation at this pin",
+        "",
+        (f"{len(docs)} file(s) selected by build relevance"
+         + (f"; {omitted} omitted for the {DOC_TOTAL_BUDGET // 1000} KB budget" if omitted else "")
+         + ". This is a SELECTION of the tree, not all of it."),
         "",
         *(f"### {path}\n\n```\n{text}\n```\n" for path, text in docs.items()),
         "## What to answer",
@@ -248,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     skill = es.get_skill(a.engine)
     sha = skill["pinned"]
     repo_dir = _clone(skill)
-    docs = _docs(repo_dir, sha)
+    docs, _omitted = _docs(repo_dir, sha)
     text = Path(a.file).read_text() if Path(a.file).exists() else ""
     if not text.strip():
         print(f"[params-review] {a.engine}: the review leg wrote no {a.file}; nothing to apply")

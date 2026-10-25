@@ -232,6 +232,95 @@ def test_the_bump_workflow_runs_the_review_before_the_pr():
     assert run.index("engine-params-review-brief") < run.index("engine-params-review-apply")
 
 
+# ---------------------------------------------------------------------------
+# the brief is a SELECTION of the tree, not all of it (issue #597)
+# ---------------------------------------------------------------------------
+def _doc_repo(tmp_path):
+    """A real git repo whose tree is dominated by non-build documentation."""
+    import subprocess as sp
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    def git(*args):
+        return sp.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)
+    git("init", "-b", "main", ".")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "T")
+    (repo / "CMakeLists.txt").write_text("\n".join(
+        f'option(GGML_FLAG_{i} "flag {i}" OFF)' for i in range(1200)))   # > 20 KB, options all the way down
+    (repo / "README.md").write_text("build with -DGGML_CUDA=ON and cmake\n" * 400)
+    bench = repo / "bench" / "results" / "2026-10-01"
+    bench.mkdir(parents=True)
+    (bench / "README.md").write_text("benchmark numbers\n" * 2000)
+    for i in range(60):
+        d = repo / "docs" / f"page{i}"
+        d.mkdir(parents=True)
+        (d / "README.md").write_text(f"unrelated prose about the project, page {i}\n" * 300)
+    git("add", "-A")
+    git("commit", "-m", "seed")
+    sha = git("rev-parse", "HEAD").stdout.strip()
+    return repo, sha
+
+
+def test_the_brief_selects_by_build_relevance_and_says_what_it_dropped(tmp_path):
+    """1.8 MB of bench logs is not a review input: rank, bound the total, and say so (#597)."""
+
+    # Given an upstream tree whose docs are mostly benchmark pages and prose
+    repo, sha = _doc_repo(tmp_path)
+
+    # When  the documentation is gathered
+    docs, omitted = epr._docs(repo, sha)
+
+    # Then  the CMakeLists that proves the flags is present and NOT cut before its options
+    assert "CMakeLists.txt" in docs, sorted(docs)
+    assert "option(GGML_FLAG_1199" in docs["CMakeLists.txt"], "the authoritative file was truncated"
+    assert len(docs["CMakeLists.txt"]) > epr.DOC_BUDGET, "build evidence is allowed past the per-file cap"
+
+    # And   the brief leaves room for prose: the flag-proving files may not eat the whole budget
+    assert sum(len(t) for t in docs.values()) <= epr.DOC_TOTAL_BUDGET
+    assert epr.ALWAYS_TOTAL_BUDGET < epr.DOC_TOTAL_BUDGET, "build evidence needs a share, not the lot"
+
+    # And   the benchmark tree is excluded and the total is bounded
+    assert not any(p.startswith("bench/") for p in docs), sorted(docs)
+    assert sum(len(t) for t in docs.values()) <= epr.DOC_TOTAL_BUDGET
+    assert omitted > 0, "the brief must report that it is a selection"
+
+
+def test_a_build_document_outranks_prose_and_docs_root_is_scanned(tmp_path):
+    """A `docs/BUILDING.md` is both FOUND (the glob bug) and ranked above prose (issue #597)."""
+
+    # Given a SMALL tree: one root-level build doc, one sub-level build doc, and many prose pages
+    import subprocess as sp
+    repo = tmp_path / "small"
+    repo.mkdir()
+
+    def git(*args):
+        return sp.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)
+
+    git("init", "-b", "main", ".")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "T")
+    (repo / "CMakeLists.txt").write_text('option(GGML_CUDA "cuda" OFF)\n')
+    (repo / "docs").mkdir()
+    (repo / "docs" / "BUILDING.md").write_text(
+        "cmake -DGGML_CUDA=ON -DCUDA_ARCHITECTURES=89 build install\n" * 20)
+    for i in range(40):
+        d = repo / "docs" / f"page{i}"
+        d.mkdir()
+        (d / "README.md").write_text(f"unrelated prose about the project, page {i}\n" * 200)
+    git("add", "-A")
+    git("commit", "-m", "seed")
+    sha = git("rev-parse", "HEAD").stdout.strip()
+
+    # When  the docs are gathered
+    docs, omitted = epr._docs(repo, sha)
+
+    # Then  the docs-root page is FOUND (a `docs/**/*.md`-only glob misses it) and made the cut...
+    assert "docs/BUILDING.md" in docs, sorted(docs)
+
+    # And   prose pages were dropped for the budget instead
+    assert omitted > 0, "the prose should have been what the budget left out"
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))
