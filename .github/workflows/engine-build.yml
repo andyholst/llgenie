@@ -21,6 +21,12 @@
 #       push-engine re-checks the binary's flags before it pushes).
 # Never: never merges, never pushes to `main`, never runs on a schedule, never publishes an image
 #        whose binary has not answered its test, and never builds the `none` placeholder row.
+#
+# QUEUEING. A build-and-verify run serialises only with the SAME engine/arch selection, so a narrow
+#        dispatch runs while a full sweep is going; every PUBLISHING run shares one global group so two
+#        pushes cannot race on the same `:<arch>` tag. Before #621 the group was the constant
+#        `engine-build`, so a narrow dispatch was created with zero jobs and no runner until the sweep
+#        finished — indistinguishable from a dispatcher that does not work (run 40199747645).
 name: engine-build — builds and verifies EVERY engine at its committed pin, in parallel (never merges)
 
 on:
@@ -44,7 +50,12 @@ permissions:
   packages: write
 
 concurrency:
-  group: engine-build
+  # A run that PUBLISHES serialises globally: two pushes could race on the same :<arch> tag and one
+  # would overwrite the other's image. A build-and-verify run serialises only with the SAME selection,
+  # so a narrow dispatch does not sit behind a four-hour sweep with ZERO jobs and no runner — measured:
+  # `engine=llama.cpp arch=cpu push=false` dispatched as run 40199747645 waited, 0 jobs, behind the
+  # full sweep 40199122842 (#621).
+  group: engine-build-${{ inputs.push == 'true' && 'push' || format('build-{0}-{1}', inputs.engine, inputs.arch) }}
   cancel-in-progress: false
 
 jobs:

@@ -1614,6 +1614,13 @@ workflow_dispatch inputs
 - no `pull_request`, `push` or `schedule` trigger. The row is **built, then verified, then**
   published — `make push-engine` is its own step, runs only when `push=true`, and re-checks the
   binary's flags before it pushes, so an image whose binary does not answer never reaches GHCR.
+- **a narrow dispatch is not queued behind a sweep** (issue #621). The concurrency group is keyed by
+  the selection for a build-and-verify run (`engine-build-build-<engine>-<arch>`) and shared by every
+  publishing run (`engine-build-push`), so two pushes cannot race on the same `:<arch>` tag while
+  `engine=llama.cpp arch=cpu push=false` runs **alongside** a full sweep. With the old constant
+  `engine-build` group, such a dispatch was created with zero jobs and no runner until the sweep
+  finished — indistinguishable from a dispatcher that does not work (measured: run 40199747645 behind
+  run 40199122842). `cancel-in-progress: false` throughout: a sweep is never killed by a dispatch.
 
 **Source or prebuilt is the params' decision, not this workflow's.** A variant with
 `prebuilt: false` compiles from its pinned sha in the generated Dockerfile; a variant with
