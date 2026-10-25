@@ -1,7 +1,7 @@
 # 2026-10-25 — a failed run whose PR already landed is not a fix-bot failure
 
 Issue: [#629](https://github.com/asimov-agent/llgenie/issues/629)
-PR: _this branch_
+PR: [#635](https://github.com/asimov-agent/llgenie/pull/635)
 OpenSpec change: `fix-bot-no-pr`
 
 ## What was red
