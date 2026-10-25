@@ -369,3 +369,30 @@ def test_a_broken_config_is_refused_not_overwritten(tmp_path):
     assert r.returncode == 2
     assert "not a YAML mapping" in r.stderr
     assert (home / "config.yaml").read_text() == "- just\n- a list\n"
+
+
+def test_a_skill_list_from_a_make_variable_is_expanded(tmp_path):
+    """A leg cannot carry a literal comma inside `$(call scrubbed_run,…)` (issue #641), so its `-s`
+    list comes from a Makefile variable — the guard must expand that the way make would."""
+
+    # Given a Makefile that assigns the list, and a leg that references it
+    (tmp_path / "Makefile").write_text("LEG_SKILLS := alpha,beta\nleg:\n\thermes -z \"go\" -s $(LEG_SKILLS) --yolo\n")
+    legs = guard.iter_legs(tmp_path)
+
+    # When  the legs are read
+    # Then  both names are seen, not the literal `$(LEG_SKILLS)`
+    assert legs and legs[0]["skills"] == ["alpha", "beta"], legs
+
+
+def test_the_variable_expansion_is_bounded_and_safe(tmp_path):
+    """An unknown or self-referential variable must not loop or invent a name."""
+
+    # Given an assignment that refers to itself and one that does not exist
+    values = {"LOOP": "$(LOOP)", "GOOD": "gamma"}
+
+    # When  the text is expanded
+    out = guard.expand_make("-s $(LOOP),$(GOOD),$(MISSING)", values)
+
+    # Then  the known one is replaced and the others are left alone
+    assert "$(GOOD)" not in out and ",gamma," in out
+    assert "$(MISSING)" in out

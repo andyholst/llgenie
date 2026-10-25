@@ -354,6 +354,12 @@ require-env: ## Refuse to start when a credential a leg needs is missing (KEYS="
 	@test -n "$(KEYS)" || { echo "Usage: make require-env KEYS=\"NOUS_API_KEY [TYPESAFE_API_KEY]\""; exit 1; }
 	python3 scripts/require_env.py $(KEYS)
 
+# `$(call …)` splits its arguments on COMMAS IN THE UNEXPANDED TEXT, so a literal `-s a,b` inside
+# the call keeps only `-s a`: the rest is dropped, the shell sees an unclosed quote, and the leg dies
+# with `unexpected EOF while looking for matching '` before the agent starts (issue #641, measured on
+# #602/#605 staying DIRTY). The skills therefore come from a variable — no comma in the call text —
+# and `make -n rebase-bot-agent` is the proof.
+REBASE_BOT_SKILLS := rebase-conflict,bot-unattended
 rebase-bot-agent: ## Ask Hermes to resolve a stopped rebase (the conflict prompt arrives on STDIN); runs INSIDE the agent image; the transcript is REDACTED before it prints (issue #359)
 	@python3 scripts/require_env.py NOUS_API_KEY
 	python3 scripts/ci_images.py ensure agent
@@ -362,7 +368,7 @@ rebase-bot-agent: ## Ask Hermes to resolve a stopped rebase (the conflict prompt
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
 	  $(AGENT_SHELL_FORWARD) \
-	  $(AGENT_IMAGE) bash -lc 'hermes -z "$$(cat) Follow the preloaded skill rebase-conflict; the prompt above carries the conflicted files." -s rebase-conflict,bot-unattended $(nous-alias) --reasoning medium --yolo')
+	  $(AGENT_IMAGE) bash -lc 'hermes -z "$$(cat) Follow the preloaded skill rebase-conflict; the prompt above carries the conflicted files." -s $(REBASE_BOT_SKILLS) $(nous-alias) --reasoning medium --yolo')
 # Hermes runs directly there, NOT through `make _rebase-bot-agent`: the container's /repo/Makefile
 # is the conflicted file the agent was asked to resolve, and make cannot parse it (issue #460).
 
