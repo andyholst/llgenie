@@ -196,3 +196,34 @@ def test_only_one_variant_per_engine_owns_latest():
     # When  the owners are counted per engine
     # Then  every engine has exactly one
     assert claims and set(claims.values()) == {1}, claims
+
+
+def test_a_not_yet_published_latest_does_not_fail_the_pull_but_a_drifted_one_does(monkeypatch):
+    """Rollout: `:latest` appears with the first publishing run; once it exists it must match."""
+
+    # Given a published hash tag and :<arch> with matching digests, and no :latest yet
+    monkeypatch.setattr(ei, "REGISTRY", "ghcr.io/asimov-agent")
+
+    def sh(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(ei, "_sh", sh)
+    monkeypatch.setattr(ei, "publish_refs", lambda spec: [
+        "ghcr.io/asimov-agent/llgenie/llama-cpp:74bca395-3932631f-cpu",
+        "ghcr.io/asimov-agent/llgenie/llama-cpp:cpu",
+        "ghcr.io/asimov-agent/llgenie/llama-cpp:latest",
+    ])
+    digests = {"74bca395-3932631f-cpu": "sha256:aa", "llama-cpp:cpu": "sha256:aa",
+               "llama-cpp:latest": ""}
+    monkeypatch.setattr(ei, "_digest", lambda ref: digests[next(k for k in digests if k in ref)])
+    spec = _spec()
+
+    # When  the published image is pulled
+    pulled = ei.pull_published(spec)
+
+    # Then  a missing :latest is a note, not a failure
+    assert pulled == spec["tag"]
+
+    # And   once :latest exists with another digest, the pull fails
+    digests["llama-cpp:latest"] = "sha256:bb"
+    assert ei.pull_published(spec) == ""

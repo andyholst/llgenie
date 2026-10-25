@@ -811,6 +811,11 @@ def pull_published(spec: dict) -> str:
         return ""
     for m in moving:
         d = _digest(m)
+        if not d and m.endswith(":latest"):
+            # Rollout (issue #638): `:latest` only exists once a run has published that engine.
+            # A missing one is not a drifted one — the next run that rebuilds the cell creates it.
+            print(f"[engine-image] note: {m} not published yet (the next publishing run creates it)")
+            continue
         if d != d_ref:
             print(f"[engine-image] FAIL digest mismatch: {ref}={d_ref} {m}={d or '?'}")
             return ""
