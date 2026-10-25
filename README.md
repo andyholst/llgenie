@@ -2029,7 +2029,9 @@ make test-install-trend # after make install: ~/bin/llgenie with NO model in a p
                        # "hi" (issue #105)
 make test-published-engine ENGINE=<id> ARCH=<arch>  # issue #102: pull ENGINE's :ARCH image AS PUBLISHED
                        # (no build, digest == the :ARCH tag), then the binary reports its version and the
-                       # container serves the tiny model and answers "hi" on /v1/chat/completions
+                       # container serves the tiny model and answers "hi" on /v1/chat/completions.
+                       # The binary-flag check runs in the TEST IMAGE like every other test stage
+                       # (issue #621): the runner's own python3 has no pytest
 make ci-engines BACKEND=metal  # the engine stage (issue #120): cpu|cuda|rocm|vulkan -> container engines, metal -> every native engine
 make test-native-engines       # Apple Silicon: make install path for EACH native-Metal engine, tiny model on Metal + "hi"
 make test-native-engine        # Apple Silicon: REAL TensorFold install / update / reuse through the llgenie pick
