@@ -51,8 +51,8 @@ install:
     # host at run time via the nvidia CDI device)
     - "LD_LIBRARY_PATH=${{LD_LIBRARY_PATH:-}}:/usr/local/cuda/lib64/stubs {binary} --help > /dev/null"
 binary: "{build}/bin/llama-server"
-binary_flags: ["--version", "--help"]   # fork of llama.cpp: same --version / --help
-detect: "{binary} --version"
+binary_flags: ["--help"]   # the fork does NOT implement --version (it starts serving and logs `0.00.000.362 I srv ...`), so --help is the proof (issue #625)
+detect: "echo \"pin {pinned_short}\""
 launch: "{binary} -m {model} --host {host} --port {port} --alias {alias} --jinja"
 health: "GET /health"
 alias_mode: flag

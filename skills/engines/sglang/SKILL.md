@@ -45,9 +45,9 @@ env:
 binary: "sglang"
 binary_flags: ["--help"]   # the sglang CLI answers --help (no --version); detect proves it
 binary_probe:                # argparse-only CLI: the help family must answer, the version
-  cuda: help                 # comes from the image's `detect` (`sglang.__version__`)
+  cuda: help                 # comes from the image's `detect` (the installed distribution's version)
   rocm: help
-detect: "{binary} --help > /dev/null && python3 -c 'import sglang; print(sglang.__version__)'"
+detect: "{binary} --help > /dev/null && python3 -c 'import importlib.metadata as m; print(\"sglang\", m.version(\"sglang\"))'"   # the distribution: `sglang.__version__` is 0.0.0 in the rocm wheel (issue #625)
 launch: "{binary} serve --model-path {model} --host {host} --port {port} --served-model-name {alias}"
 health: "GET /health"
 alias_mode: flag
