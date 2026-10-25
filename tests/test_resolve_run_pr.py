@@ -174,3 +174,61 @@ def test_the_workflow_resolves_the_pr_through_the_make_target():
     assert "number=$(" not in step, step
     assert "gh pr list --repo" not in step, step
     assert '"/runs/' not in step, step
+
+
+def test_allow_none_answers_no_pr_without_failing(tmp_path, monkeypatch):
+    """Issue #629: a failed run whose PR already landed is nothing to repair, not a red run."""
+
+    # Given a run neither source resolves, and a GitHub output file
+    gh = _fake_gh(tmp_path, api_stdout="", api_exit=0, list_stdout="", list_exit=0)
+    output = tmp_path / "output.txt"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    # When  the fix-bot resolves that run with the lenient answer
+    rc = rr.main(["resolve", "--repo", "asimov-agent/llgenie", "--run-id", "40207293399",
+                  "--head-owner", OWNER, "--head-branch", "fix/engine-gate-strict",
+                  "--allow-none", "--gh", str(gh)])
+
+    # Then  it succeeds with the single empty `number=` line an absent PR means
+    assert rc == 0, rc
+    assert output.read_text() == "number=\n", output.read_text()
+
+
+def test_allow_none_still_resolves_a_live_pr(tmp_path, monkeypatch):
+    """The lenient flag changes only the no-answer case: a live PR is still reported as its number."""
+
+    # Given a run whose head still has an open PR, and a GitHub output file
+    gh = _fake_gh(tmp_path, api_stdout="506\n")
+    output = tmp_path / "output.txt"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    # When  the fix-bot resolves it with the lenient answer
+    rc = rr.main(["resolve", "--repo", "asimov-agent/llgenie", "--run-id", "40207293399",
+                  "--head-owner", OWNER, "--head-branch", BRANCH, "--allow-none", "--gh", str(gh)])
+
+    # Then  the number is unchanged
+    assert rc == 0, rc
+    assert output.read_text() == "number=506\n", output.read_text()
+
+
+def test_the_fix_bot_workflow_resolves_through_the_lenient_target():
+    """The lenient answer belongs to the fix-bot's sweep, and only to it (issue #629)."""
+
+    # Given the real fix-bot workflow and the real make targets
+    fix_bot = (REPO / ".github" / "workflows" / "fix-bot.yml").read_text()
+    makefile = (REPO / "Makefile").read_text()
+
+    # When  the sweep's resolution step and both targets' recipes are read
+    step = fix_bot.split("- name: Resolve the PR the failed run belongs to", 1)[1]
+    step = step.split("- name:", 1)[0]
+    lenient = makefile.split("fix-bot-resolve:", 1)[1].split(chr(10) * 2, 1)[0]
+    strict = makefile.split("auto-merge-resolve:", 1)[1].split(chr(10) * 2, 1)[0]
+
+    # Then  the sweep calls the lenient target, and it is the ONLY place the flag is passed
+    assert "make fix-bot-resolve" in step, step
+    assert "make auto-merge-resolve" not in step, step
+    assert "--allow-none" in lenient, lenient
+    assert "--allow-none" not in strict, strict
+    assert "--allow-none" not in WORKFLOW, "the merge gate must keep its loud failure"

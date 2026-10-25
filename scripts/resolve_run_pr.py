@@ -23,10 +23,17 @@ PR must not be silently dropped.
 
 Commands (stdlib only, the GitHub API only through a `gh` on PATH):
 
-    resolve --repo R --run-id N --head-owner O --head-branch B [--gh gh]
+    resolve --repo R --run-id N --head-owner O --head-branch B [--allow-none] [--gh gh]
 
 The resolved number is written as the single line `number=<n>` to the file named by `$GITHUB_OUTPUT`
 when that variable is set (the workflow's `id: pr` output), and printed as that same line otherwise.
+
+Two callers ask the same question and differ on ONE thing, so the difference is a flag and not a second
+resolver. The merge gate (`auto-merge.yml`, via `make auto-merge-resolve`) must never drop a green PR, so
+nothing resolving is a loud failure. The fix-bot's sweep (`fix-bot.yml`, via `make fix-bot-resolve`) is
+repairing a PR that a failed run pointed at: when that PR has already merged or closed, there is simply
+nothing to repair, and the sweep must end cleanly — measured in issue #629, where a landed PR
+(`fix/engine-gate-strict`, PR #627) turned the fix-bot's own run red. `--allow-none` is that answer.
 """
 from __future__ import annotations
 
@@ -89,22 +96,43 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True, type=int, help="the finished CI run id")
     parser.add_argument("--head-owner", required=True, help="the run's head repository owner")
     parser.add_argument("--head-branch", required=True, help="the run's head branch")
+    parser.add_argument("--allow-none", action="store_true",
+                        help="answer 'no open PR' with exit 0 and an empty `number=` line (the fix-bot's "
+                             "sweep: a PR that already landed is nothing to repair); without it nothing "
+                             "resolving is a loud failure (the merge gate)")
     parser.add_argument("--gh", default="gh", help="the gh binary to call (default: gh from PATH)")
     args = parser.parse_args(argv)
 
+    label = "fix-bot-resolve" if args.allow_none else "auto-merge-resolve"
     try:
         number = resolve(args.repo, args.run_id, args.head_owner, args.head_branch, args.gh)
     except ResolutionError as exc:
-        print(f"[auto-merge-resolve] {exc}", file=sys.stderr)
-        return 1
+        if not args.allow_none:
+            print(f"[auto-merge-resolve] {exc}", file=sys.stderr)
+            return 1
+        # The fix-bot's own case (issue #629): the run's PR already merged or closed, so there is no
+        # branch left to repair. That is an answer, not a failure - the sweep then picks whatever PR
+        # deserves the bot, exactly as its scheduled form does.
+        print(f"[fix-bot-resolve] no open pull request for run {args.run_id} "
+              f"(head {args.head_owner}:{args.head_branch}) - nothing to repair", file=sys.stderr)
+        return _emit(label, "", args)
 
+    return _emit(label, str(number), args)
+
+
+def _emit(label: str, number: str, args: argparse.Namespace) -> int:
+    """Write the single `number=<n>` line (empty for the allowed-none answer) to `$GITHUB_OUTPUT`."""
     line = f"number={number}"
     output_file = os.environ.get("GITHUB_OUTPUT")
     if output_file:
         with open(output_file, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
-        print(f"[auto-merge-resolve] resolved PR #{number} for run {args.run_id} "
-              f"(head {args.head_owner}:{args.head_branch})")
+        if number:
+            print(f"[{label}] resolved PR #{number} for run {args.run_id} "
+                  f"(head {args.head_owner}:{args.head_branch})")
+        else:
+            print(f"[{label}] resolved no PR for run {args.run_id} "
+                  f"(head {args.head_owner}:{args.head_branch})")
     else:
         print(line)
     return 0

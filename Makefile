@@ -67,7 +67,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -806,6 +806,14 @@ auto-merge: ## Merge a PR ONLY when this run is green and the PR is conflict-fre
 auto-merge-resolve: ## Resolve the open PR a finished CI run belongs to (REPO= RUN_ID= HEAD_OWNER= HEAD_BRANCH=): writes `number=<n>` to $GITHUB_OUTPUT, treats a 404/error body as no answer and falls back to the fork head search, and fails loudly when nothing resolves (issue #508)
 	@test -n "$(REPO)" && test -n "$(RUN_ID)" && test -n "$(HEAD_OWNER)" && test -n "$(HEAD_BRANCH)" || { echo "Usage: make auto-merge-resolve REPO=<owner/repo> RUN_ID=<id> HEAD_OWNER=<owner> HEAD_BRANCH=<branch>"; exit 1; }
 	python3 scripts/resolve_run_pr.py resolve --repo "$(REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)"
+
+# The fix-bot's sweep asks the SAME question with the opposite consequence (issue #629): a `CI` failure
+# report can arrive after its PR already merged or closed, and then there is nothing to repair — so an
+# empty answer is an answer (exit 0, `number=`), never a red run. The merge gate above must keep failing
+# loudly, which is why this is a separate target over one resolver rather than a shared default.
+fix-bot-resolve: ## Resolve the open PR a failed CI run belongs to for the fix-bot sweep (REPO= RUN_ID= HEAD_OWNER= HEAD_BRANCH=): writes `number=<n>` to $GITHUB_OUTPUT, and answers an EMPTY `number=` with exit 0 when the PR already merged or closed — nothing to repair, not a failure (issue #629)
+	@test -n "$(REPO)" && test -n "$(RUN_ID)" && test -n "$(HEAD_OWNER)" && test -n "$(HEAD_BRANCH)" || { echo "Usage: make fix-bot-resolve REPO=<owner/repo> RUN_ID=<id> HEAD_OWNER=<owner> HEAD_BRANCH=<branch>"; exit 1; }
+	python3 scripts/resolve_run_pr.py resolve --repo "$(REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)" --allow-none
 
 auto-merge-recheck: ## Re-evaluate the open PRs whose own deferral marker matches their current head — a deferral is retried without a push (REPO= [MAX=5] [DRY=1]) (issue #545)
 	@test -n "$(REPO)" || { echo "Usage: make auto-merge-recheck REPO=<owner/repo> [MAX=5] [DRY=1]"; exit 1; }

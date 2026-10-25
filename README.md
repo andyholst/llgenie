@@ -93,12 +93,19 @@ A bot never works from a stale base:
   fork, so without the allowlist the scheduled sweep passed over every PR and repaired nothing;
   the branch is now checked out from — and pushed to — the PR's own head remote.
 - **The fix-bot is woken by the failure it repairs** (issue #538). `fix-bot.yml` runs on `workflow_run` for
-  `CI` when a `pull_request` run concluded `failure`, resolves that run's PR with `make auto-merge-resolve`,
-  captures the failed run's log, and dispatches the repair for **that** PR (`make fix-bot-sweep PR=<n>`). The
-  hourly sweep stays as a fallback. Up to **5** attempts per head (`FIX_ROUNDS`/`rounds`, counted by the PR's
-  `fix(bot):` commits); a failure this runner cannot reproduce (a macOS-only job, a GPU-only image test) is
-  repaired from the captured log and marked **UNVERIFIED** — CI re-runs and re-triggers, so a real flake is
-  retried instead of being dropped because a Linux check was green.
+  `CI` when a `pull_request` run concluded `failure`, resolves that run's PR with `make fix-bot-resolve`
+  (issue #629), captures the failed run's log, and dispatches the repair for **that** PR
+  (`make fix-bot-sweep PR=<n>`). The hourly sweep stays as a fallback. Up to **5** attempts per head
+  (`FIX_ROUNDS`/`rounds`, counted by the PR's `fix(bot):` commits); a failure this runner cannot reproduce
+  (a macOS-only job, a GPU-only image test) is repaired from the captured log and marked **UNVERIFIED** —
+  CI re-runs and re-triggers, so a real flake is retried instead of being dropped because a Linux check
+  was green.
+- **A failed run whose PR already landed is not a failure** (issue #629). `workflow_run` reports arrive
+  after the merge that made them moot, so `make fix-bot-resolve` answers an empty `number=` (exit 0,
+  "nothing to repair") and the sweep proceeds as its scheduled form does — it picks the PR that deserves
+  the bot, and does nothing when none does. The merge gate keeps the opposite reading: `make
+  auto-merge-resolve` still **fails loudly** when nothing resolves, because a green PR must never be
+  silently dropped. One resolver (`scripts/resolve_run_pr.py`, `--allow-none`), two documented answers.
 
 Driven by `scripts/bot_sync_main.sh`; `tests/test_bot_sync.py` runs the rules through a real
 scratch git repository.
@@ -2277,6 +2284,9 @@ re-checks and stops — it **never merges**; a human reviews the result:
 
 ```
 make fix-bot-sweep      # which red PR deserves the bot, then dispatch it (DRY=1 previews; needs gh)
+make fix-bot-resolve    # a failed run -> its PR for the sweep; an EMPTY `number=` means nothing to repair
+                        # (a PR that already merged), never a red run — the merge gate's auto-merge-resolve
+                        # keeps failing loudly on the same answer (issue #629)
 make fix-loop           # run the loop locally against the failing check (scripts/fix_loop.sh; needs an agent on PATH)
 make fix-loop-image     # the same loop inside the agent image (AGENT_IMAGE= overrides the ref, LOG=path tees)
 make fix-bot-report     # render the loop's failure report (REPORT=<path>) — the comment the workflow posts
