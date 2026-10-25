@@ -205,18 +205,30 @@ def test_a_help_only_cli_is_not_failed_for_having_no_version_flag():
     assert "version family" in " ".join(flags_verdict["failures"])
 
 
-def test_a_device_probe_is_contained_not_failed(tmp_path):
-    """vllm cuda/rocm cannot answer without its device; its version comes from `detect`."""
+def test_a_device_probe_is_contained_only_for_a_named_cell(tmp_path):
+    """vllm cuda/rocm cannot answer without its device — but ONLY because they are named (#625).
+
+    Until #625 any `probe: device` cell passed with every flag at exit 1, which is how four rows went
+    green having proved nothing. The containment now has to be earned: the cell is in `DEVICE_ONLY`, and
+    the note quotes the reason. An unlisted cell with the same verdicts is red.
+    """
 
     # Given a `probe: device` variant whose flags all fail on this runner
     r, verdicts = _run(tmp_path, {}, list(ei.TYPED_FLAGS))
 
-    # When  the verdicts are decided with the device policy
-    verdict = ei.decide(["--version", "--help"], verdicts, policy="device")
+    # When  the verdicts are decided for a cell that IS on the exemption list
+    listed = ei.decide(["--version", "--help"], verdicts, policy="device",
+                       engine="vllm", variant="cuda")
 
-    # Then  it passes and says where the version comes from
-    assert verdict["ok"], verdict["failures"]
-    assert "detect" in verdict["note"], verdict
+    # Then  it passes, and says where the version comes from and why it is exempt
+    assert listed["ok"], listed["failures"]
+    assert "detect" in listed["note"] and "#625" in listed["note"], listed
+
+    # And  the SAME verdicts on an unlisted cell are red — the policy alone no longer rescues it
+    unlisted = ei.decide(["--version", "--help"], verdicts, policy="device",
+                         engine="sglang", variant="cuda")
+    assert unlisted["ok"] is False, unlisted
+    assert any("DEVICE_ONLY" in f for f in unlisted["failures"]), unlisted["failures"]
 
 
 if __name__ == "__main__":

@@ -1716,14 +1716,23 @@ that drops a whole spelling reds while an engine that only ever spelled it `--he
 not answer is named in the failure. The bump PR's CI runs this through
 `make test-engine-stage … TEST=detect` → `make test-engine-image` → `scripts/engine_image.py
 test-image` + `tests/test_engine_version.py`, so a binary that cannot answer `--help` is red before a
-human merges the bump.
+human merges the bump. `make engine-gate-report` prints what each cell will actually prove before any image
+is built — `flag-proven`, `device-exempt` (with its reason) or `disabled` (issue #625) — so a sweep's green
+rows can be read for what they are without opening 27 logs.
 A Python import is not that check (issue #204). Those flags, and the file each image
 must contain, are generated into `containers/engines/binaries.json` with the params
 (`make generate-engine-params`, checked by `make check-engine-params`) and are NOT part
-of the image-tag hash, so documenting them moves no published tag. A backend whose CLI
-initialises its device at startup (`binary_probe: device`: vllm cuda/rocm, mlx cuda,
-tensorrt-llm cuda, exllamav3 rocm) still has to CONTAIN the file; there the version comes
-from `entrypoint.sh detect` (CI #106). A CLI whose parser has **no version flag at all**
+of the image-tag hash, so documenting them moves no published tag. **At least one probed flag must exit 0 — there is
+no blanket `device` escape** (issue #625; until then vllm cuda/rocm, tensorrt-llm cuda and mlx cuda were green
+with every probe at exit 1). The four cells whose CLI can only import WITH its device are named in
+`DEVICE_ONLY` in `scripts/engine_image.py`, each with the measured reason and its issue; any other cell that
+answers nothing is red, and the failure says to add it there deliberately or `DISABLE` it. A `detect` line
+must also prove a **version shape** — a semver, or `pin <sha7+>` for an engine whose upstream prints none — so
+`installed 0.00.000.272 I srv  llama_server: initializing ...` (a log timestamp, what the laurentzuijdwijk
+fork's `--version` prints) and the placeholder `0.0.0` are failures, not versions.
+A backend whose CLI
+initialises its device at startup still has to CONTAIN the file, and (for the four named cells) the version
+comes from `entrypoint.sh detect` (CI #106). A CLI whose parser has **no version flag at all**
 (`binary_probe: help`: mlx cpu — argparse `--help`/`-h` only) must answer the help family,
 and its version likewise comes from `detect`; without that policy the probe would fail an
 engine for a flag it never had (found by the dispatch sweep, issue #614).

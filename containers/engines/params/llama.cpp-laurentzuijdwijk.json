@@ -70,7 +70,7 @@
         "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}:/usr/local/cuda/lib64/stubs /opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cuda/bin/llama-server --help > /dev/null"
       ],
       "env": {},
-      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cuda/bin/llama-server --version",
+      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cuda/bin/llama-server --version 2>&1 | grep -E '^version:'",
       "pre_launch": null,
       "launch": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cuda/bin/llama-server -m {model} --host {host} --port {port} --alias llm-local --jinja",
       "post_launch": null,
@@ -114,7 +114,7 @@
         "HIPCXX": "$(hipconfig -l)/clang",
         "HIP_PATH": "$(hipconfig -R)"
       },
-      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-rocm/bin/llama-server --version",
+      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-rocm/bin/llama-server --version 2>&1 | grep -E '^version:'",
       "pre_launch": null,
       "launch": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-rocm/bin/llama-server -m {model} --host {host} --port {port} --alias llm-local --jinja",
       "post_launch": null,
@@ -167,7 +167,7 @@
         "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}:/usr/local/cuda/lib64/stubs /opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-vulkan/bin/llama-server --help > /dev/null"
       ],
       "env": {},
-      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-vulkan/bin/llama-server --version",
+      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-vulkan/bin/llama-server --version 2>&1 | grep -E '^version:'",
       "pre_launch": null,
       "launch": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-vulkan/bin/llama-server -m {model} --host {host} --port {port} --alias llm-local --jinja",
       "post_launch": null,
@@ -208,7 +208,7 @@
         "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}:/usr/local/cuda/lib64/stubs /opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cpu/bin/llama-server --help > /dev/null"
       ],
       "env": {},
-      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cpu/bin/llama-server --version",
+      "detect": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cpu/bin/llama-server --version 2>&1 | grep -E '^version:'",
       "pre_launch": null,
       "launch": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cpu/bin/llama-server -m {model} --host {host} --port {port} --alias llm-local --jinja",
       "post_launch": null,

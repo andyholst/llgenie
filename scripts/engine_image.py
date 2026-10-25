@@ -426,8 +426,19 @@ def _answered(verdicts: dict[str, dict], flag: str) -> bool:
     return bool(v) and v["rc"] == 0 and v["bytes"] > 0
 
 
-def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flags") -> dict:
-    """The verdict for one engine binary, from the per-flag results (issue #580).
+#: Variants whose CLI cannot answer ANY flag without its device, so on a GPU-less hosted runner the only
+#: provable thing is that the file exists. Every entry is a measured cost, not an escape hatch: `decide()`
+#: refuses the exemption for any cell that is not listed, and each reason names what the probe actually
+#: did (run 40204145334, issue #625). A cell leaves this list when it can answer a flag device-free.
+DEVICE_ONLY: dict[tuple[str, str], str] = {
+    ("vllm", "cuda"): "#625 `vllm --version/--help/-h/-V` all exit 1, raising in _compute_kwargs",
+    ("vllm", "rocm"): "#625 same CLI, same import-time device probe (in _compute_kwargs)",
+    ("tensorrt-llm", "cuda"): "#625 `trtllm-serve --help/--version` fail at import (line 1, in <module>)",
+    ("mlx", "cuda"): "#625 `mlx_lm.server` imports libcuda.so.1 at import: ImportError without a device",
+}
+def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flags",
+           engine: str = "", variant: str = "") -> dict:
+    """The verdict for one engine binary, from the per-flag results (issue #580, tightened by #625).
 
     Pure, so it can be tested without docker. Rules, in order:
 
@@ -435,8 +446,11 @@ def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flag
       * the help family and the version family must each be answered by one of their spellings, which
         is what survives engines that hyphenate help differently (six of them document `--help` only);
       * an engine that documents nothing falls back to the trio and needs one answer;
-      * a `probe: device` variant whose flags ALL failed is contained: its CLI initialises the device
-        at startup, and the version is proven by the image's own `detect`.
+      * **at least one probed flag must exit 0 — always** (issue #625). Until #625 a `probe: device`
+        variant whose flags ALL failed was accepted on the promise that `detect` would prove the
+        version, so `vllm/cuda`, `vllm/rocm`, `tensorrt-llm/cuda` and `mlx/cuda` were green with every
+        probe at exit 1. The exemption is now a NAMED list (`DEVICE_ONLY`), each entry carrying the
+        measured reason, and any other cell gets a plain failure.
 
     Returns {"ok": bool, "failures": [lines], "note": str}.
     """
@@ -455,11 +469,19 @@ def decide(documented: list[str], verdicts: dict[str, dict], policy: str = "flag
 
     probed = [f for f in dict.fromkeys([*documented, *TYPED_FLAGS]) if f in verdicts]
     if not any(_answered(verdicts, f) for f in probed):
-        if policy == "device":
+        # #625: a `probe: device` cell is no longer a blanket pass. Only the cells measured into
+        # DEVICE_ONLY may lean on `detect`, and even they must say why in the log.
+        exempt = DEVICE_ONLY.get((engine, variant)) if policy == "device" else ""
+        if exempt:
             return {"ok": True, "failures": [],
-                    "note": "its CLI needs its device (probe: device) -> version comes from the "
-                            "image's entrypoint detect"}
-        if documented:
+                    "note": f"exempt from the flag rule ({exempt}) -> version comes from the image's "
+                            f"entrypoint detect, and the file's presence was checked"}
+        if policy == "device":
+            failures.append(f"every probed flag failed and {engine}/{variant} is NOT on the "
+                            f"device-only exemption list: a binary that cannot answer one flag on "
+                            f"this runner proves nothing (add it to DEVICE_ONLY with a reason, or "
+                            f"DISABLE the cell — issue #625)")
+        elif documented:
             failures.append(f"none of the documented flags answered: {' '.join(documented)}")
         else:
             failures.append(f"the manifest documents no flags and none of the probed flags answered: "
@@ -547,7 +569,7 @@ def binary_file_works(spec: dict) -> int:
         print(((r.stdout or "") + (r.stderr or "")).strip()[-2000:])
         return 1
     verdicts = parse_probe(out)
-    verdict = decide(documented, verdicts, policy)
+    verdict = decide(documented, verdicts, policy, engine=spec["id"], variant=spec["variant"])
     print(f"[engine-image] {spec['id']}/{spec['variant']} binary {binary} "
           f"(documented: {' '.join(documented) or 'none'}, policy: {policy}, "
           f"probed: {' '.join(flags)})")
@@ -570,6 +592,38 @@ def binary_file_works(spec: dict) -> int:
     return 1
 
 
+VERSION_TOKEN = re.compile(r"\b\d+\.\d+\.\d+\b")
+PIN_TOKEN = re.compile(r"\bpin\s+([0-9a-f]{7,40})\b", re.I)
+#: `0.00.000.272 I srv  llama_server: initializing ...` — a TIMESTAMPED LOG line, not a version. One fork
+#: printed exactly this for `--version` and the gate accepted it (issue #625).
+LOG_STAMP = re.compile(r"\b\d+\.\d+\.\d+(?:\.\d+)?\s+I\s+srv\b")
+
+
+def version_proof(text: str) -> str:
+    """The version a `detect` line proves, or "" when the line proves none (issue #625).
+
+    Accepted shapes: a semver (`0.5.21`, `0.32.0+cpu`, `0.7.0-dev`), or `pin <sha7+>` for an engine whose
+    upstream prints no version at all (the image's build identity is then the pinned commit). A timestamped
+    server log line (`0.00.000.272 I srv …`) is ignored — it is noise some CLIs print around the version — and
+    the placeholder `0.0.0` that a wheel can report when its packaging metadata is missing is refused.
+    """
+    text = text or ""
+    pin = PIN_TOKEN.search(text)
+    if pin:
+        return f"pin {pin.group(1)}"
+    # A stamp is IGNORED, not fatal: `llama-server --version` on the laurentzuijdwijk fork prints
+    # `0.00.000.331 I srv  llama_server: initializing ...` and then `version: 0.5.0-dev (build 11364,
+    # commit 3c75be02f)` — the stamp is noise on the same output, and the version is real (measured on the
+    # published cpu image). Rejecting the whole text threw that version away.
+    text = LOG_STAMP.sub(" ", text)
+    for m in VERSION_TOKEN.finditer(text):
+        token = m.group(0)
+        if token == "0.0.0":
+            continue
+        return token
+    return ""
+
+
 def test_image(spec: dict) -> int:
     """GPU images on GPU-less runners: the engine file exists and accepts
     --version or -h, `entrypoint.sh detect` prints a version, and
@@ -587,10 +641,18 @@ def test_image(spec: dict) -> int:
               f"{(r.stdout or r.stderr).strip().splitlines()[-1:] or ['']}")
         if cmd == ["info"] and ("port=11434" not in r.stdout or "model=llm-local" not in r.stdout):
             rc = 1
-        if cmd == ["detect"] and (r.returncode != 0 or not re.search(r"\d+\.\d+", r.stdout + r.stderr)):
-            # the binary's own --version/--help must exit 0 and print a version
-            print(r.stdout[-2000:], r.stderr[-2000:])
-            rc = 1
+        if cmd == ["detect"]:
+            seen = (r.stdout or "") + (r.stderr or "")
+            proof = version_proof(seen)
+            if r.returncode != 0 or not proof:
+                # #625: a `detect` line must prove a version (semver, or `pin <sha>`), not merely
+                # contain digits — `0.00.000.272 I srv ...` and `0.0.0` used to pass this.
+                why = (f"exit {r.returncode}" if r.returncode != 0
+                       else f"no version in {seen.strip().splitlines()[-1:] or ['']!r}")
+                print(f"[engine-image] FAIL {spec['id']}/{spec['variant']}: entrypoint detect proves no "
+                      f"version ({why}); a log line or `0.0.0` is not a version")
+                print(r.stdout[-2000:], r.stderr[-2000:])
+                rc = 1
     print(f"[engine-image] {'OK' if rc == 0 else 'FAIL'} image test {tag}")
     return rc
 

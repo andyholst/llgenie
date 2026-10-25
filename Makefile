@@ -60,7 +60,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	install-prism-cuda install-upstream-cuda install-prism-metal install-upstream-metal \
 	sync-registry check-registry skills-validate engine-list engine-hardware engine-plan engine-check engine-install engine-detect engine-smoke test-engine ci-engine-images build-engine-base build-engines generate-build-engine-params test-engine-image push-engine test-published-engine test-install-published engine-launchers test-built-engine test-uninstalled \
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
-	engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
+	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
 	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict implement-issue hermes-smoke agent-jev-preflight nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
@@ -881,6 +881,9 @@ check-engine-source: ## CI: fail if a cell claims a source build (prebuilt=false
 	python3 scripts/engine_source_guard.py check
 engine-source-report: ## Print the source-vs-prebuilt census of every engine x arch cell, and every tracked exception
 	python3 scripts/engine_source_guard.py report
+
+engine-gate-report: ## Print what each engine cell will actually prove (flag-proven / device-exempt / disabled) from the committed params, before any image is built (issue #625)
+	python3 scripts/engine_gate_report.py
 build-engine-base: ## Build the shared toolchain base image for BACKEND (cpu|cuda|rocm|vulkan; PUSH=1 publishes + caches in LLGENIE_REGISTRY)
 	@test -n "$(BACKEND)" || { echo "Usage: make build-engine-base BACKEND=cpu|cuda|rocm|vulkan [PUSH=1]"; exit 1; }
 	python3 scripts/engine_image.py build-base "$(BACKEND)" $(if $(FORCE),--force,) $(if $(PUSH),--push,)
