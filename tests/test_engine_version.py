@@ -39,12 +39,18 @@ def test_engine_binary_reports_a_version():
     print(f"[version] {engine}/{arch}: {out.splitlines()[-1]}")
 
 
-def test_engine_binary_answers_the_flags_a_user_types():
+def test_engine_binary_answers_the_flags_a_user_types(capsys):
     """Every documented flag, and both flag families, answered by the built image's binary.
 
     The `version` entrypoint above proves the IMAGE reports a version. This proves the BINARY answers
     the flags a user actually types — and it names the flag that did not, instead of passing on
     whichever spelling happened to work (issue #580).
+
+    The verdict comes from `engine_image.binary_file_works`, the function `make test-engine-image` runs
+    for every row, and NOT from a probe written here (issue #634): the local copy forgot to pass the
+    cell's engine id and variant to `decide()`, so the `DEVICE_ONLY` exemption was looked up under
+    `("", "")` and the four device-only cells (vllm cuda/rocm, tensorrt-llm cuda, mlx cuda) went red
+    with `and / is NOT on the device-only exemption list`.
     """
     engine = os.environ.get("LLGENIE_TEST_ENGINE", "")
     arch = os.environ.get("LLGENIE_TEST_ARCH", "")
@@ -56,29 +62,15 @@ def test_engine_binary_answers_the_flags_a_user_types():
     spec = ei.resolve(engine, None, arch)
     entry = ei.binary_manifest(spec["id"], spec["variant"])
     binary = str(entry.get("binary") or "")
-    documented = [str(f) for f in (entry.get("flags") or [])]
-    policy = str(entry.get("probe") or "flags")
     assert binary, f"{engine}/{arch}: binaries.json carries no binary"
 
-    # When  the shipped probe runs every flag a user types inside the image
-    flags = [*documented, *[f for f in ei.TYPED_FLAGS if f not in documented]]
-    r = subprocess.run([ei.RUNTIME, "run", "--rm", "--entrypoint", "bash", spec["tag"], "-c",
-                        ei.BINARY_PROBE, "llgenie-binary", binary, *flags],
-                       capture_output=True, text=True, timeout=600)
-    assert r.returncode == 0, f"{engine}/{arch} probe failed ({r.returncode}): " \
-                              f"{(r.stdout + r.stderr)[-2000:]}"
+    # When  the product's own probe runs every flag a user types inside the image
+    rc = ei.binary_file_works(spec)
+    out = capsys.readouterr().out
 
-    # Then  every documented flag and both families answered, and a miss names the flag
-    verdicts = ei.parse_probe(r.stdout)
-    # The cell's identity decides whether the `DEVICE_ONLY` exemption applies (issue #625): without it,
-    # `decide()` sees engine="" and refuses every device-policy cell — which is how `mlx/cuda` failed here
-    # while `test_image` (which passes the identity) accepted it.
-    verdict = ei.decide(documented, verdicts, policy, engine=spec["id"], variant=spec["variant"])
-    assert verdict["ok"], f"{engine}/{arch} binary {binary} failed the flag check:\n" + \
-                          "\n".join(verdict["failures"])
-    for flag in flags:
-        answered = verdicts.get(flag, {}).get("rc") == 0
-        print(f"[flags] {engine}/{arch} {flag}: {'answers' if answered else 'no answer'}")
+    # Then  the row's verdict is green, and the per-flag table it printed is the evidence
+    assert rc == 0, f"{engine}/{arch} binary {binary} failed the flag check:\n{out[-4000:]}"
+    assert "[engine-image]" in out, out
 
 
 def test_strata_engine_runs_on_avx2_cpus_and_setup_reuses_it():

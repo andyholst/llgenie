@@ -1716,7 +1716,11 @@ that drops a whole spelling reds while an engine that only ever spelled it `--he
 not answer is named in the failure. The bump PR's CI runs this through
 `make test-engine-stage … TEST=detect` → `make test-engine-image` → `scripts/engine_image.py
 test-image` + `tests/test_engine_version.py`, so a binary that cannot answer `--help` is red before a
-human merges the bump. `make engine-gate-report` prints what each cell will actually prove before any image
+human merges the bump. That row is decided by ONE function — `binary_file_works` in
+`scripts/engine_image.py`, which passes the cell's engine id and variant to the decider — and the pytest
+case calls it rather than probing again (issue #634: a local copy of the probe forgot the cell identity, so
+`DEVICE_ONLY` was looked up under `("", "")` and the four device-only cells went red saying `and / is NOT on
+the device-only exemption list`). `make engine-gate-report` prints what each cell will actually prove before any image
 is built — `flag-proven`, `device-exempt` (with its reason) or `disabled` (issue #625) — so a sweep's green
 rows can be read for what they are without opening 27 logs.
 A Python import is not that check (issue #204). Those flags, and the file each image
