@@ -200,3 +200,25 @@ def test_sglang_reports_a_pin_when_its_own_metadata_is_a_placeholder():
     assert ei.version_proof("sglang 0.5.21") == "0.5.21"
     assert ei.version_proof("sglang pin e00930c54890") == "pin e00930c54890"
     assert ei.version_proof("sglang 0.0.0") == ""
+
+
+def test_the_gate_report_shows_the_detect_that_will_prove_the_version():
+    """The census must print each cell's `detect`, because that is what the gate judges (#625)."""
+
+    import engine_gate_report as report  # noqa: PLC0415
+
+    # Given the committed params, every cell the sweep would build has a detect
+    for row in report.rows():
+        if row["verdict"] == "disabled":
+            continue
+        assert row["detect"], row
+
+    # And  the printed census carries it (a placeholder detect would be visible before any image job)
+    import io
+    from contextlib import redirect_stdout
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        report.main()
+    out = buf.getvalue()
+    assert "detect:" in out
+    assert "importlib.metadata" in out or 'grep -E' in out  # the two fixed detects are on screen

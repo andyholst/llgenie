@@ -57,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
         mark = {"flag-proven": "FLAGS ", "device-exempt": "DEVICE", "disabled": "DISABL"}[r["verdict"]]
         print(f"  {mark}  {r['engine']:<{width}}  {r['variant']:<7} flags={','.join(r['flags']) or '-':<16} "
               f"policy={r['policy']:<6} {('— ' + r['reason']) if r['reason'] else ''}")
+        # The detect is the version proof for every cell, so show it: a placeholder or a log-line detect is
+        # visible here instead of after a ten-minute image job (issue #625).
+        if r["detect"]:
+            print(f"          detect: {r['detect']}")
     counts = {v: sum(1 for r in table if r["verdict"] == v) for v in ("flag-proven", "device-exempt", "disabled")}
     print(f"\n[gate-report] flag-proven={counts['flag-proven']} device-exempt={counts['device-exempt']} "
           f"disabled={counts['disabled']}")
