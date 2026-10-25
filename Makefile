@@ -894,10 +894,13 @@ test-published-engine: ## Issue #102: pull ENGINE's ARCH image AS PUBLISHED (no 
 	@test -n "$(ENGINE)" -a -n "$(ARCH)" || { echo "Usage: make test-published-engine ENGINE=<id> ARCH=cpu|cuda|rocm|vulkan"; exit 1; }
 	python3 scripts/engine_image.py pull-published "$(ENGINE)" $(ARCH_ARGS)
 	$(MAKE) test-engine-image ENGINE=$(ENGINE) ARCH=$(ARCH)
-	# issue #204: the real published image's engine binary must answer its documented flags
+	# issue #204: the real published image's engine binary must answer its documented flags.
+	# It runs in the TEST IMAGE like every other test stage (issue #621): the runner's own python3 has
+	# no pytest, so a bare `python3 -m pytest` here fails with "No module named pytest" — which is what
+	# every test-published-* job did as soon as the published matrix started carrying rows again.
 	@mkdir -p "$(CI_HOME)"
-	LLGENIE_PUBLISHED_PULLED=1 LLGENIE_TEST_ENGINE="$(ENGINE)" LLGENIE_TEST_ARCH="$(ARCH)" \
-	  python3 -m pytest -q -p no:cacheprovider tests/test_published_engine_binary.py
+	$(call engine_test,LLGENIE_PUBLISHED_PULLED=1 LLGENIE_TEST_ENGINE="$(ENGINE)" LLGENIE_TEST_ARCH="$(ARCH)") \
+		python3 -m pytest -q -p no:cacheprovider tests/test_published_engine_binary.py
 	@$(CI_HOME_CLEAN)
 	@if python3 -c 'import sys; sys.path.insert(0, "scripts"); import engine_image as ei; sys.exit(0 if ei.chat_testable("$(ENGINE)", "$(ARCH)") else 1)'; then \
 	  python3 scripts/engine_smoke.py "$(ENGINE)" $(ARCH_ARGS) --image $(if $(filter cpu,$(ARCH)),,--no-gpu); \

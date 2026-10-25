@@ -1614,6 +1614,13 @@ workflow_dispatch inputs
 - no `pull_request`, `push` or `schedule` trigger. The row is **built, then verified, then**
   published — `make push-engine` is its own step, runs only when `push=true`, and re-checks the
   binary's flags before it pushes, so an image whose binary does not answer never reaches GHCR.
+- **a narrow dispatch is not queued behind a sweep** (issue #621). The concurrency group is keyed by
+  the selection for a build-and-verify run (`engine-build-build-<engine>-<arch>`) and shared by every
+  publishing run (`engine-build-push`), so two pushes cannot race on the same `:<arch>` tag while
+  `engine=llama.cpp arch=cpu push=false` runs **alongside** a full sweep. With the old constant
+  `engine-build` group, such a dispatch was created with zero jobs and no runner until the sweep
+  finished — indistinguishable from a dispatcher that does not work (measured: run 40199747645 behind
+  run 40199122842). `cancel-in-progress: false` throughout: a sweep is never killed by a dispatch.
 
 **Source or prebuilt is the params' decision, not this workflow's.** A variant with
 `prebuilt: false` compiles from its pinned sha in the generated Dockerfile; a variant with
@@ -2029,7 +2036,9 @@ make test-install-trend # after make install: ~/bin/llgenie with NO model in a p
                        # "hi" (issue #105)
 make test-published-engine ENGINE=<id> ARCH=<arch>  # issue #102: pull ENGINE's :ARCH image AS PUBLISHED
                        # (no build, digest == the :ARCH tag), then the binary reports its version and the
-                       # container serves the tiny model and answers "hi" on /v1/chat/completions
+                       # container serves the tiny model and answers "hi" on /v1/chat/completions.
+                       # The binary-flag check runs in the TEST IMAGE like every other test stage
+                       # (issue #621): the runner's own python3 has no pytest
 make ci-engines BACKEND=metal  # the engine stage (issue #120): cpu|cuda|rocm|vulkan -> container engines, metal -> every native engine
 make test-native-engines       # Apple Silicon: make install path for EACH native-Metal engine, tiny model on Metal + "hi"
 make test-native-engine        # Apple Silicon: REAL TensorFold install / update / reuse through the llgenie pick

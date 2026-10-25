@@ -146,3 +146,34 @@ def test_no_workflow_cancels_every_run_unconditionally():
         "cancel-in-progress: true would let a next tick kill an in-flight bot run or a GHCR "
         "publish: " + ", ".join(offenders)
     )
+
+
+def test_engine_build_serialises_publishing_runs_but_not_a_narrow_dispatch():
+    """A narrow `engine-build` dispatch must not vanish behind a full sweep (issue #621).
+
+    Measured: `engine=llama.cpp arch=cpu push=false` (run 40199747645) was created while the full sweep
+    (run 40199122842) was running, and it sat `pending` with **zero jobs** — the global `engine-build`
+    group queued it behind four hours of work, which looks exactly like a dispatcher that does not work.
+    The group is therefore keyed by the selection for a build-only run, while every run that PUBLISHES
+    shares one group (two pushes must not race on the same `:<arch>` tag).
+    """
+
+    # Given the engine-build workflow's concurrency block
+    conc = _concurrency(_load("engine-build.yml"))
+    assert conc, "engine-build.yml declares no concurrency group"
+    group, cancel = conc
+
+    # When  the group expression is read
+    text = str(group)
+
+    # Then  it is keyed by the dispatch inputs, not a constant
+    assert text.startswith("engine-build-"), text
+    assert "inputs.engine" in text and "inputs.arch" in text, \
+        f"the group is not keyed by the selection, so a narrow dispatch queues behind a sweep: {text}"
+
+    # And  a publishing run still serialises globally, because two pushes could race on a tag
+    assert "inputs.push" in text and "'push'" in text, \
+        f"a publishing run must share one global group (tag race), got: {text}"
+
+    # And  it never cancels a running sweep
+    assert cancel is False or str(cancel).lower() == "false", cancel
