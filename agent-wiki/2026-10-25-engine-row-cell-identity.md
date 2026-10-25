@@ -1,7 +1,7 @@
 # 2026-10-25 — an engine row decides through one function, with its cell's identity
 
 Issue: [#634](https://github.com/asimov-agent/llgenie/issues/634)
-PR: _this branch_
+PR: [#637](https://github.com/asimov-agent/llgenie/pull/637)
 OpenSpec change: `engine-row-cell-identity`
 
 ## What was red
