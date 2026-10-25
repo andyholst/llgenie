@@ -43,12 +43,16 @@ WITH the identity, so the unit suite tested the decider and never the caller tha
 
 ## Fix
 
+While this was in flight, #632 (PR #633, `c5a45ff`) fixed the SYMPTOM at that call site and made `decide()`
+refuse a `policy: device` verdict without the cell identity. This change fixes the CAUSE — the row was a second
+implementation of the pipeline, which is why it drifted and could not inherit the fix.
+
 - `tests/test_engine_version.py`: the flag case calls `engine_image.binary_file_works(spec)` — the same
   function `make test-engine-image` runs — and asserts its exit status, printing the captured per-flag table
   as the failure evidence. No local probe, no local decider.
-- `tests/test_engine_binary_flags.py`: three regression tests — every `DEVICE_ONLY` cell is exempt with its
-  own identity, the SAME verdicts with no identity are red (the bug's exact shape), and the engine-row test's
-  text carries no `BINARY_PROBE`/`decide(`/`parse_probe(` of its own.
+- `tests/test_engine_binary_flags.py`: the seam test — the engine-row test's flag case names
+  `binary_file_works(spec)` and carries no `BINARY_PROBE`/`decide(`/`parse_probe(` of its own. The identity
+  rule and both of its directions belong to #633 and are NOT duplicated here.
 - README: names `binary_file_works` as the one deciding function and records why (issue #634).
 
 ## Verification
@@ -58,6 +62,5 @@ WITH the identity, so the unit suite tested the decider and never the caller tha
   as before — the pytest row now joins it instead of duplicating it.
 - Gates: `make openspec-validate NAME=engine-row-cell-identity`, `make lint`, `make check-workflows`,
   `make check-wiring`, `make check-docs`, `make test-unit`.
-- The four cells' verdicts are reproduced hermetically through the shipped `decide()` with the real
-  `DEVICE_ONLY` entries; the images themselves are re-proved by the next `engine-build` sweep, whose rows
-  now call the same function this test calls.
+- The row's verdict now comes from the function `test_image` already runs for the same image, so the two
+  cannot disagree; the next `engine-build` sweep proves the four cells end to end.
