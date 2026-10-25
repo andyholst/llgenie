@@ -1,14 +1,14 @@
 # Tasks — fix-bot-no-pr
 
-- [ ] 1. OpenSpec change (`proposal.md`, `specs/fix-bot-sweep/spec.md`, this file)
-- [ ] 2. `scripts/resolve_run_pr.py`: `resolve --allow-none` answers "no PR" with exit 0 and an empty
+- [x] 1. OpenSpec change (`proposal.md`, `specs/fix-bot-sweep/spec.md`, this file)
+- [x] 2. `scripts/resolve_run_pr.py`: `resolve --allow-none` answers "no PR" with exit 0 and an empty
       `number=` line; the default (merge gate) stays a loud exit 1
-- [ ] 3. `Makefile`: `fix-bot-resolve` target (the fix-bot's one code path) + `.PHONY` entry
-- [ ] 4. `.github/workflows/fix-bot.yml`: the sweep's resolution step calls `make fix-bot-resolve` and
+- [x] 3. `Makefile`: `fix-bot-resolve` target (the fix-bot's one code path) + `.PHONY` entry
+- [x] 4. `.github/workflows/fix-bot.yml`: the sweep's resolution step calls `make fix-bot-resolve` and
       says what an empty answer means
-- [ ] 5. `tests/test_resolve_run_pr.py`: the lenient answer, the strict answer, the make target and both
+- [x] 5. `tests/test_resolve_run_pr.py`: the lenient answer, the strict answer, the make target and both
       workflows' call sites
-- [ ] 6. README (the fix-bot section + the target list) and an `agent-wiki/` entry naming #629 and the PR
-- [ ] 7. Verified: `make test-unit` (the new tests), `make lint`, `make check-wiring`, `make check-docs`,
+- [x] 6. README (the fix-bot section + the target list) and an `agent-wiki/` entry naming #629 and the PR
+- [x] 7. Verified: `make test-unit` (the new tests), `make lint`, `make check-wiring`, `make check-docs`,
       `make openspec-validate NAME=fix-bot-no-pr`, and the fix-bot resolution driven end to end against a
       fake `gh` that answers nothing
