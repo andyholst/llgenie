@@ -164,13 +164,18 @@ def resolve(engine: str, backend: str | None, variant: str | None = None) -> dic
     return es.image_spec(params, es.pick_variant(params, b, {**hw, "backend": b}))
 
 
-def _buildx(tag: str, ctx: str, push: bool, cache_ref: str) -> int:
+def _buildx(tag: str, ctx: str, push: bool, cache_ref: str, force: bool = False) -> int:
     """docker buildx with a registry layer cache: unchanged layers are reused
-    across CI runs and machines (cache_ref = <registry>/<name>:buildcache)."""
+    across CI runs and machines (cache_ref = <registry>/<name>:buildcache).
+
+    `force` (issue #638) is a REAL rebuild: `--no-cache`, and the registry cache is not read,
+    so a fully cached build can no longer re-tag the previous layers.
+    """
+    cache_args = [] if force else ["--cache-from", f"type=registry,ref={cache_ref}"]
+    no_cache = ["--no-cache"] if force else []
     if push and REGISTRY:
         # push ONLY the registry-qualified tag (a bare llgenie/... tag would go to Docker Hub)
-        cmd = [RUNTIME, "buildx", "build", "-t", f"{REGISTRY}/{tag}",
-               "--cache-from", f"type=registry,ref={cache_ref}",
+        cmd = [RUNTIME, "buildx", "build", "-t", f"{REGISTRY}/{tag}", *no_cache, *cache_args,
                "--cache-to", f"type=registry,ref={cache_ref},mode=max", "--push", ctx]
         rc = _sh(cmd).returncode
         if rc == 0:  # make the image available locally under its bare tag too
@@ -184,8 +189,8 @@ def _buildx(tag: str, ctx: str, push: bool, cache_ref: str) -> int:
     cmd = [RUNTIME, "buildx", "build"]
     if _sh([RUNTIME, "buildx", "inspect", "default"], capture_output=True).returncode == 0:
         cmd += ["--builder", "default"]
-    cmd += ["-t", tag, "--load"]
-    if REGISTRY:
+    cmd += [*no_cache, "-t", tag, "--load"]
+    if REGISTRY and not force:
         cmd += ["--cache-from", f"type=registry,ref={cache_ref}"]
     return _sh(cmd + [ctx]).returncode
 
@@ -208,7 +213,7 @@ def build_base(backend: str, force: bool = False, push: bool = False) -> int:
         return 0
     with tempfile.TemporaryDirectory(prefix="llgenie-base-") as ctx:
         shutil.copy2(es.BASE_DIR / f"Dockerfile.{backend}", Path(ctx) / "Dockerfile")
-        rc = _buildx(tag, ctx, push, f"{REGISTRY}/{es.base_image_name(backend)}:buildcache")
+        rc = _buildx(tag, ctx, push, f"{REGISTRY}/{es.base_image_name(backend)}:buildcache", force=force)
     print(f"[engine-image] {'built' if rc == 0 else 'FAIL'} base {tag}")
     return rc
 
@@ -224,7 +229,7 @@ def build(spec: dict, force: bool = False, push: bool = False) -> int:
     text = dockerfile.read_text()
     base = es.base_tag(spec["backend"])
     if f"FROM {base}" in text:  # compiled engine on the shared toolchain base
-        rc = build_base(spec["backend"], push=push)
+        rc = build_base(spec["backend"], force=force, push=push)
         if rc:
             return rc
         if REGISTRY and push:  # the published base must be addressable by the FROM line
@@ -237,7 +242,8 @@ def build(spec: dict, force: bool = False, push: bool = False) -> int:
         shutil.copy2(es.CONTAINER_DIR / "entrypoint.sh", c / "entrypoint.sh")
         shutil.copy2(es.REPO_ROOT / "scripts" / "engine_runner.py", c / "engine_runner.py")
         (c / "params.json").write_text(json.dumps(variant, indent=2) + "\n")
-        rc = _buildx(tag, ctx, push, f"{REGISTRY}/{tag.split(':')[0]}:buildcache-{spec['variant']}")
+        rc = _buildx(tag, ctx, push, f"{REGISTRY}/{tag.split(':')[0]}:buildcache-{spec['variant']}",
+                     force=force)
     if rc:
         print(f"[engine-image] FAIL build {tag} (exit {rc})")
         return rc
@@ -666,6 +672,36 @@ def test_image(spec: dict) -> int:
     return rc
 
 
+def engine_latest_variant(spec: dict) -> str:
+    """The ONE variant of an engine that also carries the moving `:latest` tag (issue #638).
+
+    `cpu` when the engine has one — it runs on any host and needs no GPU — otherwise the first
+    variant the committed params declare (sorted, so the answer never depends on dict order).
+    Exactly one variant per engine, so parallel publishing rows cannot race to point `:latest`
+    at a different backend.
+    """
+    path = es.REPO_ROOT / spec["params_file"] if spec.get("params_file") else None
+    if not path or not path.exists():
+        return spec["variant"]
+    variants = sorted(json.loads(path.read_text())["variants"])
+    if not variants:  # a params file with no variants cannot happen; be loud rather than guess
+        raise SystemExit(f"[engine-image] {spec['id']}: params declare no variants")
+    return "cpu" if "cpu" in variants else variants[0]
+
+
+def publish_refs(spec: dict) -> list[str]:
+    """Every registry ref one built image is published under (issue #638).
+
+    Three names, in this order: the immutable HASH tag (`<sha8>-<hash>-<variant>`), the moving
+    per-arch tag (`:<variant>`), and — for the engine's canonical variant only — `:latest`.
+    """
+    name = spec["tag"].split(":")[0]
+    refs = [f"{REGISTRY}/{spec['tag']}", f"{REGISTRY}/{name}:{spec['variant']}"]
+    if spec["variant"] == engine_latest_variant(spec):
+        refs.append(f"{REGISTRY}/{name}:latest")
+    return refs
+
+
 def push(spec: dict) -> int:
     """Push a built image to GHCR only after its binary reports a version.
 
@@ -683,9 +719,7 @@ def push(spec: dict) -> int:
     if test_image(spec) != 0:
         print(f"[engine-image] FAIL {tag}: engine binary file missing or did not accept --version or -h; not pushing")
         return 1
-    ref = f"{REGISTRY}/{tag}"
-    latest = f"{REGISTRY}/{tag.split(':')[0]}:{spec['variant']}"  # moving per-arch tag
-    for r in (ref, latest):
+    for r in publish_refs(spec):
         if _sh([RUNTIME, "tag", tag, r]).returncode or _sh([RUNTIME, "push", r]).returncode:
             print(f"[engine-image] FAIL push {r}")
             return 1
@@ -756,7 +790,6 @@ def pull_published(spec: dict) -> str:
         return ""
     tag = spec["tag"]
     ref = f"{REGISTRY}/{tag}"
-    latest = f"{REGISTRY}/{tag.split(':')[0]}:{spec['variant']}"
     _sh([RUNTIME, "rmi", "-f", tag, ref], capture_output=True)  # no local build may be used
     pulled = False
     for i in range(6):
@@ -771,12 +804,18 @@ def pull_published(spec: dict) -> str:
     if not pulled:
         print(f"[engine-image] FAIL {ref} is not published")
         return ""
-    d_ref, d_latest = _digest(ref), _digest(latest)
-    if not d_ref or d_ref != d_latest:
-        print(f"[engine-image] FAIL digest mismatch: {ref}={d_ref or '?'} {latest}={d_latest or '?'}")
+    d_ref = _digest(ref)
+    moving = publish_refs(spec)[1:]  # :<arch>, and :latest for the engine's canonical variant
+    if not d_ref:
+        print(f"[engine-image] FAIL {ref} has no digest")
         return ""
+    for m in moving:
+        d = _digest(m)
+        if d != d_ref:
+            print(f"[engine-image] FAIL digest mismatch: {ref}={d_ref} {m}={d or '?'}")
+            return ""
     _sh([RUNTIME, "tag", ref, tag], check=True)
-    print(f"[engine-image] pulled published {ref} ({d_ref}), same digest as {latest}")
+    print(f"[engine-image] pulled published {ref} ({d_ref}), same digest as {', '.join(moving)}")
     return tag
 
 

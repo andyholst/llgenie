@@ -186,3 +186,20 @@ def test_a_serving_cell_still_probes_its_binary_first():
     assert "test-engine " in serve
     assert serve.index("test-engine-image") < serve.index("test-engine ")
     assert "&&" in serve, "the serve branch must fail closed when the binary test fails"
+
+
+def test_the_dispatch_can_force_a_rebuild():
+    """`force` is a dispatch input (default false) wired to FORCE=1 on the build step only (issue #638)."""
+
+    text = workflow()
+    inputs = text.split("inputs:", 1)[1].split("permissions:", 1)[0]
+
+    # Given the dispatch inputs
+    # When  `force` is read
+    assert "force:" in inputs
+    assert inputs.count('default: "false"') >= 2, "push and force both default to false"
+
+    # Then  the build step carries FORCE and neither the verification nor the publish step does
+    build_step = text.split("run: make build-engine", 1)[0].rsplit("- name:", 1)[1]
+    assert "FORCE: ${{ inputs.force == 'true' && '1' || '' }}" in build_step
+    assert "FORCE" not in text.split("run: make push-engine", 1)[1]

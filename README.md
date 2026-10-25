@@ -1413,7 +1413,7 @@ from the pipeline that will run.
 |---|---|---|
 | `architecture-bot.yml` | rewrites docs/ARCHITECTURE.md from the tree and opens a linked issue + PR (never merges) | `dry` (optional, default `false`) — Preview the issue and PR bodies this run would file, filing nothing<br>`doc` (optional, default `docs/ARCHITECTURE.md`) — Repository-relative markdown document to refresh |
 | `code-review-bot.yml` | reviews the tree and the pipelines and files one issue per finding (never edits code) | `dry` (optional, default `false`) — Preview the issues it would file (owner only) |
-| `engine-build.yml` | builds and verifies EVERY engine at its committed pin, in parallel (never merges) | `engine` (optional) — Engine id to sweep (e.g. llama.cpp); empty = every engine in the committed params<br>`arch` (optional) — One backend to sweep (cpu|cuda|rocm|vulkan); empty = every variant of each engine<br>`push` (optional, default `false`) — Publish the built images to GHCR (true) or build and verify only (false) |
+| `engine-build.yml` | builds and verifies EVERY engine at its committed pin, in parallel (never merges) | `engine` (optional) — Engine id to sweep (e.g. llama.cpp); empty = every engine in the committed params<br>`arch` (optional) — One backend to sweep (cpu|cuda|rocm|vulkan); empty = every variant of each engine<br>`push` (optional, default `false`) — Publish the built images to GHCR (true) or build and verify only (false)<br>`force` (optional, default `false`) — Rebuild from scratch, ignoring the layer cache (true) or reuse a cached/available image (false) |
 | `engine-bump-rebase.yml` | rebases every open engine-bump PR onto the latest main | `dry` (optional, default `false`) — print the PRs it would rebase and push nothing (no branch is touched) |
 | `engine-bump.yml` | bumps pinned engines to their newest upstream release and opens the PR | `engine` (optional) — Only bump this engine (id); empty = all |
 | `fix-bot.yml` | repairs a failing PR branch until its checks pass (never merges) | `pr_number` (optional) — PR number whose branch should be repaired<br>`branch` (optional) — PR head branch (used when pr_number is empty)<br>`check` (optional, default `make ci-unit`) — the deterministic check to drive the loop<br>`rounds` (optional, default `5`) — repair attempts (default 5)<br>`report_file` (optional) — path to the failed run's captured log (repair context; empty = run the check locally) |
@@ -1595,7 +1595,17 @@ workflow_dispatch inputs
   engine  one engine id (e.g. llama.cpp); empty = every engine in the committed params
   arch    one backend (cpu|cuda|rocm|vulkan); empty = every variant of each engine
   push    true = publish the built images to GHCR; default false = build + verify only
+  force   true = rebuild from scratch (--no-cache, no registry layer cache, fresh shared
+          base); default false = reuse a cached or already-available image
 ```
+
+**`force=true` + `push=true` is how every tag is rebuilt from a clean build and republished**
+(issue #638). Without it the sweep can only ever validate `… available -> no rebuild`: a forced run
+recompiles each cell and publishes it under three names — the immutable **hash tag**
+(`<sha8>-<hash>-<variant>`), the moving **`:<arch>`** tag, and **`:latest`** (one variant per engine
+carries it: the `cpu` variant when the engine has one, else its only/first variant, so parallel rows
+never race on that tag). `make build-engine ENGINE=… ARCH=… FORCE=1` and `make build-engines FORCE=1`
+do the same locally.
 
 - `guard` first (owner or collaborator with write, before any secret is read), then the matrix.
 - `matrix` runs `make engine-build-matrix ENGINE=… ARCH=…` — the rows are the **committed params**
@@ -1651,6 +1661,7 @@ make build-engine-base BACKEND=cuda                      # shared toolchain base
 make build-engine-vllm-cuda                              # per engine x arch shortcut: build-engine-<engine>-<arch>
 make build-engine-llama.cpp-prism-rocm
 make build-engines                                        # EVERY engine x variant, in parallel (JOBS=, default nproc; VERIFY=1 runs each built image's binary test)
+make build-engines FORCE=1 VERIFY=1                        # the same, every row rebuilt from scratch (--no-cache, fresh base) and verified
 make build-engines ARCH=cuda                              # one arch, every engine
 make build-engines ENGINE=llama.cpp                       # one engine, every arch type
 make build-engines ENGINE=llama.cpp ARCH=cuda             # one engine x one arch
