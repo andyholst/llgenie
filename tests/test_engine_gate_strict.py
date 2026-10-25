@@ -40,6 +40,10 @@ def test_a_version_must_look_like_a_version():
         "llama.cpp/cpu: installed version: 0.7.0-dev (build 11870, commit 74bca3950)": "0.7.0",
         "installed pin 3c75be02f450": "pin 3c75be02f450",
         "tensorfold-native 1.1.4": "1.1.4",
+        # measured on the published laurentzuijdwijk/cpu image: a log line, THEN the real version
+        "0.00.000.331 I srv  llama_server: initializing ...\n"
+        "version: 0.5.0-dev (build 11364, commit 3c75be02f)\n"
+        "built with GNU 13.3.0 for Linux x86_64": "0.5.0",
     }
     rejected = {
         "installed 0.00.000.272 I srv  llama_server: initializing ...": "",
@@ -141,11 +145,11 @@ def test_the_two_broken_detects_no_longer_produce_a_false_version():
         assert "importlib.metadata" in spec["detect"], (variant, spec["detect"])
         assert "sglang.__version__" not in spec["detect"], (variant, spec["detect"])
 
-    # And  the fork no longer documents a --version it does not implement, and proves its pin instead
+    # And  the fork's `--version` (which DOES answer, exit 0) is still documented, while its detect greps
+    #      the `version:` line instead of the log stamp that precedes it
     binaries = json.loads((REPO / "containers" / "engines" / "binaries.json").read_text())
     laurent_binaries = binaries["engines"]["llama.cpp-laurentzuijdwijk"]
     for variant, entry in laurent_binaries.items():
-        assert entry["flags"] == ["--help"], (variant, entry)
+        assert entry["flags"] == ["--version", "--help"], (variant, entry)
     for variant, spec in laurent["variants"].items():
-        assert spec["detect"].startswith("echo \"pin "), (variant, spec["detect"])
-        assert ei.version_proof(f"installed pin {spec['detect'].split()[-1].strip(chr(34))}")
+        assert "grep -E '^version:'" in spec["detect"], (variant, spec["detect"])

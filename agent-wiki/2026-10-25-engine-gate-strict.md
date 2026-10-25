@@ -25,8 +25,21 @@ Run 40204145334 swept 27 rows, 29/29 green. Reading each row's log:
 - `version_proof()`: a semver or `pin <sha7+>` is a version; a timestamped log line and `0.0.0` are not.
   `test_image()` now fails naming what it saw.
 - `sglang` detect reads `importlib.metadata` (its rocm wheel's `__version__` is `0.0.0`, the distribution is
-  `0.5.21`); `llama.cpp-laurentzuijdwijk` stops documenting `--version` — its fork starts serving instead — and
-  reports `pin 3c75be02f450`.
+  `0.5.21`).
+- `llama.cpp-laurentzuijdwijk`: **corrected after running the published image.** Its `--version` DOES answer
+  (exit 0) — it just prints a log line first and the real version on line 2:
+
+  ```
+  $ docker run … llgenie/laurent-check:cpu -c 'llama-server --version 2>&1'
+  0.00.000.331 I srv  llama_server: initializing ...
+  version: 0.5.0-dev (build 11364, commit 3c75be02f)
+  built with GNU 13.3.0 for Linux x86_64
+  ```
+
+  So the flag stays documented, and the fix is in the `detect`: `… --version 2>&1 | grep -E '^version:'`
+  → `version_proof` → `0.5.0`. An earlier draft of this change dropped `--version` and reported the pin;
+  that was wrong, and the host run is what caught it. `version_proof` therefore IGNORES a log stamp instead
+  of rejecting the whole text — the stamp is noise around a real version, not a version.
 - `tests/test_engine_gate_strict.py` (7 tests) pins both halves and the two fixed detects.
 
 ## Verification

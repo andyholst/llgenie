@@ -23,6 +23,8 @@ not always mean "the binary works":
 
 ## What Changes
 
+- **`scripts/engine_image.py::version_proof()`** ignores a timestamped log stamp instead of rejecting the
+  whole text (a stamp can precede a real version — measured on the published cpu image).
 - **`scripts/engine_image.py::decide()`**: at least one probed flag must exit 0, always. The `probe: device`
   policy no longer returns ok by itself; it may only carry a cell that is in the new **`DEVICE_ONLY`** list,
   and every entry states the measured reason and the issue. An unlisted `device` cell fails with a message that
@@ -33,9 +35,10 @@ not always mean "the binary works":
   now fails naming what it saw instead of `re.search(r"\d+\.\d+")`.
 - **`skills/engines/sglang/SKILL.md`**: `detect` reads the installed distribution's version
   (`importlib.metadata`), so rocm reports `0.5.21` instead of `0.0.0`.
-- **`skills/engines/llama.cpp-laurentzuijdwijk/SKILL.md`**: `binary_flags: ["--help"]` (the fork has no
-  `--version`), and `detect: echo "pin {pinned_short}"` — the image's build identity, which the gate accepts
-  as a version proof.
+- **`skills/engines/llama.cpp-laurentzuijdwijk/SKILL.md`**: the flags stay `--version --help` — the fork's
+  `--version` DOES answer (exit 0), printing a log line first and `version: 0.5.0-dev (build 11364, commit
+  3c75be02f)` on the next — and the `detect` now selects that line (`--version 2>&1 | grep -E '^version:'`), so
+  the row proves `0.5.0` instead of `0.00.000.272 I srv …`.
 - Regenerated `containers/engines/params/{sglang,llama.cpp-laurentzuijdwijk}.json` and
   `containers/engines/binaries.json` (`make generate-engine-params`), README, and a dated agent-wiki record.
 - **`tests/test_engine_gate_strict.py`**: hermetic tests for both halves — a log stamp and `0.0.0` are not

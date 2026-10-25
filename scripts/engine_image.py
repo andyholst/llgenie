@@ -603,16 +603,19 @@ def version_proof(text: str) -> str:
     """The version a `detect` line proves, or "" when the line proves none (issue #625).
 
     Accepted shapes: a semver (`0.5.21`, `0.32.0+cpu`, `0.7.0-dev`), or `pin <sha7+>` for an engine whose
-    upstream prints no version at all (the image's build identity is then the pinned commit). Rejected: a
-    timestamped server log line (what `llama.cpp-laurentzuijdwijk --version` prints), and the placeholder
-    `0.0.0` that a wheel can report when its packaging metadata is missing.
+    upstream prints no version at all (the image's build identity is then the pinned commit). A timestamped
+    server log line (`0.00.000.272 I srv …`) is ignored — it is noise some CLIs print around the version — and
+    the placeholder `0.0.0` that a wheel can report when its packaging metadata is missing is refused.
     """
     text = text or ""
     pin = PIN_TOKEN.search(text)
     if pin:
         return f"pin {pin.group(1)}"
-    if LOG_STAMP.search(text):
-        return ""
+    # A stamp is IGNORED, not fatal: `llama-server --version` on the laurentzuijdwijk fork prints
+    # `0.00.000.331 I srv  llama_server: initializing ...` and then `version: 0.5.0-dev (build 11364,
+    # commit 3c75be02f)` — the stamp is noise on the same output, and the version is real (measured on the
+    # published cpu image). Rejecting the whole text threw that version away.
+    text = LOG_STAMP.sub(" ", text)
     for m in VERSION_TOKEN.finditer(text):
         token = m.group(0)
         if token == "0.0.0":

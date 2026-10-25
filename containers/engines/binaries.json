@@ -75,6 +75,7 @@
       "cuda": {
         "binary": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cuda/bin/llama-server",
         "flags": [
+          "--version",
           "--help"
         ],
         "probe": "flags"
@@ -82,6 +83,7 @@
       "rocm": {
         "binary": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-rocm/bin/llama-server",
         "flags": [
+          "--version",
           "--help"
         ],
         "probe": "flags"
@@ -89,6 +91,7 @@
       "vulkan": {
         "binary": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-vulkan/bin/llama-server",
         "flags": [
+          "--version",
           "--help"
         ],
         "probe": "flags"
@@ -96,6 +99,7 @@
       "cpu": {
         "binary": "/opt/llgenie/src/laurentzuijdwijk-llama.cpp/build-cpu/bin/llama-server",
         "flags": [
+          "--version",
           "--help"
         ],
         "probe": "flags"

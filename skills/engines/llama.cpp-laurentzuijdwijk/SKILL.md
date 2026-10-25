@@ -51,8 +51,8 @@ install:
     # host at run time via the nvidia CDI device)
     - "LD_LIBRARY_PATH=${{LD_LIBRARY_PATH:-}}:/usr/local/cuda/lib64/stubs {binary} --help > /dev/null"
 binary: "{build}/bin/llama-server"
-binary_flags: ["--help"]   # the fork does NOT implement --version (it starts serving and logs `0.00.000.362 I srv ...`), so --help is the proof (issue #625)
-detect: "echo \"pin {pinned_short}\""
+binary_flags: ["--version", "--help"]   # both answer (measured on the published cpu image); --version prints a log line FIRST, then `version: 0.5.0-dev (build …)`
+detect: "{binary} --version 2>&1 | grep -E '^version:'"   # the version line, not the `0.00.000.331 I srv …` log line before it (issue #625)
 launch: "{binary} -m {model} --host {host} --port {port} --alias {alias} --jinja"
 health: "GET /health"
 alias_mode: flag

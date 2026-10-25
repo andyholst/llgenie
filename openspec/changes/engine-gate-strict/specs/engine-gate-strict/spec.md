@@ -73,8 +73,8 @@ THEN `version_proof()` returns the version token, or the cell is red.
 ### Requirement: the two broken detections report a real identity
 
 `sglang`'s `detect` MUST read the installed distribution's version (its own `__version__` is `0.0.0` in the
-rocm wheel), and `llama.cpp-laurentzuijdwijk` MUST NOT document a `--version` its fork does not implement —
-it reports its pinned commit instead.
+rocm wheel), and `llama.cpp-laurentzuijdwijk`'s `detect` MUST select its `version:` line rather than the log stamp
+that precedes it.
 
 WHEN the committed params and binaries are read
 THEN `sglang` uses `importlib.metadata` and the fork documents `--help` only and detects `echo "pin <sha>"`.
