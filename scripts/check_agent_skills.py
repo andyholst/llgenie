@@ -86,9 +86,44 @@ def _prompt_at(line: str, start: int) -> tuple[str, int]:
     return line[i:end], end + len(close)
 
 
+_MAKE_ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*(.*)$")
+
+
+def make_vars(root: Path) -> dict[str, str]:
+    """Simple `NAME := value` / `NAME = value` assignments from the Makefile (issue #641).
+
+    A leg may not put a literal comma inside `$(call scrubbed_run,…)` — make splits the call's
+    arguments on commas in the UNEXPANDED text — so its `-s` list comes from a variable. The guard
+    has to expand those the way make would, or it reads `$(SKILLS)` as a skill name.
+    """
+    values: dict[str, str] = {}
+    mk = root / "Makefile"
+    try:
+        lines = mk.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        m = _MAKE_ASSIGN.match(line)
+        if m and not line.startswith((" ", "\t")):
+            values.setdefault(m.group(1), m.group(2).strip())
+    return values
+
+
+def expand_make(text: str, values: dict[str, str], passes: int = 3) -> str:
+    """Replace `$(NAME)` / `${NAME}` for known assignments, a few levels deep."""
+    for _ in range(passes):
+        new = re.sub(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)", lambda m: values.get(m.group(1), m.group(0)), text)
+        new = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", lambda m: values.get(m.group(1), m.group(0)), new)
+        if new == text:
+            break
+        text = new
+    return text
+
+
 def iter_legs(root: Path) -> list[dict]:
     """Every `hermes -z …` invocation in the shell legs, with its prompt and preloaded skills."""
     legs: list[dict] = []
+    variables = make_vars(root)
     for path in leg_sources(root):
         try:
             text = path.read_text(encoding="utf-8")
@@ -97,6 +132,7 @@ def iter_legs(root: Path) -> list[dict]:
                          "skills": []})
             continue
         for n, line in enumerate(text.splitlines(), 1):
+            line = expand_make(line, variables)
             at = line.find("hermes -z")
             if at < 0:
                 continue

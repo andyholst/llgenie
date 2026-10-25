@@ -532,6 +532,15 @@ own bot may do.
 | `rebase-conflict` | `make rebase-bot-agent` | resolve a stopped rebase |
 | `pr-fix` | `make fix-loop-image` | repair a red PR check |
 
+**A leg's command must not carry a literal comma (issue #641).** `rebase-bot-agent` is the one leg
+that inlines its `hermes …` command inside `$(call scrubbed_run,…)` — it cannot use a `_<leg>` target,
+because the container's `Makefile` is the conflicted file (issue #460) — and `$(call …)` splits its
+arguments on commas in the **unexpanded** text: `-s rebase-conflict,bot-unattended` kept only
+`-s rebase-conflict`, the shell got an unclosed quote, and the leg exited 2 before the agent started
+(every conflicted PR stayed `DIRTY`; run 40212644476, #602/#605). The skills now come from
+`$(REBASE_BOT_SKILLS)`, and `tests/test_agent_legs_quoting.py` expands **every** scrubbed leg with
+`make -n` and fails on an odd number of single quotes or a `-s` list that lost its second skill.
+
 Each skill has three sections: `## Inputs` (the files the host prepared), `## Output` (the ONE file
 the leg may write — the deterministic step after the agent does every GitHub write) and `## Rules`
 (what it must not do). The fix bot's former `scripts/fix_bot_rules.md` is the `pr-fix` skill now;
