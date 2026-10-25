@@ -335,10 +335,11 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@v4
-      # A `workflow_run` gives us a RUN, not a PR (issue #538). `make auto-merge-resolve` is the
-      # tested resolution the merge gate already uses: it reads the run's own pull_requests, falls
-      # back to a head search, treats a 404's JSON body as "no answer", and fails loudly when nothing
-      # resolves. The owner PAT is needed because a fork head's branch is invisible to the job token.
+      # A `workflow_run` gives us a RUN, not a PR (issue #538). `make fix-bot-resolve` is the resolution
+      # the merge gate uses, asked with THIS caller's consequence (issue #629): a `CI` failure report can
+      # arrive after its PR already merged or closed, and then there is nothing to repair — so an empty
+      # answer is an answer (exit 0, `number=`), not a red run and not a reactor issue. The owner PAT is
+      # needed because a fork head's branch is invisible to the job token.
       - name: Resolve the PR the failed run belongs to
         if: github.event_name == 'workflow_run'
         id: pr
@@ -348,7 +349,17 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        run: make auto-merge-resolve REPO="$REPO" RUN_ID="$RUN_ID" HEAD_OWNER="$HEAD_OWNER" HEAD_BRANCH="$HEAD_BRANCH"
+        run: |
+          set -euo pipefail
+          make fix-bot-resolve REPO="$REPO" RUN_ID="$RUN_ID" HEAD_OWNER="$HEAD_OWNER" HEAD_BRANCH="$HEAD_BRANCH"
+          # No `number=` means the PR this run belonged to is gone: the sweep below then decides on its
+          # own, exactly as its scheduled form does, and does nothing when no PR deserves the bot.
+          pr="$(awk -F= '/^number=/{v=$2} END{print v}' "$GITHUB_OUTPUT" 2>/dev/null || true)"
+          if [ -z "$pr" ]; then
+            echo "the failed run's PR has already merged or closed — nothing to repair for it; sweeping the open PRs"
+          else
+            echo "the failed run belongs to PR #$pr"
+          fi
 
       # The repair context: the failed job's own log, so the loop can attempt a fix for a check it
       # cannot reproduce on this runner (a macOS-only failure, a GPU-only image test) instead of
