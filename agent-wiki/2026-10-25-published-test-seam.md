@@ -47,9 +47,16 @@ pins that `test-published-engine` carries its env through `engine_test`.
 - `make lint`, `make check-workflows`, `make check-docs`, `make check-wiring`, `make check-dispatch-forms`,
   `make check-pr-authors`, `make openspec-validate NAME=published-test-seam` green; full `make test-unit` on
   the branch.
+- **End to end on a real published image**: `make test-published-engine ENGINE=llama.cpp ARCH=cpu` runs to
+  completion — pull + digest against `:cpu`, `test-engine-image` 3 passed, the binary-flag check **in the test
+  image** 1 passed, and the smoke container `READY` with the OpenAI SDK answering
+  (`[smoke] OK image llgenie/llama-cpp:74bca395-3932631f-cpu … model=llm-local`). That is the same target and
+  the same image the `test-published-llama.cpp-cpu` job runs, so the job's failure was the harness line and
+  nothing else.
 - The `engine-build` dispatch the maintainer started (run 40199122842, `a24e22f`) was monitored while this
-  landed: its rows run `make build-engine` + `make test-engine-stage`, the same test-image seams, and none had
-  failed at the time of writing.
+  landed: its rows run `make build-engine` + `make test-engine-stage`, the same test-image seams; 20 of 29 rows
+  were complete with **0 failures** at the time of writing, and the llama.cpp/cpu row builds the image whose
+  published flags the run above just proved.
 
 ## Why the dispatcher itself is fine
 

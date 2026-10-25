@@ -21,7 +21,11 @@ MAKEFILE = REPO / "Makefile"
 #: The seams a test command may run through. `$(TEST_RUN)` and `$(ENGINE_TEST_RUN)` resolve to the test
 #: image in CI and to the venv on a dev host; `$(call engine_test,…)` builds the same container command with
 #: the engine's env; the literal image name catches a hand-written `docker run … llgenie/test:latest`.
-SEAMS = ("$(TEST_RUN)", "$(ENGINE_TEST_RUN)", "$(call engine_test,", "llgenie/test:latest")
+SEAMS = ("$(TEST_RUN)", "$(ENGINE_TEST_RUN)", "$(call engine_test,", "llgenie/test:latest",
+         # the host-side seams: `$(PY)` / `$(VENV_GUARD)` / `$(NATIVE_GUARD)` are the gguf venv's interpreter,
+         # which carries pytest — the venv IS the seam on a dev host (and on the macOS native-engine targets,
+         # which never run in CI's Linux test image)
+         "$(PY)", "$(VENV_GUARD)", "$(NATIVE_GUARD)")
 
 #: A target header, e.g. `test-published-engine:` (not a variable assignment, not a `.PHONY` list).
 _TARGET = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):")
@@ -56,6 +60,28 @@ def _logical_recipe_lines(text: str) -> list[tuple[str, str]]:
     return out
 
 
+#: A pytest invocation in a RECIPE: `python3 -m pytest`, `python -m pytest`, or a bare `pytest …` command.
+#: A venv interpreter (`.../bin/python -m pytest`) carries pytest itself, so it is a seam in its own right.
+_PYTEST = re.compile(r"(?:\bpython3? -m pytest\b)|(?:^pytest\b)|(?:\bpytest \S)")
+_VENV_PY = re.compile(r"/bin/python3?[\"']?\s+-m pytest\b")
+
+
+def offenders(text: str) -> list[tuple[str, str]]:
+    """(target, command) for every recipe line that runs pytest without a seam that provides it.
+
+    Exposed so the rule can be proved on a synthetic Makefile, not only on today's file (a Makefile that
+    happens to be clean says nothing about whether the rule works).
+    """
+    bad: list[tuple[str, str]] = []
+    for target, command in _logical_recipe_lines(text):
+        if not _PYTEST.search(command):
+            continue
+        if any(seam in command for seam in SEAMS) or _VENV_PY.search(command):
+            continue
+        bad.append((target, command))
+    return bad
+
+
 def test_every_pytest_in_a_make_recipe_runs_through_the_test_seam():
     """A recipe that needs pytest must get it from the test image (or the venv), never from the host."""
 
@@ -63,16 +89,16 @@ def test_every_pytest_in_a_make_recipe_runs_through_the_test_seam():
     recipes = _logical_recipe_lines(MAKEFILE.read_text())
 
     # When  the lines that run pytest are read
-    pytest_lines = [(t, c) for t, c in recipes if re.search(r"\bpython3? -m pytest\b", c)]
+    pytest_lines = [(t, c) for t, c in recipes if _PYTEST.search(c)]
 
     # Then  there is more than one (the suite is driven from several targets) …
     assert pytest_lines, "no pytest invocation found in the Makefile: the parser or the targets changed"
 
     # And  every single one runs through a seam that provides pytest
-    offenders = [(t, c) for t, c in pytest_lines if not any(seam in c for seam in SEAMS)]
-    assert not offenders, (
+    bad = offenders(MAKEFILE.read_text())
+    assert not bad, (
         "a make recipe runs pytest on a bare host python (issue #621 — the runner has no pytest):\n"
-        + "\n".join(f"  {t}: {c}" for t, c in offenders)
+        + "\n".join(f"  {t}: {c}" for t, c in bad)
     )
 
     # And  the target that failed, specifically, is the one that carries the published-image env
@@ -80,3 +106,30 @@ def test_every_pytest_in_a_make_recipe_runs_through_the_test_seam():
     assert published, "test-published-engine no longer runs its pytest"
     assert any("$(call engine_test," in c and "LLGENIE_PUBLISHED_PULLED=1" in c for c in published), \
         f"test-published-engine must pass its env into the test image, got: {published}"
+
+
+def test_a_bare_pytest_line_is_caught_and_a_venv_interpreter_is_not():
+    """The rule itself, on a synthetic Makefile: a bare `pytest` fails, a venv python passes.
+
+    Today's Makefile is clean, which proves nothing about the rule — this pins both directions, including
+    the `pytest tests/…` spelling that has no `python -m` in it at all.
+    """
+
+    # Given a Makefile with one bare `pytest` recipe and one that uses the venv's python
+    sample = (
+        "host-call:\n"
+        "\tpytest -q tests/test_thing.py\n"
+        "\n"
+        "container-call:\n"
+        "\t$(TEST_RUN) python3 -m pytest -q tests/test_thing.py\n"
+        "\n"
+        "venv-call:\n"
+        "\t\"$(AGENTS_READ_VENV)/bin/python\" -m pytest tests/test_agents_read.py -q\n"
+    )
+
+    # When  the rule reads it
+    bad = offenders(sample)
+
+    # Then  only the bare host call is reported, and it is reported with its target
+    assert [t for t, _ in bad] == ["host-call"], bad
+    assert "pytest -q tests/test_thing.py" in bad[0][1]
