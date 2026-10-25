@@ -26,7 +26,7 @@
       "env": {
         "CUDA_HOME": "$(dirname $(dirname $(command -v nvcc)))"
       },
-      "detect": "sglang --help > /dev/null && python3 -c 'import importlib.metadata as m; print(\"sglang\", m.version(\"sglang\"))'",
+      "detect": "sglang --help > /dev/null && python3 -c 'import importlib.metadata as m; v = m.version(\"sglang\"); print(\"sglang\", v if v not in (\"0.0.0\", \"\") else \"pin e00930c54890\")'",
       "pre_launch": null,
       "launch": "sglang serve --model-path {model} --host {host} --port {port} --served-model-name llm-local",
       "post_launch": null,
@@ -68,7 +68,7 @@
       "env": {
         "SGLANG_USE_AITER": "1"
       },
-      "detect": "sglang --help > /dev/null && python3 -c 'import importlib.metadata as m; print(\"sglang\", m.version(\"sglang\"))'",
+      "detect": "sglang --help > /dev/null && python3 -c 'import importlib.metadata as m; v = m.version(\"sglang\"); print(\"sglang\", v if v not in (\"0.0.0\", \"\") else \"pin e00930c54890\")'",
       "pre_launch": null,
       "launch": "sglang serve --model-path {model} --host {host} --port {port} --served-model-name llm-local",
       "post_launch": null,

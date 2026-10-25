@@ -24,8 +24,9 @@ Run 40204145334 swept 27 rows, 29/29 green. Reading each row's log:
   list, so a new engine cannot inherit the escape.
 - `version_proof()`: a semver or `pin <sha7+>` is a version; a timestamped log line and `0.0.0` are not.
   `test_image()` now fails naming what it saw.
-- `sglang` detect reads `importlib.metadata` (its rocm wheel's `__version__` is `0.0.0`, the distribution is
-  `0.5.21`).
+- `sglang` detect reads `importlib.metadata` and, when the distribution itself says `0.0.0` (the ROCm wheel
+  does — measured in CI: `installed sglang 0.0.0`), reports the pinned commit instead: cuda → `sglang 0.5.21`,
+  rocm → `sglang pin e00930c54890`.
 - `llama.cpp-laurentzuijdwijk`: **corrected after running the published image.** Its `--version` DOES answer
   (exit 0) — it just prints a log line first and the real version on line 2:
 
