@@ -434,7 +434,13 @@ flag upstream's docs now recommend but the old params never had is invisible to 
 `CMakeLists.txt` at the pinned sha, plus the params this repo builds with), the `engine-params-review`
 agent leg (Hermes, project skill `.hermes/skills/engine-params-review/`) writes `params-review.md` as
 one `PROPOSE <backend> <-DFLAG> DOC <path> "<quote>" WHY <reason>` line per documented parameter, and
-`engine-params-review-apply` decides. **The host stays the writer**: a proposal is applied only when
+`engine-params-review-apply` decides. The brief is a **ranked, bounded selection** of that tree, not all
+of it (issue #597): benchmark/example/fixture trees never enter, the flag-proving files (root
+`CMakeLists.txt`, `Dockerfile*`, `docker/**`) are taken first within their own share (45 KB), the rest is
+ranked by build relevance — `option(`, `-D`, `CMAKE_`, `CUDA_ARCHITECTURES`, `GPU_TARGETS`, `cmake`,
+`cuda`, `rocm`, `hip`, `torch`, `pip install`, `apt-get` — up to 80 KB, and the brief states how many
+files the budget left out (`strata` went from 1.8 MB / 424 sections to 81 KB / 8, with its
+`docs/AMD_HIP.md` and `docs/DETAILS.md` still in). **The host stays the writer**: a proposal is applied only when
 its backend is one the engine builds, the named file exists at the pin, the flag's `NAME` is in it and
 the quoted evidence is a substring of it. Anything else is dropped and listed in the PR body under
 `Documentation review`, together with what was applied and from which document. A review that
