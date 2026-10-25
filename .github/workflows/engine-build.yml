@@ -10,8 +10,12 @@
 # asking "are all the pins good?", not to every pull request. ci.yml keeps its changed-images gate.
 #
 # Trigger surface: `workflow_dispatch` ONLY (owner/collaborator), nothing schedules it. Inputs narrow
-#                  the sweep: `engine` (one id, empty = all), `arch` (one backend, empty = all), and
-#                  `push` (publish the built images to GHCR; default false = build and verify only).
+#                  the sweep: `engine` (one id, empty = all), `arch` (one backend, empty = all),
+#                  `push` (publish the built images to GHCR; default false = build and verify only),
+#                  and `force` (rebuild from scratch with --no-cache instead of reusing a cached or
+#                  already-available image; default false). `force=true` + `push=true` is how every
+#                  tag is republished from a clean build — each image is published under its hash tag,
+#                  its moving `:<arch>` tag, and (canonical variant only) `:latest`.
 # Flow: guard (owner / collaborator with write, BEFORE any secret is read) -> make engine-build-matrix
 #       (the committed params -> one row per engine x variant; the make target is the only list) ->
 #       per row: make build-engine ENGINE= ARCH= (build only, never publishing) ->
@@ -42,6 +46,10 @@ on:
         default: ""
       push:
         description: "Publish the built images to GHCR (true) or build and verify only (false)"
+        required: false
+        default: "false"
+      force:
+        description: "Rebuild from scratch, ignoring the layer cache (true) or reuse a cached/available image (false)"
         required: false
         default: "false"
 
@@ -137,8 +145,10 @@ jobs:
       - name: Log in to GHCR (only when this run publishes)
         if: ${{ matrix.engine != 'none' && inputs.push == 'true' }}
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: make build-engine ENGINE=${{ matrix.engine }} ARCH=${{ matrix.variant }} (the committed params -> Dockerfile + params.json)
+      - name: make build-engine ENGINE=${{ matrix.engine }} ARCH=${{ matrix.variant }} (the committed params -> Dockerfile + params.json; FORCE=1 rebuilds with --no-cache)
         if: ${{ matrix.engine != 'none' }}
+        env:
+          FORCE: ${{ inputs.force == 'true' && '1' || '' }}
         run: make build-engine ENGINE=${{ matrix.engine }} ARCH=${{ matrix.variant }}
       - name: Pull the test image (GHCR, published by ci-images; the post-build pytest stage runs in llgenie/test)
         if: ${{ matrix.engine != 'none' }}

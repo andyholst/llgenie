@@ -795,8 +795,9 @@ def test_push_publishes_only_after_the_binary_reports_a_version(monkeypatch):
     assert order[0] == "test"
     pushed = [cmd[-1] for cmd in order[1:] if cmd[1] == "push"]
     assert pushed == [
-        "ghcr.io/asimov-agent/llgenie/demo:abc-cpu",
-        "ghcr.io/asimov-agent/llgenie/demo:cpu",
+        "ghcr.io/asimov-agent/llgenie/demo:abc-cpu",   # the immutable hash tag
+        "ghcr.io/asimov-agent/llgenie/demo:cpu",       # the moving per-arch tag
+        "ghcr.io/asimov-agent/llgenie/demo:latest",    # the engine's :latest (issue #638)
     ]
 
 

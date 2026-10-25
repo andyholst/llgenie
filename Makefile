@@ -895,7 +895,7 @@ engine-gate-report: ## Print what each engine cell will actually prove (flag-pro
 build-engine-base: ## Build the shared toolchain base image for BACKEND (cpu|cuda|rocm|vulkan; PUSH=1 publishes + caches in LLGENIE_REGISTRY)
 	@test -n "$(BACKEND)" || { echo "Usage: make build-engine-base BACKEND=cpu|cuda|rocm|vulkan [PUSH=1]"; exit 1; }
 	python3 scripts/engine_image.py build-base "$(BACKEND)" $(if $(FORCE),--force,) $(if $(PUSH),--push,)
-build-engine: ## Build ENGINE's image for one backend from its generated Dockerfile (ARCH=cpu|cuda|rocm|vulkan; FORCE=1, PUSH=1)
+build-engine: ## Build ENGINE's image for one backend from its generated Dockerfile (ARCH=cpu|cuda|rocm|vulkan; FORCE=1 = rebuild with --no-cache, ignoring the layer cache and a stale base; PUSH=1 = publish the hash tag, :<arch> and :latest)
 	@test -n "$(ENGINE)" || { echo "Usage: make build-engine ENGINE=<id> [ARCH=cpu|cuda|rocm|vulkan]"; exit 1; }
 	python3 scripts/engine_image.py build "$(ENGINE)" $(ARCH_ARGS) $(if $(FORCE),--force,) $(if $(PUSH),--push,)
 run-engine: ## Run ENGINE's image: OpenAI API on 127.0.0.1:$(PORT)/v1 as llm-local (MODEL=<path under ~/models | HF id>)
@@ -931,12 +931,12 @@ build-engine-%: ## Build one engine x arch image from its generated Dockerfile (
 	$(MAKE) build-engine ENGINE=$(patsubst %-$(lastword $(subst -, ,$*)),%,$*) ARCH=$(lastword $(subst -, ,$*))
 run-engine-%: ## Run one engine x arch image (run-engine-<engine>-<arch> MODEL=…)
 	$(MAKE) run-engine ENGINE=$(patsubst %-$(lastword $(subst -, ,$*)),%,$*) ARCH=$(lastword $(subst -, ,$*))
-build-engines: ## Build every engine x variant the committed params declare, in PARALLEL — all engines, or ENGINE=<id>, or ARCH=<backend>, or both (JOBS= parallel builds, default: nproc; VERIFY=1 also runs each built image's binary test)
+build-engines: ## Build every engine x variant the committed params declare, in PARALLEL — all engines, or ENGINE=<id>, or ARCH=<backend>, or both (JOBS= parallel builds, default: nproc; VERIFY=1 also runs each built image's binary test; FORCE=1 rebuilds every row from scratch, ignoring the layer cache)
 	@JOBS="$(if $(JOBS),$(JOBS),$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4))"; \
 	rows=$$(python3 scripts/engine_image.py matrix --json --ci $(if $(ENGINE),--engine "$(ENGINE)",) $(if $(ARCH),--arch "$(ARCH)",)); \
 	printf '%s' "$$rows" \
 	  | python3 -c 'import json,sys; [print(r["engine"]+" "+r["variant"]) for r in json.load(sys.stdin)["include"] if r["engine"] != "none"]' \
-	  | xargs -r -P "$$JOBS" -n 2 sh -c '$(MAKE) build-engine ENGINE=$$0 ARCH=$$1 $(if $(PUSH),PUSH=1,) $(if $(VERIFY),&& $(MAKE) test-engine-image ENGINE=$$0 ARCH=$$1,)' || exit 1
+	  | xargs -r -P "$$JOBS" -n 2 sh -c '$(MAKE) build-engine ENGINE=$$0 ARCH=$$1 $(if $(FORCE),FORCE=1,) $(if $(PUSH),PUSH=1,) $(if $(VERIFY),&& $(MAKE) test-engine-image ENGINE=$$0 ARCH=$$1,)' || exit 1
 generate-build-engine-params: generate-engine-params ## Alias of generate-engine-params
 engine-bump-plan: ## Issue #107: which engines moved upstream (git ls-remote only; ENGINE=<id> to scope)
 	@$(PY) scripts/engine_bump.py plan $(if $(ENGINE),--engine $(ENGINE),)
