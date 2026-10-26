@@ -58,7 +58,10 @@ STAGES = [
     # full fast suite
     ("test", ["make", "test"]),
     # openspec validate of the active (or given) change
-    ("openspec", ["make", "openspec-validate", "NAME=%s" % os.environ.get("NAME", "llama-ai-tooling")]),
+    # `NAME=` picks one change; without it, EVERY active change is validated (issue #156: the
+    # default used to be a hardcoded name, so the change a commit touched was never the one checked).
+    ("openspec", ["make", "openspec-validate", "NAME=%s" % os.environ["NAME"]]
+                 if os.environ.get("NAME") else ["make", "openspec-validate-all"]),
     # issue #46: assert no ACTIVE OpenSpec change has unchecked task checkboxes
     # (`- [ ]`) — `openspec validate` only checks structure, not completion. This
     # is the completion half of the gate so a worker can't land unticked tasks.

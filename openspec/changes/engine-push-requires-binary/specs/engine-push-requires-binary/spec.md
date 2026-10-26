@@ -15,6 +15,13 @@ the moving per-arch tag. The engine-image job MUST still run
 `make test-engine-stage` before `make push-engine`. Neither the binary path nor
 its flags MAY be added to the hashed params, so published image tags do not move.
 
+#### Scenario: a push whose binary does not answer publishes nothing
+
+- **Given** a built image whose engine binary file does not accept the flags its skill documents
+- **When** `make push-engine ENGINE=… ARCH=…` runs
+- **Then** it returns non-zero before any `docker tag`/`docker push`, and the published tags are untouched
+- **Test:** `tests/test_engine_skills.py::test_push_refuses_when_the_binary_does_not_report_a_version` and `::test_push_publishes_only_after_the_binary_reports_a_version`
+
 ### Requirement: every engine documents the flags its binary answers
 Every servable engine skill MUST declare `binary_flags` (a subset of
 `--version`, `--help`, `-h`) naming the flags its own binary answers, and
