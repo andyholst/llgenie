@@ -720,11 +720,57 @@ def push(spec: dict) -> int:
         print(f"[engine-image] FAIL {tag}: engine binary file missing or did not accept --version or -h; not pushing")
         return 1
     for r in publish_refs(spec):
-        if _sh([RUNTIME, "tag", tag, r]).returncode or _sh([RUNTIME, "push", r]).returncode:
+        if _sh([RUNTIME, "tag", tag, r]).returncode:
+            print(f"[engine-image] FAIL tag {r}")
+            return 1
+        pushed = _sh([RUNTIME, "push", r], capture_output=True, text=True)
+        out = f"{getattr(pushed, 'stdout', '') or ''}{getattr(pushed, 'stderr', '') or ''}".strip()
+        if out:
+            print(out)
+        if pushed.returncode:
+            if _denied_write(out):
+                # A `pull_request` run's token is scoped to the BASE repository: GitHub grants a
+                # same-repo head write access to this org's packages and refuses a FORK head
+                # outright. That is a permission no fork PR can be given, not a defect in the
+                # change, and the image was already built and tested here — so the run SKIPS the
+                # publish, loudly (a warning annotation naming the ref and the issue), and the
+                # image is published by the run that lands the change (issue #155).
+                print(f"::warning title=publish skipped::[engine-image] SKIP publish {r}: this run's "
+                      f"pull_request token cannot write {REGISTRY} (a fork head is read-only, issue "
+                      f"#155); the image was built and tested, and is published by the run that "
+                      f"lands the change")
+                print(f"[engine-image] SKIP publish {r}: pull_request token cannot write {REGISTRY} "
+                      f"(issue #155)")
+                return 0
             print(f"[engine-image] FAIL push {r}")
             return 1
         print(f"[engine-image] pushed {r}")
     return 0
+
+
+#: What a registry answers when the token is authenticated but not allowed to write the package.
+#: Measured on PR #651 (fork head, run 40339517705), both engine-image jobs: exactly the first line.
+WRITE_DENIED = (
+    "denied: installation not allowed to write organization package",
+    "denied: permission_denied",
+    "authorization failed: granted scopes",
+    "denied: requested access to the resource is denied",
+)
+
+
+def _denied_write(output: str) -> bool:
+    """True when a registry REFUSED a write this run's token could never be given (issue #155).
+
+    Only inside a `pull_request` run: a push run's token can write, so a denial there is a real
+    failure and must stay one. The message is what makes it a permission rather than a defect —
+    a network error, a missing repo or a bad tag never says `denied: installation …`.
+    """
+    import os
+
+    if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+        return False
+    lowered = (output or "").lower()
+    return any(marker in lowered for marker in WRITE_DENIED)
 
 
 def _have_runtime() -> bool:

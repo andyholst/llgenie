@@ -1,0 +1,6 @@
+- [x] `scripts/engine_image.py::push` captures each publish ref's push, prints the registry's own output, and turns the write-permission denial inside a `pull_request` run into a loud skip (`::warning::` + `SKIP publish`, exit 0).
+- [x] Every other outcome still fails: the denial on a push run, an unrelated push failure, and an image that fails its version test before publishing.
+- [x] `tests/test_ci_publish_scope.py` drives the real `push()`: the PR-#651 denial is a skip, a push-run denial fails, an unrelated `pull_request` failure fails, a successful publish is unchanged.
+- [x] `AGENTS.md` (engine pipeline rule 3) and `README.md` state the mechanism, including that the policy lives in the script and not in a workflow `if:`.
+- [x] `agent-wiki/2026-10-26-fork-pr-no-publish.md` records the change with issue and PR references.
+- [x] `make test-unit` (5200 passed, 6 deselected), `make check-workflows` and `make openspec-validate NAME=fork-pr-no-publish` are green.
