@@ -4,11 +4,11 @@ description: "Use when installing Strata (Qwen3.8-Flash-Next 125B MoE across GPU
 engine: "Strata"
 id: strata
 repo: https://github.com/Niko1221/Strata
-ref: v0.1.43
+ref: v0.2.4
 ref_kind: tag
-version: v0.1.43
-pinned: 16374b3e6dfe452a163c3a961ae5faa3b4aec84b
-verified: "2026-10-12"
+version: v0.2.4
+pinned: 0303f6581c64b9bc5d42fdf286c78985a239a1b1
+verified: "2026-10-25"
 license: MIT
 servable: true
 backends: [cuda, rocm]
@@ -43,18 +43,18 @@ install:
   rocm:
     - "cd {src} && GPU_TARGETS='{gpu_targets}' py/bin/python -c 'import os,shutil,setup; llama=setup.get_llama_cpp(); arch=os.environ[\"GPU_TARGETS\"]; setup.cmake_build(setup.ROOT, setup.ROOT/\"build\",\"strata\",[\"-DSTRATA_ENABLE_HIP=ON\",\"-DSTRATA_BUILD_TESTS=OFF\",\"-DSTRATA_PORTABLE=ON\",\"-DGPU_TARGETS=\"+arch,\"-DSTRATA_GGML_DIR=\"+str(llama)],None,\"build-strata.bat\"); eng=setup.ROOT/\"engine\"; eng.mkdir(exist_ok=True); shutil.copy2(setup.ROOT/\"build\"/setup.EXE, eng/setup.EXE); import json; (eng/\"BUILD.json\").write_text(json.dumps(dict(source=\"local\", backend=\"hip\", version=setup.source_version(), archs=sorted(arch.split(\";\") if \";\" in arch else arch.split()), vision=\"none\", src=setup.source_hash(setup.ENGINE_SOURCES), vision_src=None), indent=1))'"
 binary: "{src}/engine/strata"
-binary_flags: ["--help"]   # strata prints "strata <version>" on --help (no --version)
-detect: "{binary} --help 2>&1 | grep '^strata ' > /dev/null && echo {version}"   # plain grep: `-q` exits after the first match, the writer takes SIGPIPE and `set -o pipefail` reports 141
+binary_flags: ["--version", "--help"]   # v0.2.4's CLI answers BOTH (measured in the built image: `strata --version` -> `strata 0.1.49`, rc=0), so the probe needs no policy exemption
+detect: "{binary} --version"   # the engine names itself; the pin is what `make engine-bump` moved. No pipe at all, so `set -o pipefail` cannot turn the read into a 141 (issue #616). At v0.2.4 the banner still says 0.1.49 — that is the binary's truth, the tag carries the pin.
 pre_launch: "cd {src} && choice=$(py/bin/python -c 'import os,sys,setup; c=setup.gguf_choice(os.path.basename(sys.argv[1])); print(\"--family %s --model %s\" % c if c else \"\")' {model}) && (test -n \"$choice\" || (echo \"[strata] $(basename {model}) is not a Strata model file (setup.py gguf_choice)\" >&2; exit 1)) && py/bin/python setup.py --setup --yes --no-start --no-browser --gguf-dir $(dirname {model}) $choice --data-dir /models/strata --port {port} --host {host}"
 launch: "cd {src} && cfg=$(ls -t {src}/strata-*.json | head -1) && py/bin/python -c 'import json,sys; p,a=sys.argv[1:3]; c=json.load(open(p)); al=c.get(\"aliases\") or []; c[\"aliases\"]=al if a in al else al+[a]; json.dump(c,open(p,\"w\"),indent=1)' \"$cfg\" {alias} && py/bin/python serve/server.py --engine strata --config \"$cfg\" --port {port} --host {host}"
 health: "GET /health"
 alias_mode: config
 container:
   cuda:
-    apt: [libatomic1, libgomp1, python3-venv]
+    apt: [libatomic1, libgomp1, python3-venv, libnuma1, tini, zlib1g]
   rocm:
     base: "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0@sha256:4449f856653602317e4101a76fce599c7fcd58ccec2e539951fce5f73083179e"   # the shared rocm/dev 7.0 base has no HIP cmake package (CI #106)
-    apt: [libatomic1, libgomp1, python3-venv]
+    apt: [libatomic1, libgomp1, python3-venv, libnuma1, tini, zlib1g]
 upstream_watch: [setup.sh, setup.py, serve/server.py, docs/INSTALL.md, docs/DETAILS.md, Dockerfile, requirements.txt]
 ---
 
