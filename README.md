@@ -2239,6 +2239,15 @@ image → download → lint → unit → install → health → top-tier → top
   engine images) — never on a bare feature-branch push. So a branch is vetted by its PR's
   run, and the merge commit's run is the publish path. A fork PR is vetted by the upstream
   run and its checks report on the PR (issue #155).
+- **A fork PR's publish is a loud skip, not a red job (issue #155):** `make push-engine` is a step of
+  every `engine-image-*` job, and GitHub scopes a fork PR's token to the base repository's packages
+  **read-only**, so the registry answers `denied: installation not allowed to Write organization
+  package` on a branch whose build and test passed. `scripts/engine_image.py::push` turns exactly that
+  refusal, and only inside a `pull_request` run, into a skip: a `::warning::` annotation plus
+  `[engine-image] SKIP publish <ref>: pull_request token cannot write … (issue #155)`. The image is
+  still built and post-build tested, and the run that lands the change on `main` publishes it. A push
+  run's denial — or any other push failure — still fails loudly. The policy is in the script, not in a
+  scenario-scoped workflow `if:`; locked by `tests/test_ci_publish_scope.py`.
 - **Only collaborators, the `github-actions[bot]`, and the owner may trigger the
   workflows:** `ci.yml`, `registry-sync.yml`, `engine-bump.yml` and `engine-bump-rebase.yml` gate every run behind an actor guard that
   fails unless the triggering actor is the repo owner, the `github-actions[bot]`, or a

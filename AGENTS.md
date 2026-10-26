@@ -564,10 +564,19 @@ No engine is compiled or pip-installed on the host.
      `docker run <image> version`).
   3. `make push-engine` publishes to the repo's GHCR (`ghcr.io/<owner>/llgenie/<name>`)
      on EVERY push run (feature branches too, default for now, #101) and ONLY after
-     build + tests passed. It is also an unconditional step of every `engine-image-*`
-     job, so a same-repo `pull_request` run publishes what it built and tested
-     (measured: run 38121659510 pushed `llama-cpp:23b0202a-021e11d2-cuda`); a fork PR
-     (read-only token against the base registry) must fail loudly, not pass silently.
+     build + tests passed. It is a step of every `engine-image-*` job, so a same-repo
+     `pull_request` run publishes what it built and tested (measured: run 38121659510
+     pushed `llama-cpp:23b0202a-021e11d2-cuda`). A FORK head cannot: GitHub scopes its
+     `pull_request` token to the base repo's packages read-only and refuses the write
+     (`denied: installation not allowed to Write organization package`, measured on PR
+     #651). That refusal is a permission no fork PR can be given, so `push` turns THAT
+     message, inside a `pull_request` run only, into a loud skip — a `::warning::`
+     annotation plus a `SKIP publish <ref>: pull_request token cannot write … (issue
+     #155)` line — and the image is still built and post-build tested; the run that
+     lands the change on `main` publishes it. The policy lives in the script, never in a
+     scenario-scoped workflow `if:` (`tests/test_ci_images.py::test_no_ci_step_or_job_is_skipped`
+     forbids those). A push run's denial, or any other failure (network, bad tag, an
+     image that fails its own version test), still fails loudly — never a silent pass.
   4. The separate `engine-published-test` matrix (jobs `test-published-<engine>-<arch>`) (every push run, after all builds) pulls
      every image back from GHCR with no build and no cache, checks the digest, checks
      the binary version, STARTS the container and chats "hi" on
