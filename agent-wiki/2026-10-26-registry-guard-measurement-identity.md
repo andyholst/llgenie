@@ -59,20 +59,31 @@ Almost none of the 47 was a loss:
 
 ## What this exposes next
 
-The real weekly sequence was run in a throwaway worktree at `369ccda` against the live upstream store:
+The job's own step order was run in a throwaway worktree at `1d89a13` against the live upstream store:
 
 ```
 make sync-registry            # exit 0: 23 models -> 106 models (2026-10-26T11:56:20Z)
 make check-registry-keys      # exit 0: OK — additive only (106 models, 81 notes)
-make render-trend-list-matrix # exit 0: rewrote the 81-case fixture from the new store
-make check-engine-skill-gap   # exit 1: 16 registry engines have no skill and no dated decision
+make sync-quant-catalog       # exit 0: 87 models, 1573 real quant links
+make render-trend-list-matrix # exit 0: 81 cases
+make render-engine-skill-gap  # exit 0: wrote data/engine-skill-gap.json
+make check-registry           # exit 0: shape + README order + live links
+make test-unit                # exit 1: 101 failed, 14275 passed, 6 deselected
 ```
 
-So the guard is no longer what holds the sync shut; the next gate is `check-engine-skill-gap` on 16 new
-upstream engines (`Janas`, `Kapitsa`, `LM Studio`, `MTPLX`, `OpenJet`, `OpenVINO`, `SonicBoom`,
-`TandemLLM`, `TokenSpeed`, `Magnitude`, `LemonSeed Engine`, `turbo-fieldfare`, `strixite`, and three
-`llama.cpp` forks). Filed as [#673](https://github.com/asimov-agent/llgenie/issues/673) — a decision per
-engine (skill or a dated `data/unsupported-engines.json` entry), not part of this change.
+So the guard is no longer the blocker and every data step passes; the job now stops at `make test-unit`,
+which it runs before opening its PR. Two work items stand between that and the store landing:
+
+- [#677](https://github.com/asimov-agent/llgenie/issues/677) — 98 of the 101 failures are unit tests that
+  encode the 2026-10-13 store's contents (README list order, `KeyError: 'Ornith 1.5'`, `tps == 97.3`, a
+  per-model catalog-coverage assertion). `14275 passed` vs 5201 on the current store: cases parametrized
+  over the registry multiply with it.
+- [#673](https://github.com/asimov-agent/llgenie/issues/673) — the other 3 are `check-engine-skill-gap`
+  naming 16 upstream engines with no skill and no dated decision.
+
+Measured before this correction, on an earlier probe that skipped two regeneration steps, `test-unit`
+showed 184 failures — 82 of them the matrix fixture this job regenerates first. The number that counts is
+the job's own order: **101**.
 
 ## Not in this change
 
