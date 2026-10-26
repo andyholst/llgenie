@@ -176,29 +176,36 @@ def test_the_gate_report_separates_what_each_row_proves():
         {k: len(v) for k, v in by_verdict.items()}
 
 
-def test_sglang_reports_a_pin_when_its_own_metadata_is_a_placeholder():
-    """The rocm wheel's distribution version is `0.0.0`, so the detect must fall back to the pin (#625).
+def test_sglang_reports_the_pinned_version_when_its_own_metadata_is_a_placeholder():
+    """The rocm wheel's distribution version is `0.0.0`, so the detect must fall back to the PINNED
+    VERSION (#625), never to the commit sha (#636).
 
     This is the regression the CI run after my first attempt caught (`FAIL sglang/rocm: entrypoint detect
     proves no version (… installed sglang 0.0.0)`) — the earlier test only checked that the detect mentioned
-    `importlib.metadata`, which was not enough to keep a placeholder out of the gate.
+    `importlib.metadata`, which was not enough to keep a placeholder out of the gate. The fallback was then
+    `pin <sha>`, which `make test-built-engine` rejects in turn (`installed sglang pin 35ce31329305`), so the
+    fallback is now the skill's `version:`.
     """
 
     # Given sglang's committed params for both backends
     sglang = json.loads((REPO / "containers" / "engines" / "params" / "sglang.json").read_text())
+    version = sglang["ref"].lstrip("v")   # v0.5.22 -> 0.5.22: the tag the image is built at
 
     # When  each detect command is read
-    # Then  it carries the placeholder fallback AND a pin to fall back to …
+    # Then  it falls back to the pinned version, not to the sha, and keeps the placeholder guarded
     for variant, spec in sglang["variants"].items():
         detect = spec["detect"]
         assert "importlib.metadata" in detect, (variant, detect)
         assert 'not in ("0.0.0", "")' in detect, \
             f"{variant}: the detect must treat 0.0.0 as a placeholder, not a version: {detect}"
-        assert "pin " in detect, f"{variant}: no pin fallback in {detect}"
+        assert f'"{version}"' in detect, \
+            f"{variant}: the fallback must be the pinned version {version}: {detect}"
+        assert "pin " not in detect, f"{variant}: a commit sha is not a version (#636): {detect}"
 
-    # And  the two shapes it can print are both accepted by the gate, while the placeholder is not
-    assert ei.version_proof("sglang 0.5.21") == "0.5.21"
-    assert ei.version_proof("sglang pin e00930c54890") == "pin e00930c54890"
+    # And  the shapes it can print are accepted by the gate, while the placeholder is not
+    assert ei.version_proof(f"sglang {version}") == version
+    assert ei.version_proof("sglang pin e00930c54890") == "pin e00930c54890", \
+        "an engine with no upstream version reports its pin — sglang just must not be one"
     assert ei.version_proof("sglang 0.0.0") == ""
 
 
