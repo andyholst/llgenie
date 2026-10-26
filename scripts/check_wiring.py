@@ -373,6 +373,13 @@ def check(g: dict, exceptions: dict) -> list[str]:
             errors.append(f"{exceptions['path']}: target {tgt!r} is not a make target — delete the entry")
         elif tgt in ci_reaches:
             errors.append(f"{exceptions['path']}: `make {tgt}` is reached by CI now — delete the entry")
+        elif tgt not in (g.get("claim_targets") or {}):
+            # The recorded decision exists ONLY for a help line that claims CI coverage nothing
+            # delivers. Once the claim is gone the entry is dead prose that hides the next drift —
+            # `test-install-ci`'s entry said "its help line no longer claims the pipelines run it"
+            # while the help line still did (issue #239).
+            errors.append(f"{exceptions['path']}: `make {tgt}` no longer claims CI coverage in its help "
+                          f"line, so the entry is stale — delete it")
 
     # The .PHONY half (issue #392): make decides to run a recipe by looking for a FILE with the
     # target's name, so a target that produces no such file must be declared `.PHONY` or any file

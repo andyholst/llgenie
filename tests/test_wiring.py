@@ -344,3 +344,22 @@ def test_the_json_subcommand_is_valid_json_with_the_three_keys(tmp_path):
     # And   every value is a list, never a set (json.dumps would have raised)
     for section in doc.values():
         assert all(isinstance(v, list) for v in section.values()), section
+def test_a_decision_for_a_target_that_no_longer_claims_ci_is_stale(tmp_path):
+    """The decision exists ONLY for a claim; once the help line stops claiming, the entry hides drift.
+
+    `test-install-ci`'s entry said "its help line no longer claims the pipelines run it" while the
+    help line still did (issue #239) — the guard accepted it because a recorded entry short-circuited
+    the claim check.
+    """
+
+    # Given a target that makes no CI claim, and a dated decision recorded for it
+    makefile = ".PHONY: quiet\nquiet: ## a local check, no CI claim here\n\techo hi\n"
+    root = _tree(tmp_path, makefile, {}, exceptions={"documents": {}, "targets": {
+        "quiet": {"reason": "kept from an earlier claim", "decided": "2026-10-15"}}})
+
+    # When  the wiring is checked
+    r = _run(root, "check")
+
+    # Then  the entry is reported as stale and must be deleted
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "no longer claims CI coverage" in (r.stdout + r.stderr)
