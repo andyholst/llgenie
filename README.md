@@ -1034,6 +1034,15 @@ the gate target: macOS pulls no engine image, so its run of the gate does no loo
 `ci-install` stays the same on both OSes. Without that gate the first run of a new pin fails
 `[install] FAIL llama.cpp/cpu: not published` while its own build job is still pushing
 the tag (issue #169).
+
+The same race used to red `make test-unit`, from the other side: the real-registry case in
+`tests/test_ci_publish_order.py` resolved the **current checkout's** plan, so a bump PR asked GHCR
+for the tag it was itself publishing, and every bump PR arrived `1 failed` (`#665`, `#663`). That
+case now checks exactly the engines whose committed params this change did **not** move, and prints
+the ones it defers (`[publish-order] deferred to ci-wait-engine-images: [...]`): a repinned engine's
+brand-new tag is `make ci-wait-engine-images`' business, which is the gate that can wait. On `main`,
+where nothing differs from the base, every engine is still checked (issue #672).
+
 > **Why a wrapper?** `scripts/llgenie_serve.py` imports the `gguf`/`numpy` packages that live in the
 > venv, so it must be launched with the venv python. The `~/bin/llgenie` wrapper does
 > exactly that; the `llgenie.py` symlink keeps editors/`--list` pointing at the real file (which lives at

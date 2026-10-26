@@ -14,6 +14,7 @@ lookup; the last test hits the real registry with no mock.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -180,15 +181,121 @@ def test_published_images_need_no_wait(monkeypatch):
     assert len(refs) == len(iel.CORE_ENGINES)
 
 
-def test_every_image_install_pulls_is_published():
-    """Real registry, no mock: every image `make install` pulls is on GHCR."""
+def _deferred_engines(params_dir: Path | None = None, base: str = "origin/main") -> set[str]:
+    """Engines whose committed params this change moved, so this run is publishing their tags.
 
-    # Given the committed engine params and the cpu backend
+    A tag that has never been published cannot answer a registry lookup, and the PR that moves the
+    pin is exactly the one that publishes it — in the parallel `engine-image-*` job. Those tags are
+    waited for where the wait belongs (`make ci-wait-engine-images`, a prerequisite of `ci-install`,
+    issue #169), so a hermetic unit gate must not require them (issue #672).
+
+    An engine whose params file has no copy on the base is deferred too: it is a first import, and
+    nothing has published it yet.
+    """
+    root = params_dir or (REPO / "containers" / "engines" / "params")
+    deferred: set[str] = set()
+    for params_file in sorted(root.glob("*.json")):
+        rel = f"containers/engines/params/{params_file.name}"
+        try:
+            shown = subprocess.run(["git", "show", f"{base}:{rel}"], cwd=REPO,
+                                   capture_output=True, text=True)
+        except OSError:                     # no git on PATH: nothing to compare against
+            return set()
+        if shown.returncode != 0:           # no base copy — the engine is new in this change
+            deferred.add(params_file.stem)
+        elif shown.stdout != params_file.read_text():
+            deferred.add(params_file.stem)
+    return deferred
+
+
+def test_a_params_file_identical_to_the_base_is_not_deferred(tmp_path):
+    """An engine whose params equal the base copy is still checked against the registry (#672)."""
+
+    # Given a scratch params dir holding one engine's committed params verbatim from origin/main
+    engine = "llama.cpp"
+    base = subprocess.run(["git", "show", f"origin/main:containers/engines/params/{engine}.json"],
+                          cwd=REPO, capture_output=True, text=True)
+    assert base.returncode == 0, base.stderr
+    root = tmp_path / "params"
+    root.mkdir()
+    (root / f"{engine}.json").write_text(base.stdout)
+
+    # When  the deferred set is computed
+    deferred = _deferred_engines(params_dir=root, base="origin/main")
+
+    # Then  it is empty: an unchanged engine is never exempt from the registry assertion
+    assert deferred == set(), deferred
+
+
+def test_an_engine_with_no_base_copy_is_deferred(tmp_path):
+    """A params file the base does not carry is a first import: nothing has published it yet."""
+
+    # Given an engine whose params file exists only in this checkout
+    root = tmp_path / "params"
+    root.mkdir()
+    (root / "brand-new-engine.json").write_text('{"id": "brand-new-engine"}')
+
+    # When  the deferred set is computed
+    deferred = _deferred_engines(params_dir=root, base="origin/main")
+
+    # Then  that engine is deferred, never silently required from the registry
+    assert deferred == {"brand-new-engine"}, deferred
+
+
+def _assert_published(deferred: set[str]) -> list[str]:
+    """Check the registry for every cpu image this change did not repin; return what was checked.
+
+    The repinned engines are named in the output instead of looked up: their tags are published by
+    this run's own `engine-image-*` job, and waited for by `make ci-wait-engine-images` — the gate
+    that can wait (#169, #672).
+    """
     plan = [e for e in iel.install_plan("cpu") if e["variant"]]
     assert plan, "install resolves no engine image for cpu"
+    checked = [e["engine"] for e in plan if e["engine"] not in deferred]
+    if deferred:
+        print(f"[publish-order] deferred to ci-wait-engine-images: {sorted(deferred)}")
+    assert checked, "the plan names no engine this change did not repin"
+    rc = iel.wait_published("cpu", only=checked, timeout_s=120, poll_s=10)
+    assert rc == 0, ("an image make install pulls and this change did not repin is not published "
+                     "on GHCR (issue #169)")
+    return checked
 
-    # When the gate waits against the real registry with a short deadline
-    rc = iel.wait_published("cpu", timeout_s=120, poll_s=10)
 
-    # Then every tag install pulls is published
-    assert rc == 0, "an image make install pulls is not published on GHCR (issue #169)"
+def test_a_bump_defers_its_own_new_tag_and_checks_the_rest(monkeypatch, capsys):
+    """A bump PR defers only the engine it repins, and still checks every other engine."""
+
+    # Given a checkout whose llama.cpp params differ from the base
+    asked: list[str] = []
+
+    def fake_wait(arch, only=None, timeout_s=None, poll_s=None):
+        asked.extend(only or [])
+        return 0
+
+    monkeypatch.setattr(iel, "wait_published", fake_wait)
+
+    # When  the registry case runs with that engine deferred
+    checked = _assert_published({"llama.cpp"})
+
+    # Then  llama.cpp is named as deferred, never looked up, and every other engine is checked
+    out = capsys.readouterr().out
+    assert "llama.cpp" in out and "ci-wait-engine-images" in out
+    assert "llama.cpp" not in asked
+    assert asked == checked
+    plan = [e["engine"] for e in iel.install_plan("cpu") if e["variant"]]
+    assert checked == [e for e in plan if e != "llama.cpp"], checked
+
+
+def test_every_image_install_pulls_is_published():
+    """Real registry, no mock: every image `make install` pulls is on GHCR.
+
+    An engine this change repins is deferred: its tag is published by this run's own
+    `engine-image-*` job and waited for by `make ci-wait-engine-images` (issue #169), which is the
+    gate that can wait. Requiring it here reddened every bump PR (issue #672).
+    """
+
+    # Given the committed engine params and the cpu backend
+    # When  the deferred set is computed from the real checkout against origin/main
+    deferred = _deferred_engines()
+
+    # Then  every image this change did not repin is published in the real registry
+    _assert_published(deferred)
