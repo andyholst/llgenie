@@ -1,0 +1,6 @@
+- [x] `tests/test_ci_publish_order.py` computes the deferred set from `origin/main` (`git show origin/main:containers/engines/params/<id>.json`), defers an engine whose params differ or has no base copy, and prints what it deferred.
+- [x] The real-registry case asserts publication for the remaining engines through `wait_published(only=[...])`, and still fails loudly for a tag nothing published.
+- [x] Tests: a bump checkout defers its own tag and passes, an unchanged tree defers nothing, an engine with no base copy is deferred.
+- [x] README documents the narrow scope (the unit gate checks the engines this change does not repin; a new pin's tag is gated by `ci-wait-engine-images`).
+- [x] `agent-wiki/2026-10-26-unit-gate-bump-race.md` records the change with issue and PR references.
+- [x] `make test-unit` (5199 passed, 6 deselected) and `make openspec-validate NAME=unit-gate-bump-race` (valid) are green.
