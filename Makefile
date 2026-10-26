@@ -1221,7 +1221,7 @@ test-install-host: ## Verify the REAL host install (make install) — runs on th
 	@echo "==> Verifying host install artifacts via tests/test_install.py"
 	@$(PY) -m pytest tests/test_install.py -p no:cacheprovider -q
 
-test-install-ci: ## In the test container: REAL make install (engine images via host docker) -> test-built-engine -> install tests -> "hi" through the container llama-server -> trend pick -> uninstall (NO SKIP). The same on Linux and macOS (CI linux / macos pipelines)
+test-install-ci: ## LOCAL, one container: REAL make install (engine images via the host docker socket) -> test-built-engine -> install tests -> "hi" through the container llama-server -> trend pick -> uninstall (NO SKIP). CI covers the same flow as separate stages through `make ci-install`; no job runs THIS target (issue #239)
 	# Python, pytest and the hf/docker CLIs come from the test image; every
 	# inference server runs in its engine image (started through the host docker
 	# socket). HOME is a throwaway dir inside the repo (.ci-home).
