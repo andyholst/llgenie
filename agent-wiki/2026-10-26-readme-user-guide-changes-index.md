@@ -39,6 +39,8 @@ file, so it was the union of everyone's notes.
 
 ## Status
 
-Implementation complete on `feat/readme-user-facing-changes-notes`; loop gates run before the PR.
+Gates: `make test-unit` 5227 passed / 6 deselected, `make check-docs`, `make check-dispatch-forms`,
+`make check-workflows`, `make check-wiring`, `make lint` and
+`make openspec-validate NAME=readme-user-facing-changes-index` all exit 0.
 Deferred (own issues, not folded in): a generated `docs/BOTS.md` target list, and grouping
 `CHANGES.md` by release.

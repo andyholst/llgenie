@@ -10,4 +10,4 @@
 - [x] 8. `AGENTS.md` "Documentation is part of the change" amended: dated note + `CHANGES.md` row, README only for user-facing behaviour, a bot never writes the README; `Makefile` help text follows
 - [x] 9. Tests updated for the new contract: `tests/test_check_docs.py` (rewritten: real tree, surface, index, README purity), `tests/test_dispatch_forms.py`, `tests/test_issue_bot_manual_pick.py`, `tests/test_auto_merge.py`, `tests/test_architecture_bot.py`, `tests/test_agent_nerve.py`, `tests/test_engine_bump.py`
 - [x] 10. This change's own `agent-wiki/2026-10-26-readme-user-guide-changes-index.md` note + its `CHANGES.md` row
-- [ ] 11. Gates verified in `llgenie/test:latest`: `make test-unit` (the updated tests green), `make check-docs`, `make check-dispatch-forms`, `make lint`, `make openspec-validate NAME=readme-user-facing-changes-index`
+- [x] 11. Gates verified in `llgenie/test:latest`: `make test-unit` (the updated tests green), `make check-docs`, `make check-dispatch-forms`, `make lint`, `make check-workflows`, `make check-wiring`, `make openspec-validate NAME=readme-user-facing-changes-index` (all green: 5225 tests)
