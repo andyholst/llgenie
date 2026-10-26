@@ -824,8 +824,23 @@ on the old (index-based) code and passes on BOTH the old and the new registry.
 
 ### The vendored registry is additive only (mandatory, durable)
 
-`data/models.json` is a **verbatim copy** of trending-local-llms'
+`data/models.json` is a **copy, normalised on the way in,** of trending-local-llms'
 `data/models.json`, replaced wholesale by the weekly `make sync-registry` PR.
+
+- **What "normalised on the way in" means (issue #687), and what it does NOT.** Upstream's
+  store started writing model names into `formats[].name` (`"Qwen3.8-27B"`, `"LLM (MoE)"`),
+  which no consumer can act on: llgenie could not map those rows to a download, so the
+  pick/matrix tests saw `use_format: safetensors` and the planner raised `StopIteration`.
+  `scripts/sync_registry.normalise()` therefore restricts `formats` to the vocabulary
+  (`GGUF | MLX | safetensors | mlx-safetensors | litertlm`), and a row left with none states
+  the format its own repo/id names (`-GGUF`, `mlx`, `litertlm`), else GGUF — the picker's
+  documented `<name>-GGUF` fallback, applied once at vendor time. A duplicated row id is
+  dropped. Every departure is printed by the sync.
+- **Rows are NOT folded into "one row per model".** Upstream's `models[]` holds distinct
+  entities (a base model, a merged finetune, an MLX conversion, a run on one box) and its own
+  README lists each as its own row; a name heuristic cannot tell `Qwen3.8-27B Defiance
+  Uncensored` (a finetune) from `Qwen3.8-27B (iPad Pro + eGPU R9700)` (a run), and folding
+  dropped real models. The vendored README stays upstream's list, verbatim.
 `make check-registry` re-validates the NEW file's shape, which cannot see what
 the sync **lost**, so a sync that dropped a key, a model, a measurement, a t/s
 or an engagement counter used to land silently and only show up later as a

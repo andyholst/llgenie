@@ -237,7 +237,7 @@ llgenie qwen2.5-0.5b                   # local model on llama.cpp (prism-server 
 llgenie --local                        # pick among local files, llama.cpp
 ```
 
-The registry is `data/models.json` (with the README it was generated with, `data/trending-README.md`), a verbatim copy of
+The registry is `data/models.json` (with the README it was generated with, `data/trending-README.md`), a copy of
 [trending-local-llms](https://github.com/andyholst/trending-local-llms) `data/models.json`
 (no live fetch at run time; `LLGENIE_REGISTRY_SRC=<file|url>` overrides it).
 
@@ -563,7 +563,7 @@ top-tier tests pass unmodified).
 
 One pipeline, four steps, no magic:
 
-1. **Registry** — `data/models.json` is a verbatim weekly copy of
+1. **Registry** — `data/models.json` is a weekly copy of
    [trending-local-llms](https://github.com/andyholst/trending-local-llms): models, their VRAM
    column, per-engine throughput measurements and the engagement counters behind the trend score.
 2. **Rank** — the trend list that fits this card; then, per model, the engines ranked by a
