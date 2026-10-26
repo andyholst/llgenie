@@ -2120,7 +2120,8 @@ make queued-alarm      # report CI jobs stuck in `queued` too long (a runner tha
 make run-failure-reactor  # route a failed CI run to a remedy (REPO=; RUN_ID=; DRY=1 previews): a PR this bot can push
                        # (this repo or the owner's fork) -> dispatch the fix-bot as the OWNER (DISPATCH_TOKEN); else file
                        # ONE deduped issue labelled agent:implement (issue #286, fork routing #555)
-make openspec-validate NAME=<change>   # validate an OpenSpec change
+make openspec-validate NAME=<change>   # validate ONE OpenSpec change (fail-closed)
+make openspec-validate-all             # validate the structure of EVERY active change — what ci-openspec runs (issue #156)
 make openspec-new NAME=<change>        # create a change dir (the OpenSpec CLI, containerized)
 make openspec-status                   # list the changes and their task state
 make openspec-shell                    # interactive shell with the openspec CLI in a container

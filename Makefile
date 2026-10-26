@@ -53,7 +53,7 @@ SERVER_ROOT ?= $(HOME)/repository/git
 SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 
 .PHONY: all install venv-install link uninstall smoke list version help test-native-engine test-native-engine-serve test-interactive-tensorfold test-interactive-tensorfold-ci \
-	openspec-image openspec-new openspec-validate openspec-status openspec-shell \
+	openspec-image openspec-new openspec-validate openspec-validate-all openspec-status openspec-shell \
 	test test-unit test-agents-read agents-read-venv test-install test-install-ci test-install-host test-install-trend test-health test-health-host download-test-model \
 	test-image test-image-pull openspec-image-pull publish-ci-images publish-agent-image agent-image-push-check agent-image agent-image-pull ci-image-refs test-clean lint lint-fix loop loop-harness chained \
 	build-server build-variant serve-variant test-serve-variant stop-serve-variant install-prism-cpu install-upstream-cpu \
@@ -1006,6 +1006,11 @@ openspec-new: openspec-image ## openspec new change <NAME>
 	@test -n "$(NAME)" || { echo "Usage: make openspec-new NAME=<kebab-name>"; exit 1; }
 	$(RUNTIME) run $(OS_OPTS) openspec new change $(NAME)
 
+openspec-validate-all: ## openspec validate --changes: verify the STRUCTURE of every ACTIVE change (the gate a commit's own change cannot slip past, issue #156)
+	@if [ "$(HOST_OS)" = Darwin ]; then \
+	  command -v openspec >/dev/null 2>&1 || npm install -g @fission-ai/openspec@$(OPENSPEC_VERSION); \
+	  openspec validate --changes; \
+	else $(RUNTIME) run $(OS_OPTS) openspec validate --changes; fi
 openspec-validate: ## openspec validate <NAME>  (fail-closed gate used by the loop)
 	@test -n "$(NAME)" || { echo "Usage: make openspec-validate NAME=<change>"; exit 1; }
 	@if [ "$(HOST_OS)" = Darwin ]; then \
@@ -1371,8 +1376,8 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 ci-agents-read: bash-check ## CI job agents-read: make test-agents-read (Python 3.12 venv -> AGENTS.md scan -> guard tests)
 	$(MAKE) test-agents-read
 
-ci-openspec: bash-check ## CI job openspec: validate the OpenSpec changes and assert every active change has all tasks checked
-	$(MAKE) openspec-validate NAME=ci-pipeline
+ci-openspec: bash-check ## CI job openspec: validate the STRUCTURE of every active change and assert none has an unchecked task — a hardcoded change name let an invalid spec land (issue #156)
+	$(MAKE) openspec-validate-all
 	$(MAKE) openspec-tasks-check
 
 ci-cpu-health: bash-check ## CI job cpu-health: Linux answers "hi" through the llama.cpp image; macOS never starts an engine image
