@@ -289,6 +289,10 @@ def graph(root: Path = REPO) -> dict:
         "tests": [d for d in docs if d.startswith("tests/")],
         "scripts": [d for d in docs if d.startswith("scripts/")],
         "workflow_targets": workflow_targets, "ci_targets": ci_targets,
+        # what each target names directly (plus the aggregator's selection, issue #393): the
+        # `json` subcommand prints it, so it has to be part of the graph rather than a local of
+        # this function (issue #395 — the key was missing and `json` died with a KeyError).
+        "named_by_target": named_by_target,
         "aggregated": aggregated, "aggregator_errors": agg_errors,
         "phony": sorted(_phony_targets(root)),
         # wired at all (any target, any workflow) vs reached by the CI workflows
@@ -442,7 +446,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "json":
         print(json.dumps({"reachable": {k: sorted(v) for k, v in g["reachable"].items()},
                           "named_by_target": {k: sorted(v) for k, v in g["named_by_target"].items()},
-                          "workflow_targets": g["workflow_targets"]}, indent=2))
+                          # the workflow half is sets too: `json` must never hand out a set
+                          # (issue #395 — this raised TypeError after the KeyError was fixed)
+                          "workflow_targets": {w: sorted(t) for w, t in g["workflow_targets"].items()}},
+                         indent=2))
         return 0
     if a.cmd == "report":
         print(report(g, exceptions))

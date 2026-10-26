@@ -322,3 +322,25 @@ def test_the_guard_runs_in_ci_unit_and_this_file_runs_in_test_unit():
 
     # And the removed dead test file is gone for good
     assert not (REPO / "tests" / "test_engine_bump_build.py").exists()
+
+
+def test_the_json_subcommand_is_valid_json_with_the_three_keys(tmp_path):
+    """`check_wiring.py json` is consumed by scripts, so it must never crash and never emit a set.
+
+    Issue #395: it read `g["named_by_target"]` — a key `graph()` never returned — and then handed
+    `workflow_targets` (sets) straight to `json.dumps`. Both are defects a consumer sees as
+    "the tool is broken", not as a wiring finding.
+    """
+
+    # Given the real tree
+    # When  the json subcommand runs
+    r = _run(REPO, "json")
+
+    # Then  it exits 0 with parseable JSON carrying the three documented keys
+    assert r.returncode == 0, (r.returncode, r.stdout[-400:], r.stderr[-400:])
+    doc = json.loads(r.stdout)
+    assert set(doc) == {"reachable", "named_by_target", "workflow_targets"}
+    assert doc["named_by_target"] and doc["workflow_targets"]
+    # And   every value is a list, never a set (json.dumps would have raised)
+    for section in doc.values():
+        assert all(isinstance(v, list) for v in section.values()), section
