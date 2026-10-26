@@ -549,7 +549,8 @@ def _rewrite_pin_asserts(skill_id: str, old_sha: str, new_sha: str,
     the full sha, its 8-char prefix (image tags), and the tag/version string
     (`v0.35.1`, `0.35.1-rocm`). A bump that moves the pin without moving those
     asserts makes `make test-unit` red on the bump PR. Only `tests/` and
-    `README.md` are rewritten; historical OpenSpec/agent-wiki records are not.
+    `docs/` are rewritten; `README.md` is never touched (the user guide carries no pinned
+    version — issue #678), and historical OpenSpec/agent-wiki records are not.
     A ref that did not move (branch skills, old_ref == new_ref) is still
     substituted: the unit suite hardcodes the tag string next to the sha, and a
     sha-only move must rewrite both. The substitution is a no-op when the two
@@ -564,7 +565,7 @@ def _rewrite_pin_asserts(skill_id: str, old_sha: str, new_sha: str,
         if old_ref.startswith("v") and new_ref.startswith("v"):
             pairs.append((old_ref[1:], new_ref[1:]))
     changed: list[str] = []
-    roots = [REPO_ROOT / "tests", REPO_ROOT / "README.md"]
+    roots = [REPO_ROOT / "tests", REPO_ROOT / "docs"]
     files: list[Path] = []
     for root in roots:
         if root.is_file():
@@ -627,7 +628,7 @@ def _regen_guard(skill_id: str) -> list[str]:
                or c.startswith(f"containers/engines/dockerfiles/{skill_id}/")
                or c == "containers/engines/binaries.json"  # regenerate-engine-params writes this aggregate manifest even for --only
                or c.startswith("tests/")
-               or c == "README.md"
+               or c.startswith("docs/")
                or c == "data/strata_models.json")
         if not own:
             raise SystemExit(f"[engine-bump] regen changed a file outside {skill_id}: {c}")

@@ -320,7 +320,8 @@ def test_bump_rewrites_hardcoded_pin_asserts(tmp_path, monkeypatch):
         f'assert pinned == "{old}"\n'
         'assert "v0.32.0" in other  # another engine, must survive\n'
     )
-    (tmp_path / "README.md").write_text(f"tag `llgenie/ollama:{old[:8]}-<hash>-cuda`\n")
+    (tmp_path / "docs").mkdir(exist_ok=True)
+    (tmp_path / "docs" / "ENGINES.md").write_text(f"tag `llgenie/ollama:{old[:8]}-<hash>-cuda`\n")
     record = tmp_path / "openspec" / "changes" / "old"
     record.mkdir(parents=True)
     (record / "spec.md").write_text("pinned at v0.40.11\n")
@@ -342,7 +343,7 @@ def test_bump_rewrites_hardcoded_pin_asserts(tmp_path, monkeypatch):
     assert f"llgenie/ollama:{new[:8]}-" in got
     assert f'pinned == "{new}"' in got
     assert "v0.32.0" in got
-    assert f"llgenie/ollama:{new[:8]}-" in (tmp_path / "README.md").read_text()
+    assert f"llgenie/ollama:{new[:8]}-" in (tmp_path / "docs" / "ENGINES.md").read_text()
     assert (record / "spec.md").read_text() == "pinned at v0.40.11\n"
 
 
@@ -1033,7 +1034,9 @@ def _checkout(tmp_path: Path, sid: str, skill: str, old: str, ref: str) -> tuple
     path = root / "skills" / "engines" / sid / "SKILL.md"
     path.write_text(skill)
     (root / "tests" / "test_pins.py").write_text(marker)
-    (root / "README.md").write_text(marker)
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "ENGINES.md").write_text(marker)
+    (root / "README.md").write_text("# user guide: no pinned version here\n")
     (root / "Makefile").write_text(_MAKEFILE)
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
@@ -1070,7 +1073,7 @@ def _bind_files(monkeypatch, checkout: Path, upstream: Path, github: str, releas
 
 
 def _assert_pins_rewritten(checkout: Path, old: str, new: str, old_ref: str, new_ref: str) -> None:
-    for rel in ("tests/test_pins.py", "README.md"):
+    for rel in ("tests/test_pins.py", "docs/ENGINES.md"):
         text = (checkout / rel).read_text()
         assert new in text
         assert new[:8] in text

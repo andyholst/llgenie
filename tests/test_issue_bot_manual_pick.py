@@ -30,6 +30,8 @@ REPO = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO / ".github" / "workflows" / "issue-bot.yml"
 MAKEFILE = REPO / "Makefile"
 README = REPO / "README.md"
+#: The dispatch table lives in docs/BOTS.md — the README is the user guide (issue #678).
+BOTS = REPO / "docs" / "BOTS.md"
 sys.path.insert(0, str(REPO / "scripts"))
 
 import issue_implementer  # noqa: E402  (the dispatcher whose default we pin)
@@ -107,12 +109,12 @@ def test_a_supplied_number_still_pins_that_issue():
     assert "--force-issue 1234" in recipe, recipe
 
 
-def test_the_header_and_the_readme_state_the_same_contract():
-    """The file header and the README table must say what the code does, and the guard must pass."""
+def test_the_header_and_the_dispatch_table_state_the_same_contract():
+    """The file header and the dispatch table must say what the code does, and the guard must pass."""
 
-    # Given the workflow header, the README and the dispatch-forms guard
+    # Given the workflow header, the dispatch table and the dispatch-forms guard
     header = WORKFLOW.read_text().split("\non:", 1)[0]
-    readme = README.read_text()
+    readme = BOTS.read_text()
 
     # When  the blank-means-pick wording and the guard's verdict are read
     table_row = [line for line in readme.splitlines() if "`issue-bot.yml`" in line]
@@ -123,6 +125,6 @@ def test_the_header_and_the_readme_state_the_same_contract():
 
     # Then  both documents carry it and the guard is green
     assert "OPTIONAL" in header and "picks" in header, header[-600:]
-    assert table_row, "the README dispatch table must describe issue-bot.yml"
+    assert table_row, "the docs/BOTS.md dispatch table must describe issue-bot.yml"
     assert any("optional" in row and "BLANK" in row for row in table_row), table_row
     assert guard.returncode == 0, guard.stdout + guard.stderr

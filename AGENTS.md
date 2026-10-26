@@ -937,37 +937,46 @@ scenario is the contract the tests are written against, so it must read like an 
   This keeps the spec scenario and the test in lock-step: a reviewer reads the `# Given/# When/
   # Then` markers in the test body and confirms each maps to the spec's `#### Scenario`.
 
-### Documentation is part of the change: README + the work record (MANDATORY, durable)
+### Documentation is part of the change: a dated note, indexed — never a README append (MANDATORY, durable)
 
 Every change — a pipeline/job/workflow edit, a feature, a behaviour, a make target, a
-stage — MUST be **referenced and documented in `README.md` and recorded in
-`agent-wiki/` in the SAME commit**, before the PR is ready for review. The README is
-the user's navigation/usage doc: if it does not describe the change, the change does
-not exist for the person using this repo. A "done" report that makes a code change
-without those two updates is incomplete, however green the pipeline is.
+stage — MUST be **recorded as its own dated note in `agent-wiki/` and indexed in
+`CHANGES.md` in the SAME commit**, before the PR is ready for review. The README is the
+**user guide**, not the change log (issue #678): it says what llgenie is, how to install
+it, how to use it, and one page on how it works, and it points at the references. Change
+history appended to it was why it grew to 2,600 lines of work record while a new user
+could not find "Download a model". A "done" report that makes a code change without its
+note and index line is incomplete, however green the pipeline is.
 
-1. **README.md — the user-facing surface.** Any change that adds, renames, or alters a
-   user-facing feature, `make` command, target, workflow, stage or behaviour MUST be
-   mirrored in the README's matching section in the same commit: document how to
-   navigate and use it (command, layout, behaviour, and the issue number it answers).
-   That covers restructures, not just new commands — a moved job, a renamed target, a
-   new gate, a changed rule about what CI runs.
-2. **`agent-wiki/` — the work record.** Track the implementation as a dated
-   `agent-wiki/YYYY-MM-DD-<name>.md` entry (what was verified against the spec, the key
-   decisions, the current status) and **reference the issue and the PR it implements**
-   (`#<issue>`, `#<PR>`) in the entry, plus any related issue/PR it complements or
-   supersedes. Keep entries concise; don't over-engineer. Amend the existing entry for
-   the change instead of writing a second one for the same work.
-3. **The gate is real.** `make check-docs` (`scripts/check_docs.py`, run by `ci-unit`
+1. **`agent-wiki/` — the note, one per change.** Track the implementation as a dated
+   `agent-wiki/YYYY-MM-DD-<kebab>.md` entry, unique to that change: what was verified
+   against the spec, the decisions taken, the current status. **Reference the issue and
+   the PR it implements** (`#<issue>`, `#<PR>`), plus any related issue/PR it
+   complements or supersedes. Zettelkasten rules: one idea per note, a stable dated
+   filename, links — never a copy of another note. Amend the existing entry for the
+   change instead of writing a second one for the same work.
+2. **`CHANGES.md` — the index.** Add one row per change (date, the change in one line,
+   a link to its note, the issue/PR). Newest first. `CHANGES.md` is what a reader
+   follows to find the history, and it is linked from `README.md`.
+3. **The user guide still describes use.** A change that adds, renames or alters a
+   **user-facing** feature, `make` command, target or behaviour MUST also be mirrored in
+   `README.md`'s matching section in the same commit — how to run it, what it does, how
+   it fits the workflow. Automation detail (bot legs, cron slots, CI wiring, secret
+   plumbing) belongs in `docs/BOTS.md`; engine build/serve detail in `docs/ENGINES.md`;
+   the code map in `docs/ARCHITECTURE.md`. **Never document a change by appending a
+   section to `README.md`**, and a bot never writes `README.md` at all.
+4. **The gate is real.** `make check-docs` (`scripts/check_docs.py`, run by `ci-unit`
    next to `check-wiring`) fails when a user-facing make target (a `##` help line, i.e.
-   one `make help` prints) is not named in `README.md`, when a recorded exception in
-   `tests/fixtures/docs-exceptions.json` goes STALE (the README documents it after
-   all), or when an `agent-wiki/` entry references no issue or PR. A target that must
-   stay out of the README needs a dated entry there (reason + date + issue) — an
-   omission has to be a decision, not an accident. `make docs-report` shows the whole
-   picture (documented / missing / recorded exceptions / each record's references).
-   Run it in the same commit as the target you added; a red `ci-unit` here is the gate
-   working, not noise.
+   one `make help` prints) is named in neither `README.md` nor a `docs/` page the README
+   links, when a recorded exception in `tests/fixtures/docs-exceptions.json` goes STALE,
+   when an `agent-wiki/` entry references no issue or PR, when a note is missing from
+   `CHANGES.md` or an index row points at a note that does not exist, and when
+   `README.md` carries an issue-numbered change heading, a change-log heading or the
+   generated dispatch-table marker. A target documented in no doc needs a dated entry in
+   the exceptions file (reason + date + issue) — an omission has to be a decision, not an
+   accident. `make docs-report` shows the whole picture (documented / missing / recorded
+   exceptions / each record's references and index state). Run it in the same commit as
+   the change; a red `ci-unit` here is the gate working, not noise.
 - If the full loop can't complete, still run `make test-unit` + `make
   openspec-validate` and report their real results. Never hand-edit artifacts to
   fake green; fix the root cause and re-run.
