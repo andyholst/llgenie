@@ -43,7 +43,9 @@ def live_files():
     forbids), so it excludes itself rather than special-casing its own text.
     """
     me = Path(__file__).resolve()
-    for p in sorted(REPO.rglob("*")):
+    # GIT-TRACKED files only (issue #350): a scratch artefact or a bot's gitignored working file
+    # (`refine-in.md`) reddened the local loop while a fresh CI checkout stayed green.
+    for p in guard.live_files(REPO):
         if not p.is_file() or set(p.parts) & SKIP_DIRS or p.resolve() == me:
             continue
         rel = str(p.relative_to(REPO))
@@ -188,3 +190,23 @@ def test_the_shared_rule_allows_the_shim_and_the_dated_history(tmp_path):
 
     # Then  only the live doc is a hit
     assert found == ["docs/ARCHITECTURE.md"], found
+
+
+def test_a_gitignored_file_naming_the_old_module_does_not_redden_the_guard(tmp_path):
+    """The guard reads what git tracks (issue #350), so an untracked, gitignored working file is
+    not a finding — CI checks out the tracked tree, and it must be the same verdict here."""
+
+    # Given a gitignored file the refiner leaves in the checkout, naming the old module
+    scratch = REPO / "refine-in.md"
+    assert "refine-in.md" in (REPO / ".gitignore").read_text(), "the fixture relies on .gitignore"
+    scratch.write_text("the old module llama_serve.py, quoted by a bot artifact\n")
+    try:
+        # When  the guard reads the repo
+        seen = {str(p.relative_to(REPO)) for p in guard.live_files(REPO)}
+        found = guard.hits(REPO, exclude=[Path(__file__)])
+    finally:
+        scratch.unlink(missing_ok=True)
+
+    # Then  the gitignored file is neither read nor a finding
+    assert "refine-in.md" not in seen
+    assert "refine-in.md" not in found, found
