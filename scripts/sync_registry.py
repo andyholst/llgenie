@@ -4,8 +4,25 @@
   sync_registry.py sync  [--src URL|FILE] [--dest FILE]   download, validate, write when changed
   sync_registry.py check [--dest FILE]                    validate the vendored file
 
-The file is copied byte-for-byte (no reformatting), so `git diff` shows exactly
-what upstream changed. Stdlib only.
+The file is copied byte-for-byte EXCEPT for the two normalisations below (issue #687,
+a deliberate, documented departure from the verbatim rule): upstream's store started
+mixing per-box experiment rows into `models[]` and writing model names into
+`formats[].name`, which no consumer can rank or download from.
+
+  1. base rows only: a row whose name is a per-box/per-recipe variant of another row
+     ("Qwen3.8-27B (iPad Pro + eGPU R9700)", "… Twin Turbo") is folded into its base row —
+     its measurements are appended (a post already on the base is skipped), its
+     backends/supported_engines unioned — so ONE row per model remains and no
+     measurement is lost;
+  2. formats restricted to the vocabulary (GGUF | MLX | safetensors | mlx-safetensors |
+     litertlm). An unknown name is dropped; a row left with no format states GGUF for its
+     own `hf` repo, the same fallback the picker documents ("the most-downloaded
+     `<name>-GGUF` repo"), unless that repo says MLX/litertlm.
+
+The vendored README's "Most loved" table loses the folded rows with them, so the store and
+the list a user reads stay the same set in the same order. Every fold/drop is printed.
+
+Stdlib only.
 """
 from __future__ import annotations
 
@@ -165,6 +182,88 @@ def fetch(src: str) -> bytes:
     return Path(src).read_bytes()
 
 
+#: The format vocabulary a consumer can act on (issue #687). Anything else in
+#: `formats[].name` is upstream's display text, not a format.
+FORMAT_VOCAB = ("GGUF", "MLX", "safetensors", "mlx-safetensors", "litertlm")
+
+def _canon_format(name: str) -> str | None:
+    """The vocabulary spelling of a format name, or None when it is not a format."""
+    for known in FORMAT_VOCAB:
+        if str(name or "").strip().lower() == known.lower():
+            return known
+    return None
+
+
+def _format_from_repo(*hints: str) -> str | None:
+    """The format a repo id (or a row's id/name) states: mlx / litertlm / -GGUF, else None."""
+    low = " ".join(str(h or "") for h in hints).lower()
+    if "litertlm" in low:
+        return "litertlm"
+    if "mlx" in low:
+        return "MLX"
+    if "-gguf" in low or low.endswith("/gguf"):
+        return "GGUF"
+    return None
+
+
+def normalise_formats(row: dict) -> tuple[list[dict], str]:
+    """`row`'s formats restricted to the vocabulary; a row left with none states GGUF for
+    its own repo (the picker's documented `<name>-GGUF` fallback), unless that repo names
+    another format. Returns (formats, note) — note is "" when nothing was dropped."""
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for z in row.get("formats") or []:
+        canon = _canon_format(z.get("name"))
+        if canon is None:
+            dropped.append(str(z.get("name")))
+            continue
+        entry = dict(z)
+        entry["name"] = canon
+        if canon not in [k["name"] for k in kept]:
+            kept.append(entry)
+    note = ""
+    if dropped and not kept:
+        repo = row.get("hf") or ""
+        stated = _format_from_repo(repo, row.get("id"), row.get("name")) or "GGUF"
+        kept = [{"name": stated, "hf": repo}]
+        note = f"{row.get('id')}: formats {dropped} are not formats; stated {stated} for {repo}"
+    elif dropped:
+        note = f"{row.get('id')}: dropped non-format formats {dropped}"
+    return kept, note
+
+
+def normalise(data: dict) -> tuple[dict, list[str]]:
+    """The store llgenie vendors: every upstream row, one per id, formats in the vocabulary.
+
+    Upstream's `models[]` rows are distinct entities (a base model, a merged finetune, an
+    MLX conversion, a run on one box) and its own README lists each as its own row, so this
+    does NOT fold rows: which of them are "the same model" is upstream's data model to
+    decide, and a name heuristic here would drop real models (`Qwen3.8-27B Defiance
+    Uncensored` is a finetune, `Qwen3-1.7B (Woodcock on MLX)` is a run of a model upstream
+    lists nowhere else). What IS unambiguous is a duplicated row and a `formats[].name`
+    that is a model name instead of a format — both are normalised, and every change is
+    printed (issue #687).
+    """
+    notes: list[str] = []
+    rows: list[dict] = []
+    seen: dict[str, str] = {}
+    for row in data.get("models") or []:
+        row = dict(row)
+        key = str(row.get("id") or row.get("name") or "")
+        if key in seen:
+            notes.append(f"dropped duplicate row {key!r} (same id as {seen[key]!r})")
+            continue
+        seen[key] = key
+        fmts, note = normalise_formats(row)
+        row["formats"] = fmts
+        if note:
+            notes.append(note)
+        rows.append(row)
+    out = dict(data)
+    out["models"] = rows
+    return out, notes
+
+
 def _summary(data: dict) -> str:
     return f"generated_utc={data.get('generated_utc', '?')} models={len(data['models'])}"
 
@@ -183,17 +282,26 @@ def sync(src: str, dest: Path, readme_src: str | None = UPSTREAM_README,
     except ValueError as e:
         print(f"[sync-registry] REJECTED {src}: {e}", file=sys.stderr)
         return 1
+    # Everything below vendors the NORMALISED store (issue #687): one row per model, formats
+    # in the vocabulary, and the README carrying the same rows in the same order.
+    store, notes = normalise(new)
+    if readme is not None:
+        check_readme_matches(store, readme)
+    raw = (json.dumps(store, indent=2, ensure_ascii=False) + "\n").encode()
+    for note in notes:
+        print(f"[sync-registry] note: {note}")
+
     old = dest.read_bytes() if dest.exists() else b""
     same_readme = readme is None or (readme_dest.exists() and readme_dest.read_text() == readme)
     if old == raw and same_readme:
-        print(f"[sync-registry] unchanged: {dest} ({_summary(new)})")
+        print(f"[sync-registry] unchanged: {dest} ({_summary(store)})")
         return 0
     before = _summary(validate(old)) if old else "(none)"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(raw)
     if readme is not None:
         readme_dest.write_text(readme)
-    print(f"[sync-registry] updated {dest}: {before} -> {_summary(new)}")
+    print(f"[sync-registry] updated {dest}: {before} -> {_summary(store)}")
     return 0
 
 

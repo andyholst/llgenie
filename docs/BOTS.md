@@ -72,7 +72,10 @@ counts. A target that genuinely writes a file of its own name is exempt — but 
 under `not_phony` in `tests/fixtures/host-only-wiring.json`, which is refused without a reason and
 reported stale once the target is declared or gone.
 
-The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
+`make sync-registry` vendors a **normalised** copy of upstream's store (issue #687): `formats`
+restricted to the vocabulary, a non-format name restated from the row's repo/id, a duplicate id
+dropped — printed, one note per change — while every model row upstream lists is kept, because a
+name heuristic cannot tell a finetune from a run on one box. The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
 Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`), the
 trend-list matrix (`make render-trend-list-matrix`) and the per-engine gap
 (`make render-engine-skill-gap`), and opens a PR when any of those files changed.
