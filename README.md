@@ -284,14 +284,28 @@ Each model also states **what its run needs**, per upstream's `data/MODEL_CONTRA
 They may sit on the model **or** on one `engines[]` measurement ("the footprint of that run"); the
 measurement's own value wins for that engine, and a field the store does not state is a reported data
 gap — never invented. `weight_gb`, `context_tokens` and `system_ram_min` are **grow-only** in
-`make check-registry-keys`, like a t/s or an engagement counter.
+`make check-registry-keys`: they are static data about a run, and a lower value shrinks the budget
+llgenie allocates.
+
+**What the additive-only gate fails on, and what it only reports (issue #668).** Upstream rewrites its
+rows on every refresh, so the guard compares *identity*, not text. It **fails** the sync when a model row
+is gone, a key is gone from a model row, an engine that had a measurement for a model has none, a
+`backends` / `supported_engines` entry or a `formats` name is gone, an engine-registry entry is gone, a
+stated footprint is lowered, or a **tracked post** (the `/status/<id>` of a `source_post`) is nowhere in
+the new store. It **prints as a `NOTE:`** (and exits 0) when a surviving post's t/s is re-stated lower, an
+engagement counter drops (X re-scrapes move likes/views both ways), or the derived `engagement.seen_posts`
+placeholder shrinks. A measurement is identified by its post store-wide, so a refined hardware string, a
+post re-attributed to a split model row, and a profile link upgraded to its real status URL are the same
+measurement — keying on `(engine, hardware)` read all of them as a loss and froze the weekly sync for 13
+days (#534).
 
 ```bash
 make sync-registry    # download upstream data/models.json + README.md into data/ (validated: the
                       # registry must be the README "Most loved" list in README order)
 make check-registry   # validate the vendored files (CI)
-make check-registry-keys  # CI: additive only — a removed model/key/measurement, a lowered t/s,
-                      # counter, weight_gb, context_tokens or system_ram_min fails the sync
+make check-registry-keys  # CI: additive only — a removed model/key/engine/format/tracked post or a
+                      # lowered weight_gb/context_tokens/system_ram_min fails the sync; a re-stated
+                      # t/s or re-scraped counter is printed as a NOTE and does not
 make sync-quant-catalog   # regenerate the HF class table data/trending-quant-catalog.json + its test
                           # fixture (model -> engine -> arch + real quant plans with per-quant links)
                           # from the registry + live Hub; validates the newly-added links vs the prior table

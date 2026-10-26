@@ -822,14 +822,30 @@ the sync **lost**, so a sync that dropped a key, a model, a measurement, a t/s
 or an engagement counter used to land silently and only show up later as a
 thin trend list (`llgenie` then ranks engines from data that no longer exists).
 
-- **A key is never removed, renamed or narrowed, and a value is never shrunk.**
-  Additions are always fine. `scripts/registry_keys.py` compares the working
-  copy against the previously committed one (`HEAD:data/models.json`) and fails
-  on: a removed model, a key gone from a model row (list-of-objects compared as
-  a key union, so an upstream collapse/reorder is not a loss), a lost
-  `(engine, hardware)` measurement group, a lowered t/s, a lowered engagement
-  counter, a lost `backends` / `supported_engines` entry, a lost format, or a
-  removed engine-registry entry.
+- **A model, a key, an engine, a list entry or a stated footprint is never removed,
+  and a stated footprint is never shrunk.** Additions are always fine.
+  `scripts/registry_keys.py` compares the working copy against the previously
+  committed one (`HEAD:data/models.json`) and fails on: a removed model, a key gone
+  from a model row (list-of-objects compared as a key union, so an upstream
+  collapse/reorder is not a loss), **an engine that had a measurement for the model
+  and has none** (that is the unit `rank_engines` groups by, so losing it thins the
+  trend list), a lost `backends` / `supported_engines` entry, a lost format, a
+  removed engine-registry entry, a lowered `weight_gb` / `context_tokens` /
+  `system_ram_min` (on the model or on a measurement), and a **tracked post** (the
+  `/status/<id>` of a `source_post`) that is nowhere in the new store.
+- **A measurement is identified by its post, store-wide — never by its
+  `(engine, hardware)` label (issue #668).** Upstream refines a hardware string
+  (`RTX 6000` → `RTX 6000 24GB`), re-attributes a post to a split model row and
+  upgrades a profile link to the real status URL; none of that loses a
+  measurement, and keying on the label made all of it read as one and froze the
+  weekly sync for 13 days (#534). `engagement.seen_posts` is a DERIVED placeholder
+  (rebuilt on every upstream sort), so its element keys are not data and an emptied
+  one is not ten lost keys.
+- **What the store RE-READS is reported, not failed.** A surviving post's lowered
+  t/s (upstream correcting a figure) and a decreased engagement counter (a live X
+  re-scrape — likes genuinely fall) are printed as `NOTE:` with both numbers, and
+  do not fail the gate: they remove nothing from the ranked set. Do not "fix" a note
+  by widening `data/models.json`; a note is a report.
 - **`make check-registry-keys`** drives it and is part of `make check-registry`,
   which `make ci-unit` (`.github/workflows/pipeline.yml`) and the weekly
   `.github/workflows/registry-sync.yml` job both run — a guard no CI job executes
