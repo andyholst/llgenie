@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-26 | a dry run that outlives its deadline is retried, not raised out of the seam | [2026-10-26-top-tier-timeout-retry.md](agent-wiki/2026-10-26-top-tier-timeout-retry.md) | #676 |
 | 2026-10-26 | sglang's version fallback is the pin, never a commit sha | [2026-10-26-sglang-version-not-pin.md](agent-wiki/2026-10-26-sglang-version-not-pin.md) | #636, #650 |
 | 2026-10-26 | the README is the user guide; every change is a dated note indexed here | [2026-10-26-readme-user-guide-changes-index.md](agent-wiki/2026-10-26-readme-user-guide-changes-index.md) | #678, #680 |
 | 2026-10-26 | the unit gate stops requiring a tag its own PR is publishing | [2026-10-26-unit-gate-bump-race.md](agent-wiki/2026-10-26-unit-gate-bump-race.md) | #672, #674, #665, #663 |
