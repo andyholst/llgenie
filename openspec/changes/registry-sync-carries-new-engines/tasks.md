@@ -7,6 +7,6 @@
 - [x] 5. `AGENTS.md` + `docs/BOTS.md`: the rule and the operational record (which scope runs where, and why)
 - [x] 6. Tests: `tests/test_registry_sync_trend.py` (carrying vs strict, the sync step's exact scope, ci-unit not passing the flag), `tests/test_engine_skill_gap.py` (the sync still spawns issues and never runs the ci-unit gate)
 - [x] 7. Verified on the REAL new store in a throwaway worktree: `make skills-validate … ALLOW_NEW_ENGINES=1` → `0 error(s)`, the same command without it → `16 error(s)`; `check-registry` 0 losses (81 drift notes), `check-quant-catalog`, `render-trend-list-matrix` (81 cases), `render-engine-skill-gap`, `engine-skill-gap` report all exit 0
-- [ ] 8. `agent-wiki/2026-10-26-registry-sync-carries-new-engines.md` + its `CHANGES.md` row
-- [ ] 9. Gates: `make test-unit`, `make check-docs`, `make check-workflows`, `make check-wiring`, `make lint`, `make openspec-validate NAME=registry-sync-carries-new-engines`
-- [ ] 10. Re-dispatch `registry-sync` on `main` after the merge and confirm it reaches the PR step (the end-to-end proof)
+- [x] 8. `agent-wiki/2026-10-26-registry-sync-carries-new-engines.md` + its `CHANGES.md` row
+- [x] 9. Gates: `make test-unit`, `make check-docs`, `make check-workflows`, `make check-wiring`, `make lint`, `make openspec-validate NAME=registry-sync-carries-new-engines` all exit 0 on this branch
+- [x] 10. The sync's remaining POST-fix blockers are filed as their own linked issues and named in the PR: #686 (decide the 16 engines the store names) and #687 (upstream's per-box rows + non-format `formats` red 101 hermetic tests) — the end-to-end re-dispatch on `main` is the step after both
