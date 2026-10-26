@@ -30,6 +30,7 @@ HEADER = """# Trigger surface: schedule + workflow_dispatch.
 def _tree(tmp_path: Path, workflows: dict[str, str]) -> Path:
     root = tmp_path / "repo"
     (root / cdf.WORKFLOWS).mkdir(parents=True, exist_ok=True)
+    (root / "docs").mkdir(parents=True, exist_ok=True)
     for name, body in workflows.items():
         (root / cdf.WORKFLOWS / name).write_text(body)
     return root
@@ -184,7 +185,7 @@ def test_a_workflow_without_workflow_dispatch_is_out_of_scope(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# the README table is generated from the workflows and verified against them
+# the dispatch table in docs/BOTS.md is generated from the workflows and verified against them
 # ---------------------------------------------------------------------------
 def test_the_table_lists_every_dispatchable_workflow_and_its_inputs(tmp_path):
     root = _tree(tmp_path, {
@@ -200,18 +201,18 @@ def test_the_table_lists_every_dispatchable_workflow_and_its_inputs(tmp_path):
     assert "ci.yml" not in tbl
 
 
-def test_a_stale_readme_table_fails_and_a_fresh_one_passes(tmp_path):
+def test_a_stale_dispatch_table_fails_and_a_fresh_one_passes(tmp_path):
     root = _tree(tmp_path, {"a-bot.yml": _wf()})
-    (root / cdf.README).write_text(f"# t\n\n{cdf.BEGIN}\nstale\n{cdf.END}\n")
-    assert "stale" in (cdf.readme_stale(root) or "")
-    (root / cdf.README).write_text(f"# t\n\n{cdf.BEGIN}\n{cdf.table(root)}\n{cdf.END}\n")
-    assert cdf.readme_stale(root) is None
+    (root / cdf.DOC).write_text(f"# t\n\n{cdf.BEGIN}\nstale\n{cdf.END}\n")
+    assert "stale" in (cdf.doc_stale(root) or "")
+    (root / cdf.DOC).write_text(f"# t\n\n{cdf.BEGIN}\n{cdf.table(root)}\n{cdf.END}\n")
+    assert cdf.doc_stale(root) is None
 
 
-def test_a_readme_without_the_markers_is_reported(tmp_path):
+def test_a_doc_without_the_markers_is_reported(tmp_path):
     root = _tree(tmp_path, {"a-bot.yml": _wf()})
-    (root / cdf.README).write_text("# t\n\nno markers here\n")
-    assert "no `<!-- dispatch-forms:begin -->`" in (cdf.readme_stale(root) or "")
+    (root / cdf.DOC).write_text("# t\n\nno markers here\n")
+    assert "no `<!-- dispatch-forms:begin -->`" in (cdf.doc_stale(root) or "")
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@ def test_check_exits_non_zero_on_a_violation_and_zero_on_a_clean_tree(tmp_path, 
     assert cdf.main(["check", "--root", str(bad_root)]) == 1
 
     good_root = _tree(tmp_path / "good", {"a-bot.yml": _wf()})
-    (good_root / cdf.README).write_text(f"# t\n\n{cdf.BEGIN}\n{cdf.table(good_root)}\n{cdf.END}\n")
+    (good_root / cdf.DOC).write_text(f"# t\n\n{cdf.BEGIN}\n{cdf.table(good_root)}\n{cdf.END}\n")
     assert cdf.main(["check", "--root", str(good_root)]) == 0
 
 
@@ -238,7 +239,7 @@ def test_report_prints_the_table_and_exits_zero(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 def test_this_repository_states_what_every_dispatchable_run_does():
     assert cdf.violations(REPO) == []
-    assert cdf.readme_stale(REPO) is None
+    assert cdf.doc_stale(REPO) is None
     assert cdf.main(["check"]) == 0
 
 

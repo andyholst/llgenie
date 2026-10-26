@@ -402,6 +402,7 @@ def test_targets_and_doc_are_wired_into_the_gates():
     # Given the Makefile, README and the architecture doc
     mk = (REPO / "Makefile").read_text()
     readme = (REPO / "README.md").read_text()
+    bots = (REPO / "docs" / "BOTS.md").read_text()
     doc = (REPO / DOC).read_text()
     targets = [name for name, _ in ab.public_targets(REPO)]
     phony = mk.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
@@ -412,7 +413,7 @@ def test_targets_and_doc_are_wired_into_the_gates():
         # Then it has a `##` help line, is declared phony, and is documented in the README
         assert name in targets, f"{name} has no `##` help line"
         assert name in phony, f"{name} is not in .PHONY"
-        assert name in readme, f"{name} is not documented in README.md"
+        assert name in readme or name in bots, f"{name} is not documented in README.md or docs/BOTS.md"
 
     # And the doc is a real map, not a stub
     assert len(doc) > 2000

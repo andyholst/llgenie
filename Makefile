@@ -736,9 +736,9 @@ check-strata-models: ## CI: fail when data/strata_models.json differs from Strat
 	python3 scripts/strata_models.py check
 engine-bump-rebase: ## Rebase every open chore/engine-bump-* PR onto the latest main (DRY=1 prints what it would do and pushes nothing)
 	python3 scripts/engine_bump_rebase.py $(if $(DRY),--dry,)
-check-dispatch-forms: ## CI: fail when a dispatchable workflow does not state the work it will do: name, documented dispatch inputs, header block, and the README table
+check-dispatch-forms: ## CI: fail when a dispatchable workflow does not state the work it will do: name, documented dispatch inputs, header block, and the docs/BOTS.md table
 	python3 scripts/check_dispatch_forms.py check
-dispatch-forms-report: ## Print the README's dispatch table (generated from the workflow files; paste it between the dispatch-forms markers)
+dispatch-forms-report: ## Print the dispatch table in docs/BOTS.md (generated from the workflow files; paste it between the dispatch-forms markers)
 	python3 scripts/check_dispatch_forms.py report
 issue-cleaner-scan: ## Which OPEN issue a merged PR already implemented (the linkage guard cannot see, issue #325): prints each finding and its evidence, closes nothing (REPO= picks the repo)
 	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)" --dry
@@ -821,9 +821,9 @@ check-wiring: ## CI: fail when a test/script is wired to no make target or only 
 	python3 scripts/check_wiring.py check
 wiring-report: ## Show how every test/script is wired (which make target, and whether CI runs it) and the recorded host-only exceptions
 	python3 scripts/check_wiring.py report
-check-docs: ## CI: fail when a user-facing (## help) make target is not documented in README.md, when a recorded exception is stale, or when an agent-wiki/ work record references no issue or PR (issue #257)
+check-docs: ## CI: fail when a user-facing (## help) make target is undocumented, a recorded exception is stale, an agent-wiki/ note references no issue or is missing from CHANGES.md, or README.md carries change history (issues #257, #678)
 	python3 scripts/check_docs.py check
-docs-report: ## Show every user-facing make target as documented / missing / a recorded exception, and each agent-wiki/ work record's issue references
+docs-report: ## Show every user-facing make target as documented / missing / a recorded exception, and each agent-wiki/ note's issue references + CHANGES.md index state
 	python3 scripts/check_docs.py report
 auto-merge: ## Merge a PR ONLY when this run is green and the PR is conflict-free: state OPEN, mergeable MERGEABLE, mergeStateStatus CLEAN (no conflicts, not behind, not blocked), head pinned to HEAD_SHA, no do-not-merge label; then verify what it closed (PR= REPO= HEAD_SHA= from ci.yml; APPROVE=1 approves a green review-blocked PR with the other allowed identity; DRY=1 prints the decision)
 	@test -n "$(PR)" && test -n "$(REPO)" || { echo "Usage: make auto-merge PR=<n> REPO=<owner/repo> [HEAD_SHA=<sha>] [APPROVE=1] [DRY=1]"; exit 1; }
@@ -1504,7 +1504,7 @@ help:
 	@echo "  make implement-issue             the shared Hermes agent step: read issue.md + AGENTS.md, implement, run the gates, push nothing (NOUS_API_KEY from a secret)"
 	@echo "  make hermes-smoke               one real Hermes call through the implementer alias (die in seconds)"
 	@echo "  make agent-jev-preflight           report whether the JEV decision layer is available in the agent image (never blocks a run; NERVE_REQUIRE=1 verifies the image instead) — issue #238"
-	@echo "  make check-docs                  CI: fail when a user-facing make target is not documented in README.md, a recorded exception is stale, or an agent-wiki/ work record references no issue"
+	@echo "  make check-docs                  CI: fail when a user-facing make target is undocumented, an exception is stale, an agent-wiki/ note is not indexed in CHANGES.md, or README.md carries change history"
 	@echo "  make docs-report                 show every user-facing make target (documented / missing / recorded exception) and each work record's issue references"
 	@echo "  make check-pr-authors            CI: fail when a PR commit is authored by anyone but Andy Holst or Asimov Agent, when a Co-authored-by trailer names anyone else, or when a producer commits off the allowlist — PR_BASE/PR_HEAD bound the range (issue #345)"
 	@echo "  make pr-authors-report           show every commit in the range with its author verdict, and the identity each producer assigns"

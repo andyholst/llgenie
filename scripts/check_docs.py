@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
-"""Is every user-facing make target documented in README.md? (issue #257)
+"""Is every user-facing make target documented, and is the README a user guide? (issue #257, #678)
 
-AGENTS.md: "Any change that adds, renames, or alters a user-facing feature, `make`
-command, target, or workflow MUST be mirrored in `README.md` in the same change" and
-"Track progress in `agent-wiki/`". Nothing enforced either, so a target could be
-added, shipped and never appear in the README the user reads, and a work record could
-name no issue or PR at all. This is that rule, computed from the real files:
+`README.md` is the document a new user reads: what llgenie is, how to install it, how to use it,
+and how it works, with links to `docs/ARCHITECTURE.md`, `docs/ENGINES.md`, `docs/BOTS.md` and
+`CHANGES.md`. It is NOT a change log — a change's own record is a dated note in `agent-wiki/`,
+indexed by `CHANGES.md` (issue #678). Nothing enforced either rule, so a target could ship
+undocumented, and every landed change could (and did) append another issue-numbered section to the
+README until it was 2,600 lines of work record.
 
-  check_docs.py report    print every documented/undocumented target, and the exceptions
-  check_docs.py check     exit 1 on an undocumented target, a stale exception, a
-                          malformed exception, or an agent-wiki entry with no issue/PR
+  check_docs.py report    print every documented/undocumented target, the exceptions, each work
+                          record's references, and the README/CHANGES verdict
+  check_docs.py check     exit 1 on any defect below
 
 What "documented" means — one definition, no guessing:
 
 - a **documented target** is a make target that carries a `##` help line (the targets
-  `make help` prints — the user-facing surface) AND is named in `README.md`;
-- a target is matched **whole-token** in the README (`docs-report` in the README does
-  not document `docs`), and a **pattern target** (`build-engine-%`, `run-engine-%`) is
-  documented by its stem (`build-engine`, `run-engine`);
-- a target that is user-facing but deliberately not in the README must be recorded in
-  `tests/fixtures/docs-exceptions.json` (reason + decided date + issue) — an omission
-  is a dated decision, not an accident. A recorded exception that the README now
-  documents is STALE and must be deleted, so the file cannot rot;
-- every `agent-wiki/*.md` entry must **reference** the issue or PR it implements
-  (`#<n>`) — a work record that names no issue is unfalsifiable.
+  `make help` prints — the user-facing surface) AND is named in the **documentation surface**:
+  `README.md` plus every markdown file under `docs/` that the README links to. A user target
+  belongs in the README; an automation target belongs in `docs/BOTS.md`; both count;
+- a target is matched **whole-token** (`docs-report` in the README does not document `docs`), and
+  a **pattern target** (`build-engine-%`, `run-engine-%`) is documented by its stem;
+- a target that is user-facing but deliberately documented nowhere must be recorded in
+  `tests/fixtures/docs-exceptions.json` (reason + decided date + issue) — an omission is a dated
+  decision, not an accident. A recorded exception that the surface now documents is STALE and must
+  be deleted, so the file cannot rot;
+- every `agent-wiki/*.md` entry must **reference** the issue or PR it implements (`#<n>`) — a work
+  record that names no issue is unfalsifiable — and must be **indexed in `CHANGES.md`**;
+- every note `CHANGES.md` links must exist, and `README.md` must link `CHANGES.md`;
+- `README.md` must stay a user guide: no heading carrying an `(issue #N)` change reference, no
+  generated dispatch-table marker, and no change-log heading — a bot that appends change history
+  to it fails this gate instead of being able to.
 
 Stdlib only.
 """
@@ -38,6 +44,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 MAKEFILE = "Makefile"
 README = "README.md"
+CHANGES = "CHANGES.md"
+DOCS_DIR = "docs"
 WIKI_DIR = "agent-wiki"
 EXCEPTIONS = "tests/fixtures/docs-exceptions.json"
 
@@ -45,6 +53,15 @@ EXCEPTIONS = "tests/fixtures/docs-exceptions.json"
 TARGET_RE = re.compile(r"^([a-z0-9][a-z0-9._-]*%?):[^\n]*##[^\n]*$", re.M)
 # An issue/PR reference in a work record: "#123", "issue 123", "PR 123", "issues #1, #2".
 REF_RE = re.compile(r"#\d+|\b(?:issue|issues|pr|PRs?)\s+#?\d+", re.I)
+# A README heading that is a change record, not a section of the user guide.
+CHANGE_HEADING_RE = re.compile(r"^#{1,6} .*?\((?:issues?|prs?)\s*#?\d+", re.M | re.I)
+# A change-log heading under any spelling a bot would append.
+CHANGELOG_HEADING_RE = re.compile(r"^#{1,6}\s+(?:change\s?log|changelog|recent changes|changes)\s*$",
+                                  re.M | re.I)
+# A markdown link to a work record, as `CHANGES.md` writes them.
+WIKI_LINK_RE = re.compile(r"\]\((?:\./)?agent-wiki/([^)\s]+\.md)\)")
+# A markdown link the README uses to reach a reference document.
+DOC_LINK_RE = re.compile(r"\]\((?:\./)?(docs/[^)\s]+\.md)\)")
 
 
 def _targets(root: Path) -> dict[str, str]:
@@ -68,8 +85,25 @@ def _documents(readme: str, target: str) -> bool:
     return bool(re.search(r"(?<![A-Za-z0-9_-])" + re.escape(stem) + r"(?![A-Za-z0-9_-])", readme))
 
 
+def _readme(root: Path) -> str:
+    """The README's own text (empty when it does not exist — the caller reports that)."""
+    path = root / README
+    return path.read_text() if path.exists() else ""
+
+
+def _surface(root: Path) -> dict[str, str]:
+    """`{doc: text}` for the README and every `docs/` page it links to."""
+    readme = _readme(root)
+    docs: dict[str, str] = {README: readme}
+    for rel in sorted(set(DOC_LINK_RE.findall(readme))):
+        path = root / rel
+        if path.exists():
+            docs[rel] = path.read_text()
+    return docs
+
+
 def _exceptions(root: Path) -> dict:
-    """The recorded user-facing targets that stay out of the README, plus its metadata."""
+    """The recorded user-facing targets that stay out of the docs, plus its metadata."""
     path = root / EXCEPTIONS
     if not path.exists():
         return {"path": str(path), "decided_utc": None, "targets": {}}
@@ -100,43 +134,75 @@ def _wiki_entries(root: Path) -> dict[str, str]:
 def graph(root: Path = REPO) -> dict:
     """The documentation graph, computed from the real files."""
     targets = _targets(root) if (root / MAKEFILE).exists() else {}
-    readme = (root / README).read_text() if (root / README).exists() else ""
-    documented = [t for t in targets if _documents(readme, t)]
+    surface = _surface(root)
+    readme = surface.get(README, "")
+    joined = "\n".join(surface.values())
+    documented = [t for t in targets if _documents(joined, t)]
     undocumented = [t for t in targets if t not in documented]
+    changes = (root / CHANGES).read_text() if (root / CHANGES).exists() else ""
     return {
         "root": str(root),
         "readme": README,
+        "readme_text": readme,
+        "surface": list(surface),
         "targets": targets,
         "documented": documented,
         "undocumented": undocumented,
         "exceptions": _exceptions(root),
         "wiki": _wiki_entries(root),
+        "changes": changes,
+        "changes_links": sorted(set(WIKI_LINK_RE.findall(changes))),
+        "change_headings": [m.group(0).strip() for m in CHANGE_HEADING_RE.finditer(readme)]
+                            + [m.group(0).strip() for m in CHANGELOG_HEADING_RE.finditer(readme)],
     }
 
 
 def problems(info: dict) -> list[str]:
-    """Errors: an undocumented user-facing target, a stale/undocumented exception, a
-    work record that references no issue or PR."""
+    """Every documentation defect: an undocumented target, a stale/undocumented exception, a work
+    record that references no issue or PR or is not indexed, a dangling index row, and a README
+    that carries change history or does not reach the index."""
     recorded = info["exceptions"]["targets"]
-    what = info["readme"]
     errors: list[str] = []
     for target in info["undocumented"]:
         if target in recorded:
             continue
         errors.append(
-            f"{what}: `make {target}` is user-facing (it has a `##` help line) but is not "
-            f"documented there — document it, or record it in {EXCEPTIONS} with a reason"
+            f"`make {target}` is user-facing (it has a `##` help line) but is documented in neither "
+            f"{info['readme']} nor {DOCS_DIR}/ — document it, or record it in {EXCEPTIONS} with a reason"
         )
     for target, entry in recorded.items():
         if target not in info["targets"]:
             errors.append(f"{EXCEPTIONS}: {target!r} is not a user-facing make target any more")
         elif target in info["documented"]:
             errors.append(
-                f"{EXCEPTIONS}: {target!r} is STALE — {what} documents it now; delete the entry"
+                f"{EXCEPTIONS}: {target!r} is STALE — the docs document it now; delete the entry"
             )
     for name, text in info["wiki"].items():
         if not REF_RE.search(text):
             errors.append(f"{WIKI_DIR}/{name}: references no issue or PR (`#<n>`)")
+        if name not in info["changes_links"]:
+            errors.append(
+                f"{WIKI_DIR}/{name}: is not indexed in {CHANGES} — add its row "
+                f"(one change, one dated note, one index line)"
+            )
+    known = set(info["wiki"])
+    for name in info["changes_links"]:
+        if name not in known:
+            errors.append(f"{CHANGES}: links {WIKI_DIR}/{name}, which does not exist")
+    if not info["changes"]:
+        errors.append(f"{CHANGES} does not exist — it is the index of the {WIKI_DIR}/ work records")
+    elif not re.search(r"\]\((?:\./)?CHANGES\.md\)", info["readme_text"]):
+        errors.append(f"{info['readme']} does not link {CHANGES}, so a reader never finds the records")
+    for heading in info["change_headings"]:
+        errors.append(
+            f"{info['readme']}: {heading!r} is change history, not a user-guide section — the change "
+            f"belongs in its {WIKI_DIR}/ note, indexed by {CHANGES}"
+        )
+    if "<!-- dispatch-forms:" in info["readme_text"]:
+        errors.append(
+            f"{info['readme']} carries a generated dispatch table — it lives in {DOCS_DIR}/BOTS.md, "
+            f"so no bot regenerates the README"
+        )
     return errors
 
 
@@ -145,8 +211,9 @@ def report(info: dict) -> str:
     lines = [
         f"[check-docs] {info['root']}",
         f"[check-docs] {len(info['targets'])} user-facing (## help) make targets, "
-        f"{len(info['documented'])} documented in {info['readme']}, "
-        f"{len(info['undocumented'])} not, {len(recorded)} recorded exception(s)",
+        f"{len(info['documented'])} documented in {len(info['surface'])} doc(s) "
+        f"({', '.join(info['surface'])}), {len(info['undocumented'])} not, "
+        f"{len(recorded)} recorded exception(s)",
     ]
     for target in info["undocumented"]:
         mark = "recorded" if target in recorded else "MISSING"
@@ -158,10 +225,15 @@ def report(info: dict) -> str:
         )
     for name, text in info["wiki"].items():
         refs = REF_RE.findall(text)
-        lines.append(
-            f"[check-docs]   {WIKI_DIR}/{name}: {len(refs)} issue/PR reference(s)"
-            if refs else f"[check-docs]   {WIKI_DIR}/{name}: NO issue/PR reference"
-        )
+        indexed = "indexed" if name in info["changes_links"] else "NOT INDEXED"
+        if refs:
+            lines.append(f"[check-docs]   {WIKI_DIR}/{name}: {len(refs)} issue/PR reference(s), {indexed}")
+        else:
+            lines.append(f"[check-docs]   {WIKI_DIR}/{name}: NO issue/PR reference")
+    lines.append(
+        f"[check-docs] {CHANGES}: {len(info['changes_links'])} note link(s); "
+        f"{len(info['change_headings'])} change-history heading(s) in {info['readme']}"
+    )
     return "\n".join(lines)
 
 
@@ -183,8 +255,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(
         f"[check-docs] ok: every one of the {len(info['targets'])} user-facing make targets is "
-        f"documented in {info['readme']} (or a recorded exception), and every "
-        f"{len(info['wiki'])} {WIKI_DIR}/ entry references an issue or PR"
+        f"documented in {len(info['surface'])} doc(s) (or a recorded exception), every "
+        f"{len(info['wiki'])} {WIKI_DIR}/ entry references an issue or PR and is indexed in "
+        f"{CHANGES}, and {info['readme']} carries no change history"
     )
     return 0
 

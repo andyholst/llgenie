@@ -18,12 +18,12 @@ that a human can start by hand to three things:
   (the one-make-path-per-stage rule); `Never` states the invariants (never merges, never pushes to
   main, never edits code) that the workflow must not break.
 
-The README's dispatch table is generated from the workflows and verified against them, so the
+The dispatch table in `docs/BOTS.md` is generated from the workflows and verified against them, so the
 documentation a dispatcher reads cannot drift from the pipelines it describes.
 
 Commands:
-    check_dispatch_forms.py check     exit non-zero on any violation, and on a stale README table
-    check_dispatch_forms.py report    print the README table (the source of truth)
+    check_dispatch_forms.py check     exit non-zero on any violation, and on a stale dispatch table
+    check_dispatch_forms.py report    print the dispatch table (the source of truth)
 
 Usage:
     python3 scripts/check_dispatch_forms.py check
@@ -38,8 +38,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ".github/workflows"
-README = "README.md"
-#: The README's generated dispatch table lives between these markers.
+DOC = "docs/BOTS.md"
+#: The generated dispatch table lives in docs/BOTS.md, between these markers. It is NOT in
+#: README.md: the user guide is not a place a bot regenerates (issue #678).
 BEGIN = "<!-- dispatch-forms:begin -->"
 END = "<!-- dispatch-forms:end -->"
 #: `# dispatch: no inputs — <reason>` exempts a workflow from the inputs requirement.
@@ -282,7 +283,7 @@ def violations(root: Path = REPO_ROOT) -> list[str]:
 
 
 def table(root: Path = REPO_ROOT) -> str:
-    """The README table, generated from the workflows themselves."""
+    """The dispatch table, generated from the workflows themselves."""
     rows = ["| workflow | what the run does | dispatch inputs |", "|---|---|---|"]
     for path in workflow_files(root):
         a = analyse(path)
@@ -304,18 +305,18 @@ def table(root: Path = REPO_ROOT) -> str:
     return "\n".join(rows)
 
 
-def readme_stale(root: Path = REPO_ROOT) -> str | None:
-    """The reason the README table does not match the workflows, or None when it does."""
-    readme = root / README
+def doc_stale(root: Path = REPO_ROOT) -> str | None:
+    """The reason the dispatch table does not match the workflows, or None when it does."""
+    readme = root / DOC
     if not readme.exists():
-        return f"{README} does not exist"
+        return f"{DOC} does not exist"
     text = readme.read_text()
     if BEGIN not in text or END not in text:
-        return f"{README} has no `{BEGIN}` … `{END}` block for the generated dispatch table"
+        return f"{DOC} has no `{BEGIN}` … `{END}` block for the generated dispatch table"
     have = text.split(BEGIN, 1)[1].split(END, 1)[0].strip()
     want = table(root).strip()
     if have != want:
-        return (f"the {README} dispatch table is stale — regenerate it with "
+        return (f"the {DOC} dispatch table is stale — regenerate it with "
                 f"`make check-dispatch-forms report`")
     return None
 
@@ -332,7 +333,7 @@ def main(argv=None) -> int:
         return 0
 
     bad = violations(root)
-    stale = readme_stale(root)
+    stale = doc_stale(root)
     if stale:
         bad.append(stale)
     dispatchable = [p.name for p in workflow_files(root) if analyse(p)["dispatch"]]
@@ -342,7 +343,7 @@ def main(argv=None) -> int:
             print(f"  - {b}", file=sys.stderr)
         return 1
     print(f"[check-dispatch-forms] OK {len(dispatchable)} dispatchable workflow(s) state the work "
-          f"they do, their inputs are documented, and the README table matches: "
+          f"they do, their inputs are documented, and the dispatch table matches: "
           f"{', '.join(dispatchable)}")
     return 0
 

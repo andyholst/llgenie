@@ -699,7 +699,7 @@ def test_the_annotation_does_not_claim_a_call_that_was_skipped(tmp_path):
 def test_the_docs_match_the_armed_contract():
     """The bot workflows ARM the gate now, so nothing may still claim "no bot workflow sets it"."""
     pre = PREFLIGHT.read_text()
-    readme = (REPO / "README.md").read_text()
+    readme = (REPO / "README.md").read_text() + "\n" + (REPO / "docs" / "BOTS.md").read_text()
     assert "No bot workflow sets it." not in pre, "the preflight still denies the armed gate"
     assert "no bot workflow sets it" not in readme, "the README still denies the armed gate"
     assert "both bot workflows arm it" in readme
@@ -797,7 +797,7 @@ def test_the_preflight_is_documented_for_the_reader():
 
     # Given the Makefile and the README
     mk = MAKEFILE.read_text()
-    readme = (REPO / "README.md").read_text()
+    readme = (REPO / "README.md").read_text() + "\n" + (REPO / "docs" / "BOTS.md").read_text()
 
     # When the target's documentation is read
     # Then help and the README both carry it, and .PHONY declares it

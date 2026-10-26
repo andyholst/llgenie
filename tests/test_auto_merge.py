@@ -27,6 +27,9 @@ CI = (REPO / ".github" / "workflows" / "ci.yml").read_text()
 MERGE_WF = (REPO / ".github" / "workflows" / "auto-merge.yml").read_text()
 MAKEFILE = (REPO / "Makefile").read_text()
 README = (REPO / "README.md").read_text()
+#: The documentation surface (issue #678): the user guide plus the reference pages it links.
+DOCS = README + "\n" + "\n".join(
+    p.read_text() for p in sorted((REPO / "docs").glob("*.md")))
 AGENTS = (REPO / "AGENTS.md").read_text()
 
 HEAD = "1234567890abcdef1234567890abcdef12345678"
@@ -435,17 +438,17 @@ def test_the_merge_uses_the_owner_pat_and_a_make_target():
     assert "python3 scripts/auto_merge.py" not in block, "the workflow must call the make target"
 
 def test_the_targets_are_phony_and_documented():
-    """`auto-merge` and `verify-closure` exist, are phony, and are in the README."""
+    """`auto-merge` and `verify-closure` exist, are phony, and are documented."""
 
     # Given the Makefile and the README
     phony = MAKEFILE.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
 
     # When  the two targets are looked for
-    # Then  both are declared, both recipes exist, and the README documents them
+    # Then  both are declared, both recipes exist, and the docs document them
     for target in ("auto-merge", "verify-closure"):
         assert f"\n{target}:" in MAKEFILE, target
         assert target in phony, target
-        assert target in README, target
+        assert target in DOCS, target
 
 
 def test_agents_md_states_the_new_policy():
@@ -702,16 +705,16 @@ def test_the_workflow_enables_the_approval_with_the_pat():
 
 
 def test_the_explain_target_is_phony_and_documented():
-    """`auto-merge-explain` exists, is phony, and is in the README."""
+    """`auto-merge-explain` exists, is phony, and is documented."""
 
     # Given the Makefile and the README
     phony = MAKEFILE.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
 
     # When  the target is looked for
-    # Then  it is declared, has a recipe, and the README documents it
+    # Then  it is declared, has a recipe, and the docs document it
     assert "\nauto-merge-explain:" in MAKEFILE
     assert "auto-merge-explain" in phony
-    assert "auto-merge-explain" in README
+    assert "auto-merge-explain" in DOCS
 
 
 # ---- the merge runs where the secrets are: a workflow_run workflow (issue #493) ---------------
