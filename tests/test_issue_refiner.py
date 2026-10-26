@@ -368,3 +368,28 @@ def test_the_refiner_recipe_forwards_only_defined_keys():
     # ... while the refiner recipe still forwards the key the repo DOES define
     recipe = mk[mk.index("issue-refiner:"):mk.index("_issue-refiner:")]
     assert "-e TYPESAFE_API_KEY" in recipe, recipe
+
+
+def test_dry_run_writes_nothing_into_the_checkout(tmp_path, capsys):
+    """A preview must not mutate the tree it previews (issue #352).
+
+    `--dry` skipped the claim comment but still wrote the agent's input file into the current
+    working directory, so `make issue-refiner-pick DRY=1` dirtied the checkout it previewed.
+    """
+
+    # Given an open issue the refiner would pick
+    gh, _log = _fake_gh(tmp_path, {"issues": [{"number": 91, "title": "Flag audit",
+                                               "labels": [], "createdAt": "2026-10-14T00:00:00Z"}]})
+    out = tmp_path / "refine-in.md"
+
+    # When  it picks in DRY mode
+    r = ir.pick(str(gh), f"{OWNER}/{NAME}", dry=True, out_path=out)
+
+    # Then  it reports the pick and writes NOTHING
+    assert r["action"] == "pick" and r.get("dry") is True
+    assert not out.exists(), "a DRY run wrote the agent's input file"
+    assert "nothing written" in capsys.readouterr().out
+
+    # And   the real run still writes it
+    ir.pick(str(gh), f"{OWNER}/{NAME}", dry=False, out_path=out)
+    assert out.exists() and out.read_text().strip()

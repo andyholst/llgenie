@@ -200,6 +200,13 @@ def pick(gh: str, repo: str, bot: str = BOT_AUTHOR, dry: bool = False,
                                           dt.datetime.now(dt.timezone.utc),
                                           run_id=os.environ.get("GITHUB_RUN_ID"))])
         print(f"[issue-refiner] claimed #{chosen['number']} to refine it, before the agent runs")
+    if dry:
+        # A preview must not mutate the tree it previews (issue #352): `--dry` skipped the claim
+        # comment but still wrote the agent's input file into the current working directory.
+        print(f"[issue-refiner] DRY: picked #{chosen['number']}: {chosen.get('title')} "
+              f"(body + {len(comments)} comment(s)); would write {out_path}, nothing written")
+        return {"action": "pick", "issue": chosen["number"], "title": chosen.get("title"),
+                "dry": True}
     out_path.write_text(render(detail, comments))
     print(f"[issue-refiner] picked #{chosen['number']}: {chosen.get('title')} "
           f"(body + {len(comments)} comment(s)); {out_path.name} written")
