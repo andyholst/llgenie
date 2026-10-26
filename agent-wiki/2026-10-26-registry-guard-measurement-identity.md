@@ -57,6 +57,23 @@ Almost none of the 47 was a loss:
   keeps the `(engine, hardware)` footprint comparison for exactly those rows (a profile link or an
   absent `source_post`), which restores the guarantee without re-introducing the relabel defect.
 
+## What this exposes next
+
+The real weekly sequence was run in a throwaway worktree at `369ccda` against the live upstream store:
+
+```
+make sync-registry            # exit 0: 23 models -> 106 models (2026-10-26T11:56:20Z)
+make check-registry-keys      # exit 0: OK — additive only (106 models, 81 notes)
+make render-trend-list-matrix # exit 0: rewrote the 81-case fixture from the new store
+make check-engine-skill-gap   # exit 1: 16 registry engines have no skill and no dated decision
+```
+
+So the guard is no longer what holds the sync shut; the next gate is `check-engine-skill-gap` on 16 new
+upstream engines (`Janas`, `Kapitsa`, `LM Studio`, `MTPLX`, `OpenJet`, `OpenVINO`, `SonicBoom`,
+`TandemLLM`, `TokenSpeed`, `Magnitude`, `LemonSeed Engine`, `turbo-fieldfare`, `strixite`, and three
+`llama.cpp` forks). Filed as [#673](https://github.com/asimov-agent/llgenie/issues/673) — a decision per
+engine (skill or a dated `data/unsupported-engines.json` entry), not part of this change.
+
 ## Not in this change
 
 The pick semantics that read this data — `fits()` gating on `vram_tier` (a label) instead of
