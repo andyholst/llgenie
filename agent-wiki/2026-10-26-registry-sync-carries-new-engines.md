@@ -1,6 +1,6 @@
 # 2026-10-26 — the registry sync carries a new engine instead of dying on it
 
-Implements issue #683 (OpenSpec change `registry-sync-carries-new-engines`).
+Implements issue #683 (PR #685, OpenSpec change `registry-sync-carries-new-engines`).
 
 ## What was wrong (measured)
 
@@ -50,5 +50,6 @@ Neither scope tolerates a skill whose engine left the registry; the flag is neve
 
 ## Status
 
-Implementation complete on `feat/registry-sync-carries-new-engines`; the end-to-end proof is a
-`registry-sync` dispatch on `main` after the merge reaching the PR step.
+Implementation complete on `feat/registry-sync-carries-new-engines` (PR #685); the end-to-end proof is a
+`registry-sync` dispatch on `main` after the merge reaching the PR step. Deferred, its own linked issue:
+deciding the 16 engines the synced store names (#686).
