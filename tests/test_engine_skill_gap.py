@@ -524,7 +524,8 @@ def test_the_weekly_sync_regenerates_the_gap_and_spawns_a_tracking_issue():
     # And it reports the gap (a report, so the sync still carries the data, #219)
     assert any("make engine-skill-gap" in r for r in runs)
     checks = next(r for r in runs if "make check-registry" in r)
-    assert "check-engine-skill-gap" not in checks
+    # (the step's own comment NAMES the ci-unit gate it relies on; the command must not be it)
+    assert "make check-engine-skill-gap" not in checks
 
     # And it spawns one issue per unresolved engine with the sync token
     spawn = next(s for s in steps if "spawn-engine-skill-issues" in s.get("run", ""))

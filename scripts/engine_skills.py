@@ -1122,7 +1122,8 @@ def load_unsupported(src: str | Path | None = None) -> dict:
     return {"path": str(path), "engines": engines}
 
 
-def validate(skills: dict, registry: dict | None = None, unsupported: dict | None = None) -> list[str]:
+def validate(skills: dict, registry: dict | None = None, unsupported: dict | None = None,
+             allow_new_engines: bool = False) -> list[str]:
     errors = []
     for sid, s in skills.items():
         where = f"{sid} ({s.get('_path')})"
@@ -1226,10 +1227,21 @@ def validate(skills: dict, registry: dict | None = None, unsupported: dict | Non
         # decision, "no skill and nobody decided" is a new, unresolved engine.
         decisions = (unsupported or {}).get("engines") or {}
         where = (unsupported or {}).get("path") or str(UNSUPPORTED_FILE)
+        # `allow_new_engines` is the DATA-CARRYING scope (issue #683): the weekly registry-sync
+        # must be able to land the store that first names an engine llgenie does not ship, because
+        # its next step opens one tracking issue per new engine and ci-unit's
+        # `check-engine-skill-gap` is the loud gate that keeps the resulting PR red until each
+        # engine ships a skill or gets a dated decision. Without the flag every bot job that must
+        # carry upstream data deadlocks: the data never lands, so the issue that would decide the
+        # engine never opens. A NEW engine is still named here, never silently dropped.
         for name in registry:
             if name in engines:
                 continue
-            if unsupported is None:
+            if allow_new_engines:
+                print(f"[skills-validate] NOTE: registry engine {name!r} has no skill and no dated "
+                      f"decision in {where} — carried, and handed to the engine-gap tracker "
+                      f"(new and unresolved, issue #229)", file=sys.stderr)
+            elif unsupported is None:
                 errors.append(f"registry engine {name!r} has no skill (add skills/engines/<id>/SKILL.md)")
             elif name not in decisions:
                 errors.append(f"registry engine {name!r} has no skill and no dated decision in {where} "
@@ -1271,6 +1283,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="the dated decisions that make an unshipped registry engine deliberate "
                         "(data/unsupported-engines.json, issue #229). Without it every registry "
                         "engine with no skill is an error.")
+    v.add_argument("--allow-new-engines", action="store_true",
+                   help="the DATA-CARRYING scope (issue #683): a registry engine with no skill and "
+                        "no decision is named and tolerated, because this run's next step opens its "
+                        "tracking issue and ci-unit is the gate that refuses it. Never for ci-unit.")
     for name in ("plan", "check", "install", "detect"):
         p = sub.add_parser(name)
         p.add_argument("id")
@@ -1311,7 +1327,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "validate":
         reg = load_registry(a.registry) if a.registry else None
         unsupported = load_unsupported(a.unsupported) if a.unsupported else None
-        errors = validate(skills, reg, unsupported)
+        errors = validate(skills, reg, unsupported, allow_new_engines=a.allow_new_engines)
         for e in errors:
             print(f"[skills-validate] {e}", file=sys.stderr)
         print(f"[skills-validate] {len(skills)} skills, "

@@ -865,6 +865,16 @@ thin trend list (`llgenie` then ranks engines from data that no longer exists).
 - The same rule is enforced where the store is WRITTEN — trending-local-llms
   `check_no_value_loss` (its issue #114). llgenie never patches upstream data to
   make a sync pass: a loss is reported upstream and fixed there.
+- **A data-carrying bot job carries a NEW engine; ci-unit refuses it (issue #683).** The
+  weekly sync must be able to land a store that first names an engine llgenie does not
+  ship: `make skills-validate … ALLOW_NEW_ENGINES=1` names that engine and continues, the
+  sync's next step opens one tracking issue per new engine (`make spawn-engine-skill-issues`),
+  and `make check-engine-skill-gap` in `ci-unit` is what keeps the resulting PR red until
+  each engine ships a skill or gets a dated decision in `data/unsupported-engines.json`.
+  Without that split the job deadlocks: measured 2026-10-26, `skills-validate` exited 1 on
+  16 engines upstream had just started listing, so no sync PR landed after 2026-10-13 and
+  the issues that would have decided them were never opened. `ALLOW_NEW_ENGINES=1` is never
+  passed from `ci-unit`, and it never tolerates a skill whose engine left the registry.
 
 ### Agent-implemented issues always end in a monitored, green PR (mandatory, durable)
 
