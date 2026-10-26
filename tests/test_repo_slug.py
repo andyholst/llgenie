@@ -67,9 +67,12 @@ def test_the_slug_is_a_slug_by_default():
     """`GH_REPO` is `asimov-agent/llgenie` when `REPO` is the checkout path."""
 
     # Given the checkout path as REPO
-    # When  GH_REPO is printed through a make expression
-    out = subprocess.run(["make", "-s", "--eval=print-gh-repo: ; @echo $(GH_REPO)",
-                          "print-gh-repo"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+    # When  GH_REPO is printed by make, reading the extra target from stdin
+    #       (`-f -`, not `--eval`: macOS ships GNU make 3.81, which has no `--eval`,
+    #        so the target never existed there and the print was empty — #656)
+    r = subprocess.run(["make", "-s", "-f", "Makefile", "-f", "-", "print-gh-repo"],
+                       cwd=REPO, input="print-gh-repo: ; @echo $(GH_REPO)\n",
+                       capture_output=True, text=True)
 
     # Then  it is the slug, never a path
-    assert out == "asimov-agent/llgenie", out
+    assert r.stdout.strip() == "asimov-agent/llgenie", (r.stdout, r.stderr)
