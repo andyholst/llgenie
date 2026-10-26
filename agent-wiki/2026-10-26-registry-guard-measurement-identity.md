@@ -1,6 +1,7 @@
 # 2026-10-26 — the additive-only gate compares identity, so the weekly sync can land
 
 Issue: [#668](https://github.com/asimov-agent/llgenie/issues/668) (unfreezes [#534](https://github.com/asimov-agent/llgenie/issues/534))
+PR: [#671](https://github.com/asimov-agent/llgenie/pull/671)
 OpenSpec: `openspec/changes/registry-guard-measurement-identity`
 
 ## What was wrong
