@@ -1,6 +1,6 @@
 # 2026-10-26 — the README is the user guide, changes are dated notes indexed by CHANGES.md
 
-Implements issue #678 (OpenSpec change `readme-user-facing-changes-index`).
+Implements issue #678 (PR #680, OpenSpec change `readme-user-facing-changes-index`).
 
 ## What was wrong (measured before this note)
 
@@ -42,5 +42,5 @@ file, so it was the union of everyone's notes.
 Gates: `make test-unit` 5227 passed / 6 deselected, `make check-docs`, `make check-dispatch-forms`,
 `make check-workflows`, `make check-wiring`, `make lint` and
 `make openspec-validate NAME=readme-user-facing-changes-index` all exit 0.
-Deferred (own issues, not folded in): a generated `docs/BOTS.md` target list, and grouping
-`CHANGES.md` by release.
+Deferred, each its own linked issue: a generated `docs/BOTS.md` target list (#681) and grouping
+`CHANGES.md` by release or month (#682).
