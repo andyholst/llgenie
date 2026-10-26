@@ -2092,6 +2092,16 @@ named cause: the case fails loudly, it is never skipped and never softened. The 
 locked by `tests/test_top_tier_dry_run_retry.py` (real child processes, no mocked
 subprocess) inside `make test-unit` (issue #399).
 
+**A slow child is a transport failure too (issue #676).** The `subprocess.run(timeout=…)`
+used to sit outside that seam, so a dry run that outlived its deadline raised
+`TimeoutExpired` straight out of `run_dry_run`: no retry, and the caller saw a traceback
+instead of a cause — measured twice in PR #661's `macos / top-tier` job (`timed out after
+780 seconds`, on changes that never touch the dry run; the same case takes 237 s on a
+developer host). A timeout is now converted to exit 124 with `timed out after <n> seconds`
+in stderr, retried within the same bound, and named at the bound instead of escaping. The
+`top-tier` job's ceiling went 60 → 90 minutes so one full retry fits above the measured
+38-minute macOS stage.
+
 ---
 
 ## Verification, loop & CI (containerized — same everywhere)

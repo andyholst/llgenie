@@ -47,6 +47,13 @@ TRANSIENT_MARKERS = (
 )
 
 
+def _text(value: bytes | str | None) -> str:
+    """A `TimeoutExpired` carries bytes (or nothing); the seam works in text."""
+    if value is None:
+        return ""
+    return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
 def is_transient(out: subprocess.CompletedProcess) -> bool:
     """True when a failed dry run failed on the Hub's transport, not on the diff."""
     if out.returncode == 0:
@@ -70,8 +77,20 @@ def run_dry_run(cmd, *, env=None, timeout=None,
     if attempts < 1:
         raise ValueError(f"attempts must be >= 1, got {attempts}")
     for used in range(1, attempts + 1):
-        last = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                              timeout=timeout)
+        try:
+            last = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            # A timeout is a TRANSPORT failure like any other — the child was still reading
+            # the Hub when the clock ran out — but it used to escape this seam entirely
+            # (#676): the escape raised out of `run_dry_run`, so no retry happened and the
+            # caller saw a bare `TimeoutExpired` instead of the CLI's own named cause. Measured
+            # twice on the macOS runner (`timed out after 780 seconds`, 661's top-tier job),
+            # where the same case takes 237 s on a developer host.
+            last = subprocess.CompletedProcess(
+                args=cmd, returncode=124,
+                stdout=_text(exc.stdout),
+                stderr=f"{_text(exc.stderr)}timed out after {timeout} seconds")
         if last.returncode == 0 or not is_transient(last):
             return last, used
     assert last is not None  # attempts >= 1, so at least one run happened
