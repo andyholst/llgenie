@@ -394,3 +394,41 @@ def test_the_sync_job_validates_the_registry_it_just_synced():
             "UNSUPPORTED=data/unsupported-engines.json") in run, run
     assert ci_lines, "ci-unit must keep validating the real registry"
     assert "UNSUPPORTED=data/unsupported-engines.json" in ci_lines[0], ci_lines
+
+    # And it carries a NEW unshipped engine instead of dying on it (issue #683), while ci-unit
+    # keeps the strict form: the sync's next step opens that engine's tracking issue, and
+    # check-engine-skill-gap is what keeps the resulting PR red until the engine is decided.
+    assert "ALLOW_NEW_ENGINES=1" in run, run
+    assert all("ALLOW_NEW_ENGINES" not in line for line in ci_lines), ci_lines
+
+
+def test_a_new_engine_is_carried_with_the_flag_and_refused_without_it():
+    """Issue #683: the deadlock was `skills-validate` refusing the store that names a new engine.
+
+    The sync job must carry the data that first lists an engine llgenie does not ship (its next
+    step opens the tracking issue); ci-unit must not. A skill whose engine left the registry is an
+    error in BOTH scopes — the flag tolerates a new upstream engine, never a broken skill.
+    """
+
+    # Given the real skills, a registry that still lists every engine they ship plus one that is
+    # new upstream, and no decision for it
+    sys.path.insert(0, str(REPO / "scripts"))
+    import engine_skills as es
+    skills = es.load_skills()
+    registry = {s.get("engine"): {} for s in skills.values()}
+    registry["BrandNewServer"] = {}
+
+    # When  the validator runs in each scope
+    strict = es.validate(skills, registry, {"engines": {}}, allow_new_engines=False)
+    carrying = es.validate(skills, registry, {"engines": {}}, allow_new_engines=True)
+
+    # Then  the strict scope names it as new-and-unresolved, and the data-carrying one tolerates it
+    assert strict == ['registry engine \'BrandNewServer\' has no skill and no dated decision in '
+                      + str(es.UNSUPPORTED_FILE) + ' (new and unresolved, issue #229): add '
+                      'skills/engines/<id>/SKILL.md or record the decision (make engine-skill-gap)'], strict
+    assert carrying == [], carrying
+
+    # And    the flag never hides a skill whose engine is gone from the registry
+    broken = es.validate(skills, {k: v for k, v in registry.items() if k not in ("BrandNewServer", "llama.cpp")},
+                         {"engines": {}}, allow_new_engines=True)
+    assert any("is not a key in the registry" in e for e in broken), broken

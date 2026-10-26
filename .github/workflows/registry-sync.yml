@@ -104,11 +104,15 @@ jobs:
           make check-registry
           make check-quant-catalog
           make engine-skill-gap
-          # The SAME scope ci-unit uses (issue #319): the bare target validates the Makefile's
-          # fixture, and REGISTRY without UNSUPPORTED errors on every engine recorded in
-          # data/unsupported-engines.json — both let the job pass/skip while the registry it is
-          # about to push fails the identical check in CI.
-          make skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json
+          # ci-unit's SCOPE (issue #319) — every shipped skill validated against the registry it is
+          # about to be read with, and a decision in data/unsupported-engines.json honoured — with
+          # ALLOW_NEW_ENGINES=1 (issue #683): an engine upstream has just started listing is CARRIED
+          # here and named, not fatal. The step below opens one tracking issue per new engine, and
+          # ci-unit's check-engine-skill-gap is what refuses it until the engine ships a skill or
+          # gets a dated decision. Without the flag this job deadlocked: the store that names the
+          # engine never landed, so the issue that would decide it never opened (measured: 16 new
+          # engines on 2026-10-26, no sync PR since 2026-10-13).
+          make skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json ALLOW_NEW_ENGINES=1
           make test-unit
       - name: Spawn one tracking issue per NEW unskilled engine
         if: steps.diff.outputs.changed

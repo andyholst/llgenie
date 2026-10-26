@@ -140,7 +140,18 @@ is a linkable work item instead of a log line. `data/engine-skill-gap.json` also
 names the models no engine can offer at all, so a model cannot vanish from the
 list unnoticed. `make skills-validate REGISTRY=data/models.json
 UNSUPPORTED=data/unsupported-engines.json` tolerates the recorded decisions per
-engine and still fails on an undecided one. The
+engine and still fails on an undecided one.
+
+**The sync job carries the new engine; ci-unit refuses it (issue #683).** A store that first names an
+engine llgenie does not ship must still be able to land, or the data that names the engine never
+arrives and the issue that would decide it never opens. So `registry-sync.yml`'s check step runs that
+same command with `ALLOW_NEW_ENGINES=1`: every shipped skill is still validated against the registry
+it is about to be read with, a recorded decision is still honoured, and a **new** engine is named
+(`[skills-validate] NOTE: … carried`) instead of failing the job. The step right after opens one
+tracking issue per new engine, and `make check-engine-skill-gap` in `ci-unit` is what keeps the
+resulting sync PR red until each engine ships a skill or gets a dated decision. Measured before this
+(2026-10-26): upstream went 23 → 106 models and 8 → 40 engines, `skills-validate` exited 1 with 16
+new engines, and no sync PR had landed since 2026-10-13. The
 `engine-bump` workflow runs on its **own** cron (weekly,
 Monday `23 6 * * 1`, separate from the registry sync) and pins every engine skill
 to the latest upstream commit, opening a PR per changed engine (issue #107):

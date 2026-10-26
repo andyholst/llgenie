@@ -879,8 +879,12 @@ workflows-report: ## Show every YAML file the workflow gate reads, how many expr
 # is "new and unresolved" and FAILS, naming it. Without --unsupported every
 # registry engine with no skill is an error, so the pinned fixture stays strict.
 UNSUPPORTED ?=
-skills-validate: ## Validate every engine skill against the trending-local-llms registry
-	python3 scripts/engine_skills.py validate --registry "$(REGISTRY)" $(if $(UNSUPPORTED),--unsupported "$(UNSUPPORTED)",)
+# ALLOW_NEW_ENGINES=1 is the DATA-CARRYING scope (issue #683): the weekly registry-sync must be
+# able to land a store that first names an engine llgenie does not ship — its next step opens
+# that engine's tracking issue, and ci-unit's check-engine-skill-gap is the gate that keeps the
+# PR red until the engine ships or gets a dated decision. Never pass it from ci-unit.
+skills-validate: ## Validate every engine skill against the trending-local-llms registry (ALLOW_NEW_ENGINES=1: carry a new unshipped engine, for the registry-sync job only)
+	python3 scripts/engine_skills.py validate --registry "$(REGISTRY)" $(if $(UNSUPPORTED),--unsupported "$(UNSUPPORTED)",) $(if $(ALLOW_NEW_ENGINES),--allow-new-engines,)
 engine-list: ## List engine skills (servable, backends, fits this machine)
 	python3 scripts/engine_skills.py list
 engine-hardware: ## Show the detected hardware parameters skills render against
