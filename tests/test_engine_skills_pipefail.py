@@ -43,3 +43,24 @@ def test_strata_detect_uses_a_full_read():
         assert "grep -q" not in detect, (arch, detect)
         assert "|" not in detect, (arch, detect)
         assert detect.endswith("--version"), (arch, detect)
+
+
+def test_no_engine_reports_a_commit_sha_as_its_version():
+    """`pin <sha>` is not a version (issue #636): a sha has no dots, so `make test-built-engine`
+    rejects it and the published-image stage goes red for an engine that is perfectly fine.
+
+    A `detect` may fall back to the PINNED VERSION (the skill's tag, e.g. `0.5.22`), never to the
+    commit sha.
+    """
+
+    # Given every engine skill
+    skills = sorted((REPO / "skills" / "engines").glob("*/SKILL.md"))
+
+    # When  their detect lines are read
+    offenders = {str(p.relative_to(REPO)): [l for l in p.read_text().splitlines()
+                                            if l.startswith("detect:") and "{pinned_short}" in l]
+                 for p in skills}
+    offenders = {k: v for k, v in offenders.items() if v}
+
+    # Then  none of them prints the sha as its version
+    assert skills and offenders == {}, offenders
