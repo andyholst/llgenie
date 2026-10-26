@@ -85,6 +85,53 @@ def test_a_hub_that_stays_unreachable_fails_loudly_at_the_bound(tmp_path):
     assert (tmp_path / "counter").read_text() == str(TOP_TIER_DRY_RUN_ATTEMPTS)
 
 
+def test_a_timeout_is_retried_and_then_named_at_the_bound(tmp_path):
+    """A child that outlives its deadline is a TRANSPORT failure, not an escape (issue #676).
+
+    Measured on the macOS runner twice (`timed out after 780 seconds` in 661's top-tier job) while
+    the same case takes 237 s on a developer host. Before the fix the `TimeoutExpired` raised out of
+    this seam, so the retry never ran and the caller saw a timeout instead of the CLI's cause.
+    """
+
+    # Given a real child that sleeps past a 1-second deadline
+    cmd, env = _probe(tmp_path)
+    env["PROBE_MODE"] = "slow"
+    script = Path(cmd[1])
+    script.write_text("import time\ntime.sleep(30)\n")
+
+    # When  the seam runs it
+    out, attempts = run_dry_run(cmd, env=env, timeout=1)
+
+    # Then  it is retried within the stated bound, and the last result NAMES the timeout
+    assert attempts == TOP_TIER_DRY_RUN_ATTEMPTS
+    assert out.returncode != 0
+    assert "timed out after 1 seconds" in out.stderr
+
+
+def test_a_timeout_that_clears_on_the_retry_passes(tmp_path):
+    """The second attempt is returned when it succeeds inside the deadline."""
+
+    # Given a real child that is slow only on its first run
+    cmd, env = _probe(tmp_path)
+    env["PROBE_MODE"] = "slow"
+    script = Path(cmd[1])
+    script.write_text(
+        "import os, pathlib, time\n"
+        "counter = pathlib.Path(os.environ['PROBE_COUNTER'])\n"
+        "seen = int(counter.read_text()) if counter.exists() else 0\n"
+        "counter.write_text(str(seen + 1))\n"
+        "if seen == 0:\n"
+        "    time.sleep(30)\n"
+        "print('[dry] would download top 1')\n")
+
+    # When  the seam runs it with a 2-second deadline
+    out, attempts = run_dry_run(cmd, env=env, timeout=2)
+
+    # Then  the retry's zero exit is returned
+    assert out.returncode == 0, out.stderr
+    assert attempts == 2
+
+
 def test_a_non_transient_failure_is_never_retried(tmp_path):
     """A failure that is not the Hub's transport is returned on the first run."""
 

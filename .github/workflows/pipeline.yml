@@ -165,10 +165,13 @@ jobs:
         run: make test-clean
 
   # top-tier: REAL (no-mock) top-tier acceptance (issue #49)
+  # 90 minutes, not 60: the macOS stage alone measured 2278 s (38 min) for 15 cases, and a
+  # dry run that outlives its 780 s deadline now gets the one retry the seam promises
+  # (issue #676) — up to another 780 s, which did not fit in 60 with the job's setup.
   top-tier:
     runs-on: ${{ inputs.runner }}
     continue-on-error: false
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read

@@ -1,0 +1,6 @@
+- [x] `tests/top_tier_dry_run.py::run_dry_run` catches `TimeoutExpired`, converts it to exit 124 with `timed out after <n> seconds` in stderr, and retries it within `TOP_TIER_DRY_RUN_ATTEMPTS`.
+- [x] The bound's last attempt returns the named timeout to the caller instead of raising out of the seam; no skip and no pass.
+- [x] `tests/test_top_tier_dry_run_retry.py` proves both directions over REAL child processes (timeout twice → named failure; slow once → retry passes).
+- [x] `.github/workflows/pipeline.yml` gives `top-tier` 90 minutes, so one full retry fits above the measured 38-minute stage.
+- [x] `README.md` documents the retry's timeout coverage and the job ceiling; `agent-wiki/2026-10-26-top-tier-timeout-retry.md` records the change with issue and PR references.
+- [x] `make test-unit` (full suite), `make check-workflows` and `make openspec-validate NAME=top-tier-timeout-retry` are green.
