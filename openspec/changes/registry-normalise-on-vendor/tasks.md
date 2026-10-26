@@ -7,4 +7,4 @@
 - [x] 5. Docs: `AGENTS.md` (the normalisation and why folding is refused), `README.md` (the two "verbatim" claims), `docs/BOTS.md` (the sync section)
 - [x] 6. Verified against the REAL store: `make sync-registry` writes 106 normalised rows with 83 printed notes; `scripts/registry_keys.py` exits 0 (additive only, 81 drift notes); `make check-registry` passes
 - [x] 7. `agent-wiki/2026-10-26-registry-normalise-on-vendor.md` + its `CHANGES.md` row
-- [ ] 8. Gates: `make test-unit`, `make check-docs`, `make check-workflows`, `make check-wiring`, `make lint`, `make openspec-validate NAME=registry-normalise-on-vendor`
+- [x] 8. Gates: `make test-unit` (5237 passed, 6 deselected), `make check-docs`, `make check-workflows`, `make check-wiring`, `make lint`, `make openspec-validate NAME=registry-normalise-on-vendor` all exit 0
