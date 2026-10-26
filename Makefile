@@ -38,6 +38,11 @@ bash-check:
 # in an interactive zsh that sourced ~/.zshrc.
 export PATH := $(BIN):$(PATH)
 REPO    := $(shell pwd)
+# `REPO` is the CHECKOUT PATH — recipes mount it (`-v "$(REPO)":/repo`), so a `$(if $(REPO),$(REPO),…)`
+# fallback can never apply and `gh` gets an absolute path ("expected the \"[HOST/]OWNER/REPO\" format",
+# issues #343/#434). `GH_REPO` is the slug every gh-calling recipe uses: the repo's own when `REPO` is
+# a path, or a `REPO=owner/name` override (anything that is not a path).
+GH_REPO := $(if $(filter /%,$(REPO)),asimov-agent/llgenie,$(REPO))
 VENV    := $(HOME)/llama-gguf-tools/.venv
 # Prefer the venv python (host install) but fall back to a plain `python3`
 # when the venv is absent — e.g. a bare GitHub Actions runner. This lets the
@@ -301,7 +306,7 @@ engine-skill-gap: ## Show the unskilled-engine gap: shipped / known-unsupported 
 engine-skill-gap-md: ## The same gap report as MARKDOWN, for a PR/issue body (the registry-sync workflow embeds it)
 	python3 scripts/engine_skill_gap.py report --md
 spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry engine (the sync job runs this; DRY=1 previews, REPO= picks the repo)
-	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo $(REPO),) $(if $(DRY),--dry,)
+	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 # ---- issue-bot: one issue per run, at most 3/day (issue #248) -----------------
 # The dispatcher is deterministic (no LLM): cap -> pick ONE -> claim -> issue.md
 # + branch. `implement-issue` is the shared Hermes agent step (AGENTS.md is the
@@ -310,7 +315,7 @@ spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry
 # is handed to the agent; the result is verified structurally and pushed with --force-with-lease
 # to the PR's OWN head remote (a fork PR goes to the fork). It never merges.
 rebase-bot-sweep: ## Which ONE open PR needs rebasing (BEHIND/DIRTY against main): prints action/pr/head_* and the reason for every pass-over
-	python3 scripts/rebase_bot_sweep.py --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(OWN_FORK),--own-fork $(OWN_FORK),) $(if $(SKIP),--skip "$(SKIP)",)
+	python3 scripts/rebase_bot_sweep.py --repo $(GH_REPO) $(if $(OWN_FORK),--own-fork $(OWN_FORK),) $(if $(SKIP),--skip "$(SKIP)",)
 
 # ---- the model pin the bots call (issue #405) --------------------------------
 # The bots run the Hermes CLI in the agent image against ONE pinned snapshot through the alias
@@ -380,11 +385,11 @@ rebase-bot-abort: ## Abort a stopped rebase and return the tree to main, so the 
 rebase-bot: ## Rebase ONE PR onto main (agent-resolved conflicts), verify the structure, then push --force-with-lease to the PR's head remote. Never merges. Needs PR=/HEAD_BRANCH= [HEAD_REPO=] [DRY=1]
 	@test -n "$(PR)" && test -n "$(HEAD_BRANCH)" || { echo "Usage: make rebase-bot PR=<n> HEAD_BRANCH=<branch> [HEAD_REPO=<owner>] [REPO=] [DRY=1]"; exit 1; }
 	PR=$(PR) HEAD_BRANCH="$(HEAD_BRANCH)" HEAD_REPO=$(if $(HEAD_REPO),$(HEAD_REPO),asimov-agent) \
-	  REPO=$(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),DRY=1,) scripts/rebase_bot.sh
+	  REPO=$(GH_REPO) $(if $(DRY),DRY=1,) scripts/rebase_bot.sh
 # ---- issue-refiner: reviews NOT-yet-implemented issues on the implementer's spare capacity
 # (issue #263). One issue per run, ONE comment + the `agent:refined` label, and never a PR.
 issue-refiner-pick: ## Spare capacity (the implementer's cap is spent)? -> the oldest issue that is not decided, claimed or already PR'd -> refine-in.md (DRY=1 previews; REPO= picks the repo)
-	python3 scripts/issue_refiner.py pick --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
+	python3 scripts/issue_refiner.py pick --repo $(GH_REPO) $(if $(DRY),--dry,)
 issue-refiner: ## Hermes REVIEWS the picked issue (reads refine-in.md: the thread + the review instruction) and writes its verdict to refine.md. No branch, no PR, nothing else touched; runs INSIDE the agent image; the transcript is REDACTED before it prints (issue #359)
 	@python3 scripts/require_env.py NOUS_API_KEY
 	@$(MAKE) --no-print-directory agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=FIRECRAWL_API_KEY
@@ -399,10 +404,10 @@ _issue-refiner: # (internal) the host recipe the agent image runs: the review, n
 	hermes -z "Follow the preloaded skill issue-refiner. Its Input is refine-in.md (with fetched/index.md as the pre-fetched evidence) and its Output is refine.md, in the shape the skill prints." -s issue-refiner,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
 issue-refiner-apply: ## Apply the review in refine.md: ONE comment on the issue + the agent:refined label (never a PR; refuses a `refined` verdict with no RESTATED block)
 	@test -n "$(ISSUE)" || { echo "Usage: make issue-refiner-apply ISSUE=<n> [REPO=<owner/repo>]"; exit 1; }
-	python3 scripts/issue_refiner.py apply refine.md --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) --issue $(ISSUE)
+	python3 scripts/issue_refiner.py apply refine.md --repo $(GH_REPO) --issue $(ISSUE)
 
 issue-dedup-pick: ## Which two unclaimed open issues look like the same defect? -> dedup-in.md, older as canonical (DRY=1 previews; REPO= picks the repo; issue #553)
-	python3 scripts/issue_dedup.py pick --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
+	python3 scripts/issue_dedup.py pick --repo $(GH_REPO) $(if $(DRY),--dry,)
 issue-dedup: ## Hermes decides whether the picked pair is the SAME defect (reads dedup-in.md) and writes dedup.md; no comment, no close, nothing else touched; runs INSIDE the agent image; the transcript is REDACTED before it prints (issue #553)
 	@python3 scripts/require_env.py NOUS_API_KEY
 	@$(MAKE) --no-print-directory agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=NOUS_API_KEY
@@ -415,7 +420,7 @@ _issue-dedup: # (internal) the host recipe the agent image runs: the decision, n
 	hermes -z "Follow the preloaded skill issue-dedup. Its Input is dedup-in.md and its Output is dedup.md, in the shape the skill prints." -s issue-dedup,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
 issue-dedup-apply: ## Apply dedup.md: retire the COPY with a comment citing the canonical + agent:duplicate, close it, and queue the canonical (COPY=<n>; never touches a claimed issue; refuses a duplicate without EVIDENCE)
 	@test -n "$(COPY)" || { echo "Usage: make issue-dedup-apply COPY=<n> [FILE=dedup.md] [REPO=<owner/repo>] [DRY=1]"; exit 1; }
-	python3 scripts/issue_dedup.py apply $(if $(FILE),$(FILE),dedup.md) --copy $(COPY) --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) $(if $(DRY),--dry,)
+	python3 scripts/issue_dedup.py apply $(if $(FILE),$(FILE),dedup.md) --copy $(COPY) --repo $(GH_REPO) $(if $(DRY),--dry,)
 
 # The documentation review of an engine's DERIVED build parameters (issue #583). The bump proves the
 # params COMPILE; this leg checks them against the engine's own docs for the arch being built. The host
@@ -439,10 +444,10 @@ engine-params-review-apply: ## Issue #583: validate params-review.md (the flag A
 	python3 scripts/engine_params_review.py apply --engine "$(ENGINE)" $(if $(DRY),--dry,)
 
 issue-bot-dispatch: ## The issue-implementer's dispatcher: cap (3/day) -> pick one labeled/ready issue -> claim -> write issue.md + branch (REPO= issue-bot.yml sets it; FORCE_ISSUE= pins a manual run; DRY=1 previews)
-	python3 scripts/issue_implementer.py dispatch --repo "$(REPO)" $(if $(FORCE_ISSUE),--force-issue $(FORCE_ISSUE),) $(if $(DRY),--dry,) $(if $(TODAY),--today $(TODAY),)
+	python3 scripts/issue_implementer.py dispatch --repo "$(GH_REPO)" $(if $(FORCE_ISSUE),--force-issue $(FORCE_ISSUE),) $(if $(DRY),--dry,) $(if $(TODAY),--today $(TODAY),)
 issue-bot-open-pr: ## Open the draft-free PR linking ISSUE from BRANCH, its body built from the agent's pr-body.md + the commit's stat and titled from the issue (never merges; refuses a body with missing Issue:/Fix:/Benefit:/Technical: parts; REPO=/ISSUE=/BRANCH= from the workflow)
 	@test -n "$(ISSUE)" && test -n "$(BRANCH)" || { echo "Usage: make issue-bot-open-pr REPO=<owner/repo> ISSUE=<n> BRANCH=<agent/issue-n-slug>"; exit 1; }
-	python3 scripts/issue_implementer.py open-pr --repo "$(REPO)" --issue $(ISSUE) --branch "$(BRANCH)" --body-file $(if $(BODY_FILE),$(BODY_FILE),pr-body.md)
+	python3 scripts/issue_implementer.py open-pr --repo "$(GH_REPO)" --issue $(ISSUE) --branch "$(BRANCH)" --body-file $(if $(BODY_FILE),$(BODY_FILE),pr-body.md)
 # The agent step: Hermes reads issue.md + AGENTS.md at the repo root and
 # implements it. AGENTS.md is the authority (Makefile-driven verification, no
 # skipped tests, business logic never mocked, one make path per stage, wiring).
@@ -514,7 +519,7 @@ issue-bot-changed: ## Did the implement step actually change the tree? Prints ch
 	python3 scripts/issue_implementer.py changed
 issue-bot-verdict: ## Apply the agent's TRIAGE verdict from triage.md: implement -> nothing (the PR path runs), refine -> ONE comment + agent:refined (no PR), close -> comment with the cited evidence + agent:closed (refused without EVIDENCE)
 	@test -n "$(ISSUE)" || { echo "Usage: make issue-bot-verdict ISSUE=<n> [REPO=<owner/repo>]"; exit 1; }
-	python3 scripts/issue_implementer.py apply-verdict triage.md --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) --issue $(ISSUE)
+	python3 scripts/issue_implementer.py apply-verdict triage.md --repo $(GH_REPO) --issue $(ISSUE)
 
 # The JEV preflight (issue #238). The agent image carries the Nerve/JEV decision layer, which
 # is what makes a bot run cheaper and more correct: the layer answers "is this the right next
@@ -610,10 +615,10 @@ agent-jev-preflight: ## Prove the JEV engine is active in the agent image; every
 # it. `scan` is free (no model, no API writes); `file` writes issues and dedups by a marker in
 # the body, so a re-run of an unchanged tree files nothing.
 code-review-scan: ## The code-review bot's checks: tree + pipelines -> findings (REPO=; STATIC=1 skips the checks that read the GitHub API; JSON=1 for machine output; no model spend, writes nothing)
-	python3 scripts/code_review.py scan --repo "$(REPO)" $(if $(STATIC),--static-only,) $(if $(JSON),--json,)
+	python3 scripts/code_review.py scan --repo "$(GH_REPO)" $(if $(STATIC),--static-only,) $(if $(JSON),--json,)
 code-review-file: ## File ONE issue per NEW code-review finding, capped per run (REPO=; CAP= issues per run, default 3; DRY=1 previews) — never edits code, never merges
 	@test -n "$(REPO)" || { echo "Usage: make code-review-file REPO=<owner/repo> [CAP=3] [DRY=1]"; exit 1; }
-	python3 scripts/code_review.py file --repo "$(REPO)" $(if $(CAP),--cap $(CAP),) $(if $(DRY),--dry,)
+	python3 scripts/code_review.py file --repo "$(GH_REPO)" $(if $(CAP),--cap $(CAP),) $(if $(DRY),--dry,)
 
 # ---- the architecture bot (issue #449) ---------------------------------------
 # `docs/ARCHITECTURE.md` is the map of the shipped path, and it ages the moment the tree moves.
@@ -643,7 +648,7 @@ _architecture-bot-doc: # (internal) the host recipe the agent image runs: only t
 
 architecture-bot-publish: ## File ONE issue + ONE linked PR for the doc change (REPO=; DOC=; STAMP=; DRY=1 previews) — nothing without drift, never merges (issue #449)
 	@test -n "$(REPO)" || { echo "Usage: make architecture-bot-publish REPO=<owner/repo> [DOC=docs/ARCHITECTURE.md] [DRY=1]"; exit 1; }
-	python3 scripts/architecture_bot.py publish --repo "$(REPO)" --doc "$(DOC)" --stamp "$(STAMP)" $(if $(DRY),--dry,)
+	python3 scripts/architecture_bot.py publish --repo "$(GH_REPO)" --doc "$(DOC)" --stamp "$(STAMP)" $(if $(DRY),--dry,)
 
 architecture-bot: ## Run the architecture bot locally end to end: brief -> doc -> issue + PR (needs NOUS_API_KEY and REPO=; DRY=1 stops at the preview)
 	@$(MAKE) architecture-bot-brief DOC="$(DOC)"
@@ -667,7 +672,7 @@ export DISPATCH_TOKEN
 run-failure-reactor: ## Route a failed CI run to a remedy (issue #286): a PR this bot can push (this repo, or the owner's fork) -> dispatch the fix-bot as the OWNER (DISPATCH_TOKEN); else file ONE deduped issue labelled agent:implement (REPO=; RUN_ID=; DRY=1 previews)
 	@test -n "$(REPO)" || { echo "Usage: make run-failure-reactor REPO=<owner/repo> RUN_ID=<run> [DRY=1]"; exit 1; }
 	@test -n "$(RUN_ID)" || { echo "Usage: make run-failure-reactor REPO=<owner/repo> RUN_ID=<run> [DRY=1]"; exit 1; }
-	python3 scripts/run_failure_reactor.py --repo "$(REPO)" --run-id "$(RUN_ID)" $(if $(DRY),--dry,)
+	python3 scripts/run_failure_reactor.py --repo "$(GH_REPO)" --run-id "$(RUN_ID)" $(if $(DRY),--dry,)
 
 implement-issue: ## Implement issue.md with Hermes INSIDE the agent image (AGENTS.md is the authority; NOUS_API_KEY/GH_TOKEN from secrets; runs the gates; pushes nothing); the transcript is REDACTED before it prints (issue #359)
 	@python3 scripts/require_env.py NOUS_API_KEY
@@ -716,20 +721,20 @@ check-dispatch-forms: ## CI: fail when a dispatchable workflow does not state th
 dispatch-forms-report: ## Print the README's dispatch table (generated from the workflow files; paste it between the dispatch-forms markers)
 	python3 scripts/check_dispatch_forms.py report
 issue-cleaner-scan: ## Which OPEN issue a merged PR already implemented (the linkage guard cannot see, issue #325): prints each finding and its evidence, closes nothing (REPO= picks the repo)
-	python3 scripts/issue_cleaner.py --repo $(REPO) --dry
+	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)" --dry
 issue-cleaner-apply: ## Close the issues a merged PR implemented but left open, each with a comment citing the PR and its merge commit (issue #325; REPO= picks the repo)
-	python3 scripts/issue_cleaner.py --repo $(REPO)
+	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)"
 worktree-prune: ## Remove the worktrees and local branches whose PR already merged, proven by the PR's merge commit (squash merges defeat ancestry, issue #431); DRY=1 prints the plan, BASE= picks the base ref, SLUG= the owner/name gh reads
 	python3 scripts/worktree_prune.py --repo $(if $(SLUG),$(SLUG),asimov-agent/llgenie) --base $(if $(BASE),$(BASE),origin/main) $(if $(DRY),--dry,)
 queued-alarm: ## Report jobs stuck in `queued` far too long (a runner that never picks them up, issue #254); COMMENT=1 delivers the report, DRY=1 previews it
-	python3 scripts/queued_run_alarm.py --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) --minutes $(if $(MINUTES),$(MINUTES),30) $(if $(COMMENT),--comment,) $(if $(DRY),--dry,)
+	python3 scripts/queued_run_alarm.py --repo $(GH_REPO) --minutes $(if $(MINUTES),$(MINUTES),30) $(if $(COMMENT),--comment,) $(if $(DRY),--dry,)
 
 fix-loop-image: ## Run the fix-bot loop inside the agent image (the same image the workflow uses); AGENT_IMAGE overrides the resolved ref, LOG=path also receives the REDACTED log (issue #359)
 	@python3 scripts/require_env.py NOUS_API_KEY
 	$(call scrubbed_run,img=$$(if [ -n "$(AGENT_IMAGE)" ]; then echo "$(AGENT_IMAGE)"; else python3 scripts/ci_images.py ref agent; fi); echo "agent image: $$img"; $(RUNTIME) run --rm --init -v "$$PWD:/repo" -w /repo -e NOUS_API_KEY -e GH_TOKEN -e FIX_CHECK -e FIX_ROUNDS -e TYPESAFE_API_KEY -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE $(AGENT_SHELL_FORWARD) "$$img" bash -lc 'scripts/agent_jev_preflight.sh && FIX_REPORT_FILE="$(REPORT_FILE)" scripts/fix_loop.sh'; $(if $(LOG),cp -f $(HERMES_LOG_SCRUBBED) $(LOG),true))
 
 fix-bot-sweep: ## Which red PR the fix-bot should repair, and dispatch it (DRY=1 previews; needs gh)
-	python3 scripts/fix_bot_sweep.py --repo $(if $(REPO),$(REPO),asimov-agent/llgenie) --check "$(if $(CHECK),$(CHECK),make ci-unit)" --max-attempts $(if $(ATTEMPTS),$(ATTEMPTS),5) $(if $(OWN_FORK),--own-fork $(OWN_FORK),) $(if $(PR),--pr $(PR),) $(if $(REPORT_FILE),--report-file "$(REPORT_FILE)",)$(if $(DRY),--dry,)
+	python3 scripts/fix_bot_sweep.py --repo $(GH_REPO) --check "$(if $(CHECK),$(CHECK),make ci-unit)" --max-attempts $(if $(ATTEMPTS),$(ATTEMPTS),5) $(if $(OWN_FORK),--own-fork $(OWN_FORK),) $(if $(PR),--pr $(PR),) $(if $(REPORT_FILE),--report-file "$(REPORT_FILE)",)$(if $(DRY),--dry,)
 
 fix-bot-report: ## Render the fix-bot's failure report from the loop's report file (REPORT=<path>; the same command the workflow uses to comment)
 	python3 scripts/fix_bot_report.py "$(if $(REPORT),$(REPORT),/tmp/fix-report.txt)" --command "$(if $(CHECK),$(CHECK),make ci-unit)"
@@ -802,7 +807,7 @@ docs-report: ## Show every user-facing make target as documented / missing / a r
 	python3 scripts/check_docs.py report
 auto-merge: ## Merge a PR ONLY when this run is green and the PR is conflict-free: state OPEN, mergeable MERGEABLE, mergeStateStatus CLEAN (no conflicts, not behind, not blocked), head pinned to HEAD_SHA, no do-not-merge label; then verify what it closed (PR= REPO= HEAD_SHA= from ci.yml; APPROVE=1 approves a green review-blocked PR with the other allowed identity; DRY=1 prints the decision)
 	@test -n "$(PR)" && test -n "$(REPO)" || { echo "Usage: make auto-merge PR=<n> REPO=<owner/repo> [HEAD_SHA=<sha>] [APPROVE=1] [DRY=1]"; exit 1; }
-	python3 scripts/auto_merge.py auto-merge --repo "$(REPO)" --pr $(PR) $(if $(HEAD_SHA),--head-sha $(HEAD_SHA),) $(if $(APPROVE),--approve-when-review-required,) $(if $(ACTOR),--actor $(ACTOR),) $(if $(DRY),--dry,)
+	python3 scripts/auto_merge.py auto-merge --repo "$(GH_REPO)" --pr $(PR) $(if $(HEAD_SHA),--head-sha $(HEAD_SHA),) $(if $(APPROVE),--approve-when-review-required,) $(if $(ACTOR),--actor $(ACTOR),) $(if $(DRY),--dry,)
 # The auto-merge workflow is a `workflow_run`, so GitHub hands it a RUN ID, not a PR number: the run has
 # to be resolved back to its PR before anything can be merged (issue #508). A fork `pull_request` run
 # 404s on the runs endpoint and `gh api` prints the error BODY to stdout, so a value counts as a PR
@@ -811,7 +816,7 @@ auto-merge: ## Merge a PR ONLY when this run is green and the PR is conflict-fre
 # tests/test_resolve_run_pr.py — this target is the one code path the workflow runs.
 auto-merge-resolve: ## Resolve the open PR a finished CI run belongs to (REPO= RUN_ID= HEAD_OWNER= HEAD_BRANCH=): writes `number=<n>` to $GITHUB_OUTPUT, treats a 404/error body as no answer and falls back to the fork head search, and fails loudly when nothing resolves (issue #508)
 	@test -n "$(REPO)" && test -n "$(RUN_ID)" && test -n "$(HEAD_OWNER)" && test -n "$(HEAD_BRANCH)" || { echo "Usage: make auto-merge-resolve REPO=<owner/repo> RUN_ID=<id> HEAD_OWNER=<owner> HEAD_BRANCH=<branch>"; exit 1; }
-	python3 scripts/resolve_run_pr.py resolve --repo "$(REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)"
+	python3 scripts/resolve_run_pr.py resolve --repo "$(GH_REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)"
 
 # The fix-bot's sweep asks the SAME question with the opposite consequence (issue #629): a `CI` failure
 # report can arrive after its PR already merged or closed, and then there is nothing to repair — so an
@@ -819,18 +824,18 @@ auto-merge-resolve: ## Resolve the open PR a finished CI run belongs to (REPO= R
 # loudly, which is why this is a separate target over one resolver rather than a shared default.
 fix-bot-resolve: ## Resolve the open PR a failed CI run belongs to for the fix-bot sweep (REPO= RUN_ID= HEAD_OWNER= HEAD_BRANCH=): writes `number=<n>` to $GITHUB_OUTPUT, and answers an EMPTY `number=` with exit 0 when the PR already merged or closed — nothing to repair, not a failure (issue #629)
 	@test -n "$(REPO)" && test -n "$(RUN_ID)" && test -n "$(HEAD_OWNER)" && test -n "$(HEAD_BRANCH)" || { echo "Usage: make fix-bot-resolve REPO=<owner/repo> RUN_ID=<id> HEAD_OWNER=<owner> HEAD_BRANCH=<branch>"; exit 1; }
-	python3 scripts/resolve_run_pr.py resolve --repo "$(REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)" --allow-none
+	python3 scripts/resolve_run_pr.py resolve --repo "$(GH_REPO)" --run-id $(RUN_ID) --head-owner "$(HEAD_OWNER)" --head-branch "$(HEAD_BRANCH)" --allow-none
 
 auto-merge-recheck: ## Re-evaluate the open PRs whose own deferral marker matches their current head — a deferral is retried without a push (REPO= [MAX=5] [DRY=1]) (issue #545)
 	@test -n "$(REPO)" || { echo "Usage: make auto-merge-recheck REPO=<owner/repo> [MAX=5] [DRY=1]"; exit 1; }
-	python3 scripts/auto_merge.py recheck --repo "$(REPO)" --max-prs $(if $(MAX),$(MAX),5) $(if $(DRY),--dry,)
+	python3 scripts/auto_merge.py recheck --repo "$(GH_REPO)" --max-prs $(if $(MAX),$(MAX),5) $(if $(DRY),--dry,)
 
 auto-merge-explain: ## Print why a PR was (or was not) auto-merged: state, mergeability, merge state, review decision, author and the verdict — writes NOTHING (PR= REPO= [HEAD_SHA=])
 	@test -n "$(PR)" && test -n "$(REPO)" || { echo "Usage: make auto-merge-explain PR=<n> REPO=<owner/repo> [HEAD_SHA=<sha>]"; exit 1; }
-	python3 scripts/auto_merge.py explain --repo "$(REPO)" --pr $(PR) $(if $(HEAD_SHA),--head-sha $(HEAD_SHA),)
+	python3 scripts/auto_merge.py explain --repo "$(GH_REPO)" --pr $(PR) $(if $(HEAD_SHA),--head-sha $(HEAD_SHA),)
 verify-closure: ## Prove a merged PR closed what its body claims: prints every closing reference and its state, and fails naming an issue that is still OPEN (PR= REPO=)
 	@test -n "$(PR)" && test -n "$(REPO)" || { echo "Usage: make verify-closure PR=<n> REPO=<owner/repo>"; exit 1; }
-	python3 scripts/verify_closure.py verify --repo "$(REPO)" --pr $(PR)
+	python3 scripts/verify_closure.py verify --repo "$(GH_REPO)" --pr $(PR)
 check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is empty, a placeholder, a subject with no body, or when AGENTS.md lost the mandate (issue #313)
 	python3 scripts/check_pr_hygiene.py check
 pr-hygiene-report: ## Show every producer the PR/commit-message guard reads, and its verdict
