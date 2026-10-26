@@ -40,10 +40,17 @@ except ImportError:
     from hf_auth import authorize, hub_open  # type: ignore
 
 REPO = Path(__file__).resolve().parent.parent
-UPSTREAM = "https://raw.githubusercontent.com/andyholst/trending-local-llms/master/data/models.json"
-UPSTREAM_README = "https://raw.githubusercontent.com/andyholst/trending-local-llms/master/README.md"
+_UPSTREAM_DATA = "https://raw.githubusercontent.com/andyholst/trending-local-llms/master"
+UPSTREAM = f"{_UPSTREAM_DATA}/data/models.json"
+UPSTREAM_README = f"{_UPSTREAM_DATA}/README.md"
+# The contract the store is written against (issue #694): the JSON Schema upstream validates
+# models.json with, and its prose twin. Vendored byte for byte, so a contract edit is a diff.
+UPSTREAM_CONTRACT = f"{_UPSTREAM_DATA}/data/model_contract.json"
+UPSTREAM_CONTRACT_DOC = f"{_UPSTREAM_DATA}/data/MODEL_CONTRACT.md"
 VENDORED = REPO / "data" / "models.json"
 VENDORED_README = REPO / "data" / "trending-README.md"  # the list a user reads; tests compare against it
+VENDORED_CONTRACT = REPO / "data" / "model_contract.json"
+VENDORED_CONTRACT_DOC = REPO / "data" / "MODEL_CONTRACT.md"
 MOST_LOVED = "## ❤️ Most loved"
 
 
@@ -70,6 +77,76 @@ def validate(raw: bytes) -> dict:
             if "engine" not in e:
                 raise ValueError(f"models[{i}] ({m['id']}) has an engine row without 'engine'")
     return data
+
+
+def _contract_paths(dest: Path) -> tuple[Path, Path]:
+    """The contract files that sit beside a store file."""
+    return dest.with_name(VENDORED_CONTRACT.name), dest.with_name(VENDORED_CONTRACT_DOC.name)
+
+
+def _require(obj: dict, keys: list[str], where: str) -> None:
+    missing = [k for k in keys if k not in obj]
+    if missing:
+        raise ValueError(f"{where} lacks {', '.join(repr(k) for k in missing)}")
+
+
+def check_contract(data: dict, schema: dict) -> None:
+    """Validate a store against the vendored upstream contract (issue #694).
+
+    Every rule is READ from the schema, never restated here: the top-level ``required``
+    keys, each model row's ``required`` keys, the engine name ``propertyNames.pattern``,
+    an engine entry's ``required`` keys and its ``backend`` ``enum``, the model ``id``
+    ``pattern``, and ``formats``' ``minItems`` plus its items' ``required`` keys. A
+    contract edit that adds a required key is therefore honoured on the next run without
+    touching this file.
+
+    Only that subset is enforced: a full JSON-Schema engine is a dependency
+    (``jsonschema``) this repository cannot add from a fork PR, because a fork-head
+    ``pull_request`` token cannot publish the new test image (#651). A rule the schema
+    states outside that subset is not enforced here — reported on #694, not hidden.
+    """
+    props = schema.get("properties") or {}
+    _require(data, list(schema.get("required") or []), "the store")
+
+    engines = data.get("engines")
+    if not isinstance(engines, dict) or not engines:
+        raise ValueError("'engines' must be a non-empty object")
+    engine_props = props["engines"]
+    name_pattern = (engine_props.get("propertyNames") or {}).get("pattern")
+    engine_entry = engine_props.get("additionalProperties") or {}
+    for name in engines:
+        if name_pattern and not re.fullmatch(name_pattern, str(name)):
+            raise ValueError(f"engine name {name!r} does not match the contract's {name_pattern!r}")
+        _require(engines[name], list(engine_entry.get("required") or []), f"engine {name!r}")
+        backend = engine_entry.get("properties", {}).get("backend", {})
+        if backend.get("enum") and engines[name].get("backend") not in backend["enum"]:
+            raise ValueError(f"engine {name!r} backend {engines[name].get('backend')!r} is not one of "
+                             f"the contract's {len(backend['enum'])} backends")
+
+    models = data.get("models")
+    if not isinstance(models, list) or not models:
+        raise ValueError("'models' must be a non-empty list")
+    model_schema = props["models"]["items"]
+    model_props = model_schema.get("properties") or {}
+    id_pattern = (model_props.get("id") or {}).get("pattern")
+    formats_schema = model_props.get("formats") or {}
+    format_entry = formats_schema.get("items") or {}
+    min_formats = formats_schema.get("minItems") or 0
+    for i, m in enumerate(models):
+        where = f"models[{i}] ({m.get('id', '?')})"
+        _require(m, list(model_schema.get("required") or []), where)
+        if not isinstance(m["engines"], list):
+            raise ValueError(f"{where} 'engines' must be a list")
+        for e in m["engines"]:
+            if "engine" not in e:
+                raise ValueError(f"{where} has an engine row without 'engine'")
+        if id_pattern and not re.fullmatch(id_pattern, str(m["id"])):
+            raise ValueError(f"{where} id does not match the contract's {id_pattern!r}")
+        formats = m["formats"]
+        if not isinstance(formats, list) or len(formats) < min_formats:
+            raise ValueError(f"{where} 'formats' must be a list of at least {min_formats}")
+        for j, f in enumerate(formats):
+            _require(f, list(format_entry.get("required") or []), f"{where} formats[{j}]")
 
 
 def readme_order(readme: str) -> list[str]:
@@ -269,16 +346,23 @@ def _summary(data: dict) -> str:
 
 
 def sync(src: str, dest: Path, readme_src: str | None = UPSTREAM_README,
-         readme_dest: Path | None = None) -> int:
-    """Copy the registry (and the README it was generated with) byte for byte,
-    after checking the registry's shape and that it is the README's list in order."""
+         readme_dest: Path | None = None, contract_src: str | None = UPSTREAM_CONTRACT,
+         contract_doc_src: str | None = UPSTREAM_CONTRACT_DOC) -> int:
+    """Copy the registry, the README it was generated with, and the contract it is written
+    against — after checking the registry's shape and that it is the README's list in order.
+
+    The contract is vendored, not enforced here: `check()` validates the store against it
+    (issue #694), which is the gate the sync job runs on the files this writes."""
     readme_dest = readme_dest or dest.with_name(VENDORED_README.name)
+    contract_dest, contract_doc_dest = _contract_paths(dest)
     raw = fetch(src)
     try:
         new = validate(raw)
         readme = fetch(readme_src).decode() if readme_src else None
         if readme is not None:
             check_readme_matches(new, readme)
+        contract = fetch(contract_src) if contract_src else None
+        contract_doc = fetch(contract_doc_src).decode() if contract_doc_src else None
     except ValueError as e:
         print(f"[sync-registry] REJECTED {src}: {e}", file=sys.stderr)
         return 1
@@ -292,8 +376,15 @@ def sync(src: str, dest: Path, readme_src: str | None = UPSTREAM_README,
         print(f"[sync-registry] note: {note}")
 
     old = dest.read_bytes() if dest.exists() else b""
-    same_readme = readme is None or (readme_dest.exists() and readme_dest.read_text() == readme)
-    if old == raw and same_readme:
+    def _unchanged(path: Path, value: str | bytes | None) -> bool:
+        if value is None or not path.exists():
+            return True
+        current = path.read_bytes()
+        return current == (value.encode() if isinstance(value, str) else value)
+
+    same_rest = (_unchanged(readme_dest, readme) and _unchanged(contract_dest, contract)
+                 and _unchanged(contract_doc_dest, contract_doc))
+    if old == raw and same_rest:
         print(f"[sync-registry] unchanged: {dest} ({_summary(store)})")
         return 0
     before = _summary(validate(old)) if old else "(none)"
@@ -301,7 +392,12 @@ def sync(src: str, dest: Path, readme_src: str | None = UPSTREAM_README,
     dest.write_bytes(raw)
     if readme is not None:
         readme_dest.write_text(readme)
-    print(f"[sync-registry] updated {dest}: {before} -> {_summary(store)}")
+    if contract is not None:
+        contract_dest.write_bytes(contract)
+    if contract_doc is not None:
+        contract_doc_dest.write_text(contract_doc)
+    print(f"[sync-registry] updated {dest}: {before} -> {_summary(store)}"
+          f"{' (+contract)' if contract is not None else ''}")
     return 0
 
 
@@ -310,8 +406,12 @@ def check(dest: Path, readme: Path | None = None) -> int:
         print(f"[check-registry] missing {dest}: run make sync-registry", file=sys.stderr)
         return 1
     readme = readme or dest.with_name(VENDORED_README.name)
+    contract, _ = _contract_paths(dest)
     try:
         data = validate(dest.read_bytes())
+        if not contract.exists():
+            raise ValueError(f"missing {contract}: run make sync-registry")
+        check_contract(data, json.loads(contract.read_bytes()))
         if readme.exists():
             check_readme_matches(data, readme.read_text())
             dead = check_links(readme_links(readme.read_text()))
@@ -322,7 +422,8 @@ def check(dest: Path, readme: Path | None = None) -> int:
     except ValueError as e:
         print(f"[check-registry] {dest}: {e}", file=sys.stderr)
         return 1
-    print(f"[check-registry] OK {dest} ({_summary(data)}; README order matches, links answer)")
+    print(f"[check-registry] OK {dest} ({_summary(data)}; contract satisfied, README order matches, "
+          f"links answer)")
     return 0
 
 

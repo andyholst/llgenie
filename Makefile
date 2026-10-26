@@ -281,9 +281,9 @@ ENGINE_ARGS = $(if $(BACKEND),--backend $(BACKEND),)
 # data/models.json is a verbatim copy of trending-local-llms data/models.json:
 # llgenie's trend pick reads it (no live fetch at run time). The registry-sync
 # workflow runs `make sync-registry` weekly (cron 17 5 * * 1) and opens a PR when it changed.
-sync-registry: ## Download trending-local-llms data/models.json into data/models.json (validated; written only when changed)
+sync-registry: ## Download trending-local-llms data/models.json (+ its README and data/model_contract.json, the contract the store must satisfy) into data/ (validated against that contract; written only when changed)
 	python3 scripts/sync_registry.py sync
-check-registry: ## Validate the vendored data/models.json + fail when the sync LOST anything vs the committed copy (CI unit job)
+check-registry: ## Validate the vendored data/models.json against the vendored upstream contract, then fail when the sync LOST anything vs the committed copy (CI unit job)
 	python3 scripts/sync_registry.py check
 	$(MAKE) check-registry-keys
 check-registry-keys: ## Fail when the vendored registry dropped a key, model, measurement, t/s or counter vs the committed copy (additive only)

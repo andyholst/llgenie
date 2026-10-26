@@ -239,7 +239,12 @@ llgenie --local                        # pick among local files, llama.cpp
 
 The registry is `data/models.json` (with the README it was generated with, `data/trending-README.md`), a copy of
 [trending-local-llms](https://github.com/andyholst/trending-local-llms) `data/models.json`
-(no live fetch at run time; `LLGENIE_REGISTRY_SRC=<file|url>` overrides it).
+(no live fetch at run time; `LLGENIE_REGISTRY_SRC=<file|url>` overrides it). The contract that store is
+written against is vendored beside it — `data/model_contract.json` (the JSON Schema upstream validates
+`models.json` with) and its prose twin `data/MODEL_CONTRACT.md` — so an upstream contract edit arrives as
+a diff of the contract, and `make check-registry` validates the store against the rules read **from that
+schema** (required keys per model row, `formats[].name`/`hf`, the `id` pattern, an engine's `backend`
+enum) instead of a hand-kept key list.
 
 Each model also states **what its run needs**, per upstream's `data/MODEL_CONTRACT.md`:
 
@@ -270,9 +275,11 @@ measurement — keying on `(engine, hardware)` read all of them as a loss and fr
 days.
 
 ```bash
-make sync-registry    # download upstream data/models.json + README.md into data/ (validated: the
-                      # registry must be the README "Most loved" list in README order)
-make check-registry   # validate the vendored files (CI)
+make sync-registry    # download upstream data/models.json + README.md + data/model_contract.json
+                      # (+ MODEL_CONTRACT.md) into data/ (validated: the store must satisfy that
+                      # contract and be the README "Most loved" list in README order)
+make check-registry   # validate the vendored store against the vendored contract, its README order
+                      # and its live links (CI)
 make check-registry-keys  # CI: additive only — a removed model/key/engine/format/tracked post or a
                       # lowered weight_gb/context_tokens/system_ram_min fails the sync; a re-stated
                       # t/s or re-scraped counter is printed as a NOTE and does not
@@ -630,6 +637,8 @@ llgenie/
 │       └── Dockerfile
 ├── data/
 │   ├── models.json         # vendored trending-local-llms registry (make sync-registry)
+│   ├── model_contract.json # the JSON Schema models.json must satisfy (vendored with it)
+│   ├── MODEL_CONTRACT.md   # that contract's prose twin (vendored with it)
 │   ├── trending-README.md  # the README the registry was generated with
 │   ├── trending-quant-catalog.json  # HF class table llgenie's pick reads (make sync-quant-catalog)
 │   └── strata_models.json  # Strata's setup.py model/file/shard map (make sync-strata-models)
