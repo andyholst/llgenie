@@ -47,7 +47,7 @@ binary_flags: ["--help"]   # the sglang CLI answers --help (no --version); detec
 binary_probe:                # argparse-only CLI: the help family must answer, the version
   cuda: help                 # comes from the image's `detect` (the installed distribution's version,
   rocm: help                 # or the pin when that distribution reports 0.0.0 — the ROCm wheel does)
-detect: "{binary} --help > /dev/null && python3 -c 'import importlib.metadata as m; v = m.version(\"sglang\"); print(\"sglang\", v if v not in (\"0.0.0\", \"\") else \"pin {pinned_short}\")'"   # cuda metadata says 0.5.21; the rocm wheel says 0.0.0, so it reports the pin (issue #625)
+detect: "{binary} --help > /dev/null && python3 -c 'import importlib.metadata as m; v = m.version(\"sglang\"); print(\"sglang\", v if v not in (\"0.0.0\", \"\") else \"{version}\")'"   # the installed distribution, or the PINNED VERSION when it reports 0.0.0 (the ROCm wheel does); a commit sha is not a version (#636)
 launch: "{binary} serve --model-path {model} --host {host} --port {port} --served-model-name {alias}"
 health: "GET /health"
 alias_mode: flag
