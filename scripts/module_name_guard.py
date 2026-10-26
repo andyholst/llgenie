@@ -22,7 +22,10 @@ Commands (stdlib only):
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,6 +54,72 @@ def is_clean(text: str) -> bool:
     return not offenders(text)
 
 
+def _gitignore_patterns(root: Path) -> list[str]:
+    """The checkout's own `.gitignore` rules (negations noted but not applied — see `live_files`)."""
+    path = root / ".gitignore"
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("!"):
+            continue
+        out.append(line)
+    return out
+
+
+def is_ignored(rel: str, patterns: list[str]) -> bool:
+    """True when `rel` matches a `.gitignore` rule: `dir/` prefixes, `*.ext` names, or a literal path.
+
+    A minimal matcher on purpose — the guard needs "is this a file a review would see", not git's
+    full semantics — and it works where git does not: the unit suite runs in the test image with the
+    checkout mounted at `/workspace`, where `.git` points outside the mount and `git ls-files` fails
+    (#350).
+    """
+    rel = rel.replace(os.sep, "/")
+    base = rel.rsplit("/", 1)[-1]
+    for pat in patterns:
+        p = pat.rstrip("/")
+        if not p:
+            continue
+        if pat.endswith("/"):
+            if rel == p or rel.startswith(p + "/") or f"/{p}/" in f"/{rel}":
+                return True
+            continue
+        if "/" in p:
+            if rel == p or rel.startswith(p + "/"):
+                return True
+            continue
+        if fnmatch.fnmatch(base, p) or fnmatch.fnmatch(rel, p):
+            return True
+    return False
+
+
+def live_files(root: Path) -> list[Path]:
+    """The files a review would see: the tree walk minus what the checkout's `.gitignore` excludes.
+
+    A guard that reads everything judges files git does not track — a bot's gitignored working file
+    (`refine-in.md`) reddened the local `make loop` while CI, on a fresh checkout, stayed green
+    (issue #350).
+    """
+    root = Path(root)
+    patterns = _gitignore_patterns(root)
+    out = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        try:
+            rel = str(p.relative_to(root))
+        except ValueError:
+            continue
+        if is_ignored(rel, patterns):
+            continue
+        out.append(p)
+    return out
+
+
 def hits(root: Path, paths: list[Path] | None = None,
          exclude: list[Path] | None = None) -> list[str]:
     """The repo-relative paths of live files that name the old module (empty when clean).
@@ -65,7 +134,7 @@ def hits(root: Path, paths: list[Path] | None = None,
     if paths:
         candidates = [Path(p) if Path(p).is_absolute() else root / p for p in paths]
     else:
-        candidates = [p for p in sorted(root.rglob("*")) if p.is_file()]
+        candidates = live_files(root)
     out: list[str] = []
     for p in candidates:
         p = Path(p).resolve()
