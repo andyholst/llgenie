@@ -91,14 +91,17 @@ def test_sync_writes_valid_registry_and_rejects_invalid(tmp_path, capsys):
     dest = tmp_path / "out" / "models.json"
     # When each is synced into a temp target
     assert sr.sync(str(VENDORED), dest, str(README)) == 0
-    # Then both are copied byte for byte and a second sync is a no-op
-    assert dest.read_bytes() == VENDORED.read_bytes()
+    # Then the store is written NORMALISED (one row per id, formats in the vocabulary — issue
+    # #687), the README is copied as upstream publishes it, and a second sync is a no-op
+    expected, _ = sr.normalise(sr.validate(VENDORED.read_bytes()))
+    assert json.loads(dest.read_bytes()) == expected
+    assert dest.read_bytes() == (json.dumps(expected, indent=2, ensure_ascii=False) + "\n").encode()
     assert (dest.parent / "trending-README.md").read_text() == README.read_text()
     assert sr.sync(str(VENDORED), dest, str(README)) == 0
     assert "unchanged" in capsys.readouterr().out
     # and the invalid one is rejected without touching the target
     assert sr.sync(str(bad), dest, str(README)) == 1
-    assert dest.read_bytes() == VENDORED.read_bytes()
+    assert json.loads(dest.read_bytes()) == expected
     assert sr.check(bad) == 1
 
 
