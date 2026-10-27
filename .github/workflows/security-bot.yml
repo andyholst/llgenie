@@ -6,7 +6,7 @@ name: security-bot — turns ONE auto-fixable vulnerability issue into a green P
 # permission scope, not a second implementation.
 #
 # Trigger surface: issues labelled (the `auto-fixable` label is what makes an issue eligible),
-#                  schedule daily 05:41 UTC, and workflow_dispatch for a manual run.
+#                  schedule daily 05:09 UTC (its own odd minute), and workflow_dispatch for a manual run.
 # Flow: guard (owner / repository bot / collaborator with write) -> make security-bot
 #       (select the oldest `security`+`vulnerability`+`auto-fixable` issue -> edit the pin in
 #       tools/requirements*.in -> make lint check-wiring check-docs check-security-scan ->
@@ -18,7 +18,7 @@ on:
   issues:
     types: [labeled]
   schedule:
-    - cron: "41 5 * * *"   # daily 05:41 UTC — its own slot (issue #275)
+    - cron: "9 5 * * *"    # daily 05:09 UTC — its own odd minute (issue #275: no bot shares a slot)
   workflow_dispatch:
     inputs:
       dry:
@@ -38,18 +38,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Owner / repository bot / collaborator trigger guard
+      - name: Owner / collaborator trigger guard
         env:
           ACTOR: ${{ github.actor }}
           TRIGGER: ${{ github.triggering_actor }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
+          # The run's head repository: empty for every non-PR event (issue #510).
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           for u in "$ACTOR" "$TRIGGER"; do
             if [ "$u" = "$OWNER" ]; then continue; fi
+            # The repository's own bot is a GitHub App login, so it is never a collaborator and the
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
             if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
               echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
               continue
