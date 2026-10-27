@@ -1,6 +1,6 @@
 # A green registry-sync PR is reviewed into ONE agent:implement issue
 
-Issue #709 (this change). Complements #704/#705 (`sync-change-issue`, which states what a store
+Issue #709 (this change), PR #720. Complements #704/#705 (`sync-change-issue`, which states what a store
 *changed*, even when a gate is red) and answers the question the green PR exists for: at each VRAM
 llgenie sells, does the trending list list models, and does each row name the inference server with the
 highest t/s that fits that card?
