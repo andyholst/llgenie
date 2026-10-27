@@ -35,6 +35,14 @@ When it prints the numbered list,
 Then every listed model fits by `fits()` and no model that does not fit is numbered.
 - **Test:** `tests/test_trend_pick.py::test_llgenie_list_is_the_readme_list_that_fits_the_card`
 
+#### Scenario: the printed row shows the figure the gate used
+
+Given a listed model whose `vram_min` and `vram_tier` disagree,
+When `llgenie --trend` prints its row,
+Then the VRAM column is `vram_min` — the field `fits()` gated on — never the display tier,
+so a row admitted at its 12 GB minimum does not print `48GB` beside itself.
+- **Test:** `tests/test_trend_pick.py::test_the_printed_row_shows_the_figure_the_gate_used`
+
 #### Scenario: the matrix applies the same floors as the pick
 Given `llgenie --matrix` with no `--ram` on a host whose RAM is known,
 When it builds the permutation map,

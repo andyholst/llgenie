@@ -2,6 +2,7 @@
 
 - [x] `fits()` gates on `vram_min`, falling back to `vram_tier` (#669), and applies `system_ram_min`.
 - [x] `llgenie --trend` passes the host's RAM to `offer()` (#414).
+- [x] `llgenie --trend` prints the VRAM figure the gate read (`mp.vram_label`: `vram_min`, else the tier), so a row admitted at its 12 GB minimum no longer prints `48GB` beside itself (#669) — measured on the host: `Ornith 1.5` 48GB → 16GB, `Qwen3.8-27B` 16GB → 12GB.
 - [x] `_canon_format` folds spelling (`LiteRT-LM` → `litertlm`) so a real format is not dropped (#730).
 - [x] `tests/test_trend_list_acceptance.py` asserts the fitting set from `mp.fits()` and finds the VRAM column by header (#693).
 - [x] `tests/test_pick_matrix_arch_perms.py`, `tests/test_card_aware_rank.py`, `tests/test_mac_trend_pick.py` derived from `offer()` and the store.

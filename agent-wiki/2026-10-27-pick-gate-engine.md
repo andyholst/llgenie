@@ -43,6 +43,20 @@ Implements #669 (task part) with #693's de-pinning, and carries the fix for #730
   weight). Generalising the TensorFold-only gate reds 29 fork tests, so the fix is a product
   decision, filed as #731 — not a test to loosen.
 
+## The printed column follows the gate (found by running the product, not the suite)
+
+`llgenie --trend --vram 8` on this host (a 16 GB card) printed `Ornith 1.5 … 48GB` and
+`Qwen 3.6 27B … 18GB` in a list headed "every model whose VRAM fits this card (16 GB)":
+the row was gated in by `fits()` (its measured minimum is 16 GB / 12 GB) while the column
+printed `vram_tier`, so the list contradicted itself exactly as #669 describes — one layer
+above the gate. `mp.vram_label()` now returns the figure the gate read (`vram_min` when the
+store states one, else the tier) and `_print_trend` prints it; measured after: `Qwen3.8-27B`
+16GB → **12GB**, `Bonsai 2 27B` 12GB → **8GB**, `Ornith 1.5` 48GB → **16GB**.
+
+Locked by `tests/test_trend_pick.py::test_the_printed_row_shows_the_figure_the_gate_used`
+(positional line matching, and it asserts the store really has rows where the two figures
+differ, so the test cannot pass by the two being equal).
+
 ## Corrected after the first CI run: the branch is green on the store it SHIPS with
 
 The first push measured every de-pinned file on the locally synced store (112 models) and

@@ -544,6 +544,32 @@ def test_every_readme_model_maps_to_its_best_engine(tmp_path, monkeypatch):
         assert r["engines"][0]["engine"] in line, line
 
 
+def test_the_printed_row_shows_the_figure_the_gate_used(tmp_path, monkeypatch):
+    """The list is gated by `mp.fits()` — the store's measured minimum — so the VRAM column
+    it prints is that same figure, never the display bucket: a row admitted at its 12 GB
+    minimum does not print "48GB" beside itself (issue #669's contradiction, one layer up
+    from the gate)."""
+    monkeypatch.setenv("LLGENIE_SYSTEM_RAM_BYTES", RAM64)
+
+    # Given the printed trend list for a 16 GB cuda card
+    rows = _offer(tmp_path, "cuda", 15.9921875, ram_gb=64)
+    out = _cli(tmp_path, "--trend").stdout
+    printed = [l for l in out.splitlines() if re.match(r"^\s+(--|\d+\.)\s{2}", l)]
+    assert len(printed) == len(rows), (len(printed), len(rows))
+
+    # When  each printed row's VRAM column is read, positionally
+    for line, r in zip(printed, rows):
+        want = mp.vram_label(r["model"])
+
+        # Then  it is the figure the gate read, not a different stated figure
+        assert f"{want:>5}  " in line, (line, want)
+
+    # And   the rows where the two figures disagree prove the column is not the tier
+    differing = [r for r in rows if mp.vram_min_gb(r["model"]) is not None
+                 and abs(mp.vram_min_gb(r["model"]) - mp._num(r["model"].get("vram_tier"))) > 1]
+    assert differing, "no row states two different VRAM figures; this test would prove nothing"
+
+
 # ---------------------------------------------------------------------------
 # mapping: registry engine name -> engine id -> image variant -> format -> download
 # ---------------------------------------------------------------------------

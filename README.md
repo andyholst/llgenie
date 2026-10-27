@@ -87,8 +87,11 @@ make install
 
 1. **The trend list**: exactly the [trending-local-llms](https://github.com/andyholst/trending-local-llms)
    README "Most loved" list, in README order (🔥 trending -> 🕑 recent -> 💤 stale, then trend score),
-   every model whose README VRAM column fits this card (a 16 GB card is 16 GB even though
-   `nvidia-smi` reports 15.99 GiB). Every model you can run here is numbered, downloaded or not
+   every model whose **stated minimum** fits this card — `vram_min` (the store's measured minimum)
+   when the store states one, else the README's VRAM column — and the figure printed beside each row
+   is that same one, so the list never shows a number it did not gate on (a 16 GB card is 16 GB even
+   though `nvidia-smi` reports 15.99 GiB, and a model the store proves runs at 12 GB is listed under
+   12GB, not under a bigger display bucket). Every model you can run here is numbered, downloaded or not
    (`[local]` = already in `~/models`); one that cannot run here stays in the list as `--` with the reason.
 2. **Engines** for the chosen model, each with the format llgenie fetches for it. A figure is
    compared to **this host's card**, not just its backend: first the figures measured

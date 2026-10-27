@@ -1661,7 +1661,7 @@ def _print_trend(mp, reg, rows, gb):
     for r in rows:
         m, e = r["model"], (r["engines"] or [None])[0]
         head = (f"{m['name']:<30} {mp.BAND_LABEL[mp.band(m, mp.registry_today(reg))]:<8} "
-                f"trend {mp.trend_score(m):>4.1f}  {m['vram_tier']:>5}  ")
+                f"trend {mp.trend_score(m):>4.1f}  {mp.vram_label(m):>5}  ")
         if r.get("why"):
             print(f"   --  {head}not here: {r['why']}")
             continue

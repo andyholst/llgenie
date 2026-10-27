@@ -413,6 +413,20 @@ def vram_min_gb(model: dict) -> float | None:
     return stated_gb(model.get("vram_min")) or None
 
 
+def vram_label(model: dict) -> str:
+    """The VRAM figure the gate reads, as the printed list shows it: the store's measured
+    minimum (`vram_min`) when it states one, else the README's display `vram_tier`.
+
+    The list is gated by `fits()`, so this is the same field the gate used: a row admitted at
+    its 12 GB measured minimum never prints "48GB" next to itself, which is exactly the
+    contradiction #669 is about (issue #669).
+    """
+    need = vram_min_gb(model)
+    if need is None:
+        return str(model.get("vram_tier") or "")
+    return f"{need:g}GB"
+
+
 def fits(model: dict, gb: float, ram_gb: float | None = None) -> bool:
     """The model's stated minimum (`vram_min`, else the README's `vram_tier`) <= the card's
     nominal size — and, when the store states one, the model's `system_ram_min` <= this
