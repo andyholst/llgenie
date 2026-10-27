@@ -455,11 +455,17 @@ def test_vendored_registry_is_the_vendored_readme_list():
     # Given the vendored registry and the README it was synced with
     data = json.loads(VENDORED.read_text())
     # Then the models are the README "Most loved" rows, same names, same order, and each
-    # row's README VRAM is the store's measured minimum (the tier rounds differently — #669)
+    # row's README VRAM is a figure the store states for it — the measured minimum, else the
+    # display tier (upstream prints one or the other depending on the sync, so neither may
+    # be frozen here; the GATE always prefers the minimum, proved hermetically in
+    # `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`)
     assert [m["name"] for m in data["models"]] == [n for n, _ in _readme_rows()]
     for (name, vram), model in zip(_readme_rows(), data["models"]):
-        stated = mp.vram_min_gb(model) or mp._num(model.get("vram_tier"))
-        assert abs(stated - vram) <= 1, f"{name}: README {vram}GB vs the store's {stated}GB"
+        stated = [v for v in (mp.vram_min_gb(model), mp._num(model.get("vram_tier")))
+                  if v is not None]
+        assert stated, f"{name}: the store states no VRAM figure at all"
+        assert min(abs(v - vram) for v in stated) <= 1, \
+            f"{name}: README {vram}GB vs the store's {stated}GB"
 
 
 @pytest.mark.parametrize("backend,gb", [("cuda", 16), ("cuda", 24), ("cpu", 16), ("rocm", 8),
@@ -503,7 +509,12 @@ def test_card_16gb_list_on_this_readme(tmp_path, monkeypatch):
     rows = _offer(tmp_path, "cuda", 15.9921875, ram_gb=64)
     names = [r["model"]["name"] for r in rows]
     assert names == _fits_names(16)
-    assert not {n for n, v in _readme_rows() if v > 32} & set(names)   # nothing far too big
+    # nothing the STORE says needs far more than this card is listed. The README's column is
+    # upstream's display figure and disagrees with the store's measured minimum on some syncs
+    # (issue #669), so the "far too big" set is read from the gate's own field, not from it.
+    too_big = {m["name"] for m in mp.load_registry()["models"]
+               if (mp.vram_min_gb(m) or mp._num(m.get("vram_tier")) or 0) > 32}
+    assert not too_big & set(names)
     # every row is listed; a row that cannot be served here says why (an engine with
     # no downloadable plan, e.g. TensorFold for a model it does not publish)
     for r in rows:

@@ -66,7 +66,10 @@ HARDWARE = (
 
 
 def _fits_card(model: dict, gb: float) -> bool:
-    return mp._num(model.get("vram_tier")) <= mp.card_class_gb(gb)
+    """The product's own fit decision, never a re-derivation from one field: `rank_models`
+    gates on `mp.fits` (the store's measured `vram_min`, else the README's `vram_tier`,
+    issue #669), so a test that restates the gate must call it."""
+    return mp.fits(model, gb)
 
 
 @pytest.fixture(scope="module")
@@ -96,13 +99,15 @@ def test_october_5_fixture_prefers_a_known_card_over_a_card_less_box():
     by_id = {row[0]: row for row in rows}
     best = sr.readme_best(readme, "CUDA t/s (best)")
 
-    # Then the servable names are the README rows at or under 16 GB
+    # Then the servable names are the snapshot's own rows this card fits, in its order —
+    # derived from the frozen fixture through the product's gate (`mp.fits`: the measured
+    # `vram_min`, else the README tier, issue #669) rather than listed by hand, so a change
+    # to the gate re-derives this list instead of failing on a stale name.
     assert reg["generated_utc"] == OCTOBER_5
-    assert [row[1] for row in rows] == [
-        "Qwen3.8-Flash-Next 125B", "Qwen3.8-27B", "Bonsai 2 27B",
-        "RavenX-Conjecture-Qwen3-8B-MLX", "Qwen3.6-35B-A3B", "Qwen3 8B",
-        "Gemma 4 12B", "Qwen3 14B", "Gemma 4 E2B", "Llama 3.1 8B",
-        "DeepSeek R1 1.5B"]
+    expected = [m["name"] for m in reg["models"]
+                if mp.fits(m, 16) and mp.rank_engines(m, "cuda", gb=16)]
+    assert [row[1] for row in rows] == expected
+    assert len(expected) > 5, "the snapshot must still list a real 16 GB set"
     assert by_id["qwen3.8-27b"][2:6] == ("llama.cpp", "llama.cpp", 43.7, "CUDA")
     assert by_id["qwen3.8-flash-next-125b"][2] == "Strata"
     # And the README's own best-per-backend column is untouched by that pick
@@ -192,11 +197,13 @@ def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_syn
     # Then the download is newer and the 48 GB list is the README order that fits
     assert new["generated_utc"] > old["generated_utc"]
     fitting = mp.trend_list(new, 48)
+    # the list is the README order narrowed by the product's own gate, never by one field:
+    # `vram_min` decides whenever the store states one (issue #669)
+    by_name = {m["name"]: m for m in new["models"]}
     assert [m["name"] for m in fitting] == [
-        name for name in sr.readme_order(readme) if mp._num(next(
-            m["vram_tier"] for m in new["models"] if m["name"] == name)) <= 48]
-    assert any(mp._num(m["vram_tier"]) > 48 for m in new["models"])
-    assert all(mp._num(m["vram_tier"]) <= 48 for m in fitting)
+        name for name in sr.readme_order(readme) if mp.fits(by_name[name], 48)]
+    assert any(not mp.fits(m, 48) for m in new["models"])
+    assert all(mp.fits(m, 48) for m in fitting)
     added = [m["id"] for m in fitting if m["id"] not in {row["id"] for row in old["models"]}]
     assert added, "the live list must add models that fit a 48 GB card"
 
@@ -348,7 +355,9 @@ def test_rank_follows_the_given_vram_ram_and_arch(live_sync):
     metal = mp.rank_engines(qwen_new, "metal")[0]
     assert metal["measured_on"] == "Metal" and metal["variant"] == "metal"
     assert all(e["variant"] != "metal" for e in mp.rank_engines(qwen_new, "cpu"))
-    big = [m for m in new["models"] if mp._num(m["vram_tier"]) > 48]
+    # "too big for this card" is the product's own decision, not one field of the store
+    # (issue #669: the measured `vram_min` wins whenever the store states one)
+    big = [m for m in new["models"] if not mp.fits(m, 48)]
     assert big
     at_48 = {r["model"]["id"] for r in mp.rank_models(new, "cuda", 48)}
     assert all(m["id"] not in at_48 for m in big)

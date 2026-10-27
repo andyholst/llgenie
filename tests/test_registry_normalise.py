@@ -148,3 +148,22 @@ def test_sync_writes_the_normalised_store_and_check_accepts_it(tmp_path):
     assert data["models"][0]["formats"] == [{"name": "GGUF", "hf": "a/m1-gguf"}]
     assert json.loads(written)["models"][0]["id"] == "m1"
     assert readme_dest.read_text() == readme.read_text()
+
+
+def test_a_format_written_in_another_spelling_is_still_that_format():
+    """Upstream spells the SAME format several ways; identity is the letters and digits,
+    not the punctuation (issue #730)."""
+
+    # Given the spellings upstream has used for the vocabulary
+    cases = {"LiteRT-LM": "litertlm", "litertlm": "litertlm", "MLX-Safetensors": "mlx-safetensors",
+             "mlx-safetensors": "mlx-safetensors", "GGUF": "GGUF", "gguf ": "GGUF"}
+
+    # When  each is canonicalised
+    got = {name: sr._canon_format(name) for name in cases}
+
+    # Then  every real format keeps its identity, in the vocabulary's own spelling
+    assert got == cases
+
+    # And   what is NOT a format is still dropped (never guessed into one)
+    for junk in ("Ornith 1.5", "LLM (MoE)", "", None):
+        assert sr._canon_format(junk) is None

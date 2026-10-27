@@ -120,13 +120,21 @@ def test_readme_parser_reads_the_vendored_list():
     rows = _readme_rows()
 
     # Then it is the registry's model list in the same order, and each row's README VRAM is
-    # the store's measured minimum (the tier is a display bucket that rounds differently —
-    # issue #669) within the 1 GB the column rounds away
+    # a figure the store states for that model — its measured minimum, else the display tier
+    # — within the 1 GB the column rounds away. WHICH of the two the column prints is
+    # upstream's choice and moves with a sync (on the 2026-10-13 store the column matches the
+    # tier, on the 2026-10-27 one the measured minimum), so the parser is pinned to "the
+    # column is a stated figure", never to one of them (issue #669). That the GATE reads the
+    # minimum is proved hermetically in
+    # `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`.
     reg = mp.load_registry()["models"]
     assert [n for n, _ in rows] == [m["name"] for m in reg]
     for (name, vram), model in zip(rows, reg):
-        stated = mp.vram_min_gb(model) or mp._num(model.get("vram_tier"))
-        assert abs(stated - vram) <= 1, f"{name}: README {vram}GB vs the store's {stated}GB"
+        stated = [v for v in (mp.vram_min_gb(model), mp._num(model.get("vram_tier")))
+                  if v is not None]
+        assert stated, f"{name}: the store states no VRAM figure at all"
+        assert min(abs(v - vram) for v in stated) <= 1, \
+            f"{name}: README {vram}GB vs the store's {stated}GB"
 
 
 @pytest.mark.parametrize("platform,backend,gb", HOSTS, ids=IDS)
@@ -144,34 +152,28 @@ def test_ac1_rows_are_the_readme_models_that_fit_in_readme_order(tmp_path, platf
     assert [r["model"]["name"] for r in rows] == expected
 
 
-def test_the_vram_gate_reads_the_field_the_readme_agrees_with():
-    """The gate reads the store's measured minimum (`vram_min`), not the display bucket.
+def test_the_vendored_store_states_two_distinct_vram_figures():
+    """`vram_min` (the contract's measured minimum) and `vram_tier` (the README's display
+    bucket) are different numbers, and the store states both.
 
-    Measured on the 2026-10-27 store: the README's VRAM column differs from `vram_min` on
-    **0 of 112** rows (allowing the 1 GB the column rounds away) and from `vram_tier` on
-    **36 of 112**. So `vram_min` IS the column, and the label is a different number
-    (issue #669).
+    This is the data premise the gate relies on, asserted WITHOUT pinning which of the two
+    upstream's column prints: that flips between stores (the 2026-10-13 store prints the
+    tier, the 2026-10-27 one the measured minimum — measured 8 of 23 and 36 of 112 rows
+    disagreeing respectively), which is why neither figure may be frozen here. The gate's
+    own choice — the minimum wins whenever the store states one — is proved hermetically in
+    `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`.
     """
-    # Given every registry row and the README's VRAM column for it
-    reg = {m["name"]: m for m in mp.load_registry()["models"]}
+    # Given every registry row that states a measured minimum
+    reg = mp.load_registry()["models"]
+    both = [(m["name"], mp.vram_min_gb(m), mp._num(m.get("vram_tier")))
+            for m in reg if mp.vram_min_gb(m) is not None]
 
-    def off_by(field) -> list[str]:
-        bad = []
-        for name, vram in _readme_rows():
-            model = reg.get(name)
-            if model is None:
-                continue
-            value = mp.vram_min_gb(model) if field == "vram_min" else mp._num(model.get("vram_tier"))
-            if value is not None and abs(value - vram) > 1:   # 1 GB is the column's rounding
-                bad.append(name)
-        return bad
-
-    # When  each field is compared with the column
-    min_bad, tier_bad = off_by("vram_min"), off_by("vram_tier")
-
-    # Then  the gate's field matches the column and the tier does not
-    assert min_bad == [], f"vram_min disagrees with the README column on {len(min_bad)} rows"
-    assert len(tier_bad) > 0, "the tier and the column agree here; this test would prove nothing"
+    # When  the two figures are compared
+    # Then  the store distinguishes them somewhere, so "which field is the gate" is a real
+    #       question rather than a coincidence of one number
+    assert both, "the vendored store states no vram_min at all"
+    assert any(abs(mn - tier) > 1 for _, mn, tier in both if tier is not None), \
+        "vram_min and vram_tier never differ here; the gate's field would prove nothing"
 
 
 @pytest.mark.parametrize("platform,backend,gb", HOSTS, ids=IDS)

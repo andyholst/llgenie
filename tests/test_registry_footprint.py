@@ -110,6 +110,34 @@ def test_a_stated_system_ram_floor_excludes_the_model():
     assert fits_short is False
 
 
+def test_the_gate_reads_the_stated_minimum_not_the_display_tier():
+    """`vram_min` is the contract's measured minimum and `vram_tier` the README's display
+    bucket; when the store states both, the MEASUREMENT decides — in both directions
+    (issue #669).
+
+    It is the one test that proves the field, and it is hermetic on purpose: the vendored
+    store's own column follows the tier on one sync and the minimum on the next, so a test
+    that read today's data would prove nothing tomorrow.
+    """
+    # Given a model the tier makes look too big (32GB) and the measurement makes fit (12GB)
+    generous = dict(MODEL, vram_tier="32GB", vram_min="12GB")
+
+    # When  a 16 GB card is asked for
+    # Then  the measurement wins: the model is offered (a tier gate would refuse it)
+    assert MP.fits(generous, 16) is True
+
+    # And   the other direction: a 16GB tier over a 24GB measured minimum
+    stingy = dict(MODEL, vram_tier="16GB", vram_min="24GB")
+
+    # Then  a 16 GB card is refused (a tier gate would offer it)
+    assert MP.fits(stingy, 16) is False
+
+    # And   a model stating no minimum still gates on the tier it states
+    tier_only = {k: v for k, v in MODEL.items() if k != "vram_min"}
+    assert MP.fits(dict(tier_only, vram_tier="24GB"), 16) is False
+    assert MP.fits(dict(tier_only, vram_tier="16GB"), 16) is True
+
+
 def test_no_stated_ram_keeps_the_previous_behaviour():
     """A store that states nothing must behave exactly as before (never invented)."""
     # Given a model with no footprint fields at all

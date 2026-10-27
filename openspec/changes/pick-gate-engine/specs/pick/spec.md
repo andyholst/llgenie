@@ -20,8 +20,8 @@ THEN `vram_tier` is the gate, exactly as before.
 #### Scenario: the measured minimum is the gate
 Given a model whose `vram_min` and `vram_tier` disagree,
 When `fits(model, 16)` runs for a 16 GB card,
-Then it answers from `vram_min`, never from the tier.
-- **Test:** `tests/test_trend_pick.py::test_the_gate_field_is_the_one_the_readme_agrees_with`
+Then it answers from `vram_min`, never from the tier — in both directions.
+- **Test:** `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`
 
 #### Scenario: the system-RAM floor is applied when the store states one
 Given a model that states `system_ram_min` above this host's RAM,
@@ -34,6 +34,13 @@ Given plain `llgenie --trend` on a host with a card and known RAM,
 When it prints the numbered list,
 Then every listed model fits by `fits()` and no model that does not fit is numbered.
 - **Test:** `tests/test_trend_pick.py::test_llgenie_list_is_the_readme_list_that_fits_the_card`
+
+#### Scenario: the matrix applies the same floors as the pick
+Given `llgenie --matrix` with no `--ram` on a host whose RAM is known,
+When it builds the permutation map,
+Then the host's RAM is resolved the way the card is, so a model above the store's
+`system_ram_min` is not listed — the matrix never offers what `offer()` refuses.
+- **Test:** `tests/test_pick_full_registry.py::test_pick_matrix_any_offer_is_a_real_fitting_hf_url`
 
 #### Scenario: a format written in another spelling is still that format
 Given a `formats[].name` of `LiteRT-LM`,
@@ -56,6 +63,17 @@ Given a card size and the vendored store,
 When a test needs the models that fit,
 Then it reads them from `mp.fits()` in the store's order, not from the README's VRAM cell.
 - **Test:** `tests/test_trend_list_acceptance.py::test_225_acceptance_strata_on_a_16gb_card`
+
+#### Scenario: the README's column is a stated figure, whichever one it prints
+
+Given the vendored store and the README it was synced with,
+When a test compares a row's README VRAM cell with the store,
+Then the cell matches a figure the store states for that model — the measured minimum, else
+the display tier — because WHICH of the two upstream prints moves with a sync (the
+2026-10-13 store prints the tier, the 2026-10-27 one the measured minimum), and the suite
+never freezes either.
+- **Test:** `tests/test_trend_list_acceptance.py::test_the_vendored_store_states_two_distinct_vram_figures`,
+  `tests/test_trend_pick.py::test_vendored_registry_is_the_vendored_readme_list`
 
 #### Scenario: the TensorFold seams follow the row the store serves
 Given a 48 GB Mac and a store whose top row is served by another engine,

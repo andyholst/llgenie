@@ -1294,8 +1294,13 @@ def matrix(registry: dict, gb: float | None = None, ram_gb: float | None = None,
     the full matrix is what the picker's choices reduce to."""
     arch = arch or host_arch()
     gb = card_gb() if gb is None else gb
+    # the host's RAM is resolved the same way the card is: `matrix()` given no ram means
+    # THIS host's ram, so the store's `system_ram_min` floor applies here exactly as it does
+    # in `offer()` (issue #669/#414). Without it `llgenie --matrix` without `--ram` listed
+    # models this host cannot run.
+    ram_gb = (system_ram_gb() or 0.0) if ram_gb is None else ram_gb
     permutations, skipped = [], []
-    for m in trend_list(registry, gb):
+    for m in trend_list(registry, gb, ram_gb):
         engines = rank_engines(m, arch, gb=gb)
         if not engines:
             names = sorted({e["engine"] for e in m.get("engines") or []} | set(m.get("supported_engines") or []))
