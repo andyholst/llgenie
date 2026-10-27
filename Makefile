@@ -72,7 +72,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -901,6 +901,20 @@ check-workflows: ## CI: fail when a YAML file's GitHub expression does not parse
 	python3 scripts/check_workflows.py check
 workflows-report: ## Show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
 	python3 scripts/check_workflows.py report
+scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep|snyk, issue #714)
+	python3 scripts/scanner_image.py build "$(SCANNER)"
+test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
+	python3 scripts/scanner_image.py test "$(SCANNER)"
+scanner-digests: ## Rewrite containers/scanners/digests.json from the Dockerfiles (the immutable tag + pinned version per scanner)
+	python3 scripts/scanner_image.py write
+scanner-ref: ## Print the published immutable ref of a scanner image (SCANNER=<id>)
+	python3 scripts/scanner_image.py ref "$(SCANNER)"
+publish-scanner-images: ## Build linux/amd64+arm64 and push one scanner image's content-hash tag to GHCR (SCANNER=<id>; the scanner-images job publishes through make ci-scanner-images)
+	python3 scripts/scanner_image.py publish "$(SCANNER)"
+ci-scanner-images: ## CI job scanner-images: build and version-test every scanner image, publish on a push run only (policy in the script)
+	python3 scripts/scanner_image.py ci
+check-scanner-images: ## CI: fail when a scanner Dockerfile floats (tag base, version range) or digests.json is stale (issue #714)
+	python3 scripts/scanner_image.py check all
 # UNSUPPORTED=<file>: upstream engines with no skill are omitted from the trend
 # offer (no image). Passing the decisions file tolerates ONLY the engines recorded
 # there with a dated decision (issue #229); an engine with no skill and no decision
@@ -1427,6 +1441,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-pr-hygiene
 	$(MAKE) check-pr-authors
 	$(MAKE) check-workflows
+	$(MAKE) check-scanner-images
 	$(MAKE) check-agent-skills
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates

@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-27 | one immutable Wolfi image per scanner | [2026-10-27-scanner-images.md](agent-wiki/2026-10-27-scanner-images.md) | #714 |
 | 2026-10-27 | `check-quant-catalog` fails on a plan the committed table lost, and only notes what the live Hub re-reads (a reorder, a newly published conversion) | [2026-10-27-quant-catalog-live-drift.md](agent-wiki/2026-10-27-quant-catalog-live-drift.md) | #736, #732 |
 | 2026-10-27 | the pick gates on the measured minimum, and the suite asserts rules over the store | [2026-10-27-pick-gate-engine.md](agent-wiki/2026-10-27-pick-gate-engine.md) | #669, #693, #730 |
 | 2026-10-27 | a GREEN sync PR is reviewed into ONE issue (VRAM trend list + highest-t/s server) | [2026-10-27-registry-sync-review.md](agent-wiki/2026-10-27-registry-sync-review.md) | #709, #720 |
