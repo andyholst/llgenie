@@ -76,16 +76,22 @@ def _env(tmp_path: Path, backend: str, gb: int) -> dict:
 
 def _readme_rows() -> list[tuple[str, int]]:
     """(name, VRAM GB) parsed straight from the vendored README markdown (the list a
-    user reads on GitHub), independent of data/models.json. The VRAM column is
-    `16GB`, a bare `8`, or `CPU` (a CPU-only model); all three parse the same way
-    production does (mp._num: 16, 8, 0)."""
+    user reads on GitHub), independent of data/models.json.
+
+    The VRAM column is looked up BY NAME in the table header — upstream reorders and
+    restyles columns (`16GB`, `**12GB**<br><sub>stated by the source …</sub>`, `8`, `CPU`),
+    and any of those must read the same as production's `mp._num` (16, 12, 8, 0)."""
     section = README.read_text().split(sr.MOST_LOVED, 1)[1].split("\n## ", 1)[0]
+    lines = section.splitlines()
+    header = next(l for l in lines if l.startswith("| Model"))
+    vram_at = [c.strip() for c in header.strip().strip("|").split("|")].index("VRAM")
     rows = []
-    for line in section.splitlines():
+    for line in lines:
         m = re.match(r"^\| \[\*\*(.+?)\*\*\]", line)
         if m:
             cells = [c.strip() for c in line.split(" | ")]
-            vram = next(c for c in cells if re.fullmatch(r"\d+GB|\d+|CPU", c))
+            # "**12GB**<br><sub>stated by the source · …</sub>" -> "12GB"
+            vram = cells[vram_at].split("<br>", 1)[0].replace("*", "").strip()
             rows.append((m.group(1), int(mp._num(vram))))
     return rows
 
@@ -113,20 +119,61 @@ def test_readme_parser_reads_the_vendored_list():
     # When its "Most loved" table is parsed
     rows = _readme_rows()
 
-    # Then it is the registry's model list, same names and VRAM, same order
+    # Then it is the registry's model list in the same order, and each row's README VRAM is
+    # a figure the store states for that model — its measured minimum, else the display tier
+    # — within the 1 GB the column rounds away. WHICH of the two the column prints is
+    # upstream's choice and moves with a sync (on the 2026-10-13 store the column matches the
+    # tier, on the 2026-10-27 one the measured minimum), so the parser is pinned to "the
+    # column is a stated figure", never to one of them (issue #669). That the GATE reads the
+    # minimum is proved hermetically in
+    # `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`.
     reg = mp.load_registry()["models"]
-    assert rows == [(m["name"], int(mp._num(m["vram_tier"]))) for m in reg]
+    assert [n for n, _ in rows] == [m["name"] for m in reg]
+    for (name, vram), model in zip(rows, reg):
+        stated = [v for v in (mp.vram_min_gb(model), mp._num(model.get("vram_tier")))
+                  if v is not None]
+        assert stated, f"{name}: the store states no VRAM figure at all"
+        assert min(abs(v - vram) for v in stated) <= 1, \
+            f"{name}: README {vram}GB vs the store's {stated}GB"
 
 
 @pytest.mark.parametrize("platform,backend,gb", HOSTS, ids=IDS)
 def test_ac1_rows_are_the_readme_models_that_fit_in_readme_order(tmp_path, platform, backend, gb):
     # Given the README list and a host
+    ram = _ram(backend, gb)
 
     # When llgenie builds its list
     rows = _offer(tmp_path, backend, gb)
 
-    # Then it is exactly the README models whose VRAM tier fits, in README order
-    assert [r["model"]["name"] for r in rows] == [n for n, v in _readme_rows() if v <= gb]
+    # Then it is exactly the registry's models this host fits, in README order — the
+    # fit is the product's own decision (VRAM floor AND the stated system-RAM floor,
+    # issue #669/#414), while the ORDER comes from the README the store was synced with.
+    expected = [m["name"] for m in mp.load_registry()["models"] if mp.fits(m, gb, ram)]
+    assert [r["model"]["name"] for r in rows] == expected
+
+
+def test_the_vendored_store_states_two_distinct_vram_figures():
+    """`vram_min` (the contract's measured minimum) and `vram_tier` (the README's display
+    bucket) are different numbers, and the store states both.
+
+    This is the data premise the gate relies on, asserted WITHOUT pinning which of the two
+    upstream's column prints: that flips between stores (the 2026-10-13 store prints the
+    tier, the 2026-10-27 one the measured minimum — measured 8 of 23 and 36 of 112 rows
+    disagreeing respectively), which is why neither figure may be frozen here. The gate's
+    own choice — the minimum wins whenever the store states one — is proved hermetically in
+    `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`.
+    """
+    # Given every registry row that states a measured minimum
+    reg = mp.load_registry()["models"]
+    both = [(m["name"], mp.vram_min_gb(m), mp._num(m.get("vram_tier")))
+            for m in reg if mp.vram_min_gb(m) is not None]
+
+    # When  the two figures are compared
+    # Then  the store distinguishes them somewhere, so "which field is the gate" is a real
+    #       question rather than a coincidence of one number
+    assert both, "the vendored store states no vram_min at all"
+    assert any(abs(mn - tier) > 1 for _, mn, tier in both if tier is not None), \
+        "vram_min and vram_tier never differ here; the gate's field would prove nothing"
 
 
 @pytest.mark.parametrize("platform,backend,gb", HOSTS, ids=IDS)
@@ -263,22 +310,31 @@ def test_ac2_select_n_and_auto_take_the_numbered_row(tmp_path, platform, backend
 
 
 def test_same_readme_different_hardware_gives_each_host_its_own_top_engine(tmp_path):
-    """The same model is offered with the engine measured on each host's hardware:
-    Qwen3.8-27B -> TensorFold on a Mac (189 t/s M5 Max), never TensorFold on a cpu host."""
+    """For each host, a row that HAS a figure measured on that host's hardware ranks it first.
 
-    # Given Qwen3.8-27B on a 48 GB mac, a 24 GB cuda card and a 48 GB cpu host
-    def top(backend, gb):
-        row = next(r for r in _offer(tmp_path, backend, gb) if r["model"]["name"] == "Qwen3.8-27B")
-        return row["engines"][0] if row["engines"] else None
+    No model and no engine is pinned (issue #693) — the rows come from the store, so the
+    invariant is AC4's first rank: when a row carries a figure measured on this host's
+    class, that engine is the one offered first; a Metal figure is never the top engine on
+    a cuda or cpu host when a CUDA/CPU one exists.
+    """
 
-    # When each host's top engine is read
-    mac, cuda, cpu = top("metal", 48), top("cuda", 24), top("cpu", 48)
+    # Given the servable list of each host
+    def rows(backend, gb):
+        return [r for r in _offer(tmp_path, backend, gb) if not r["why"]]
 
-    # Then the Mac runs TensorFold natively on a Metal figure
-    assert (mac["id"], mac["variant"], mac["measured_on"]) == ("tensorfold", "metal", "Metal")
+    # When each host's list is walked
+    checked = 0
+    for backend, gb, want in (("metal", 48, "Metal"), ("cuda", 24, "CUDA"), ("cpu", 48, "CPU")):
+        for row in rows(backend, gb):
+            measured = {e["measured_on"] for e in row["engines"]}
+            if want not in measured:
+                continue        # nothing of this host's class for this row: the global order decides
+            checked += 1
 
-    # And the cuda card's figure is a CUDA one (an engine with a cuda image or cpu fallback)
-    assert cuda["measured_on"] == "CUDA" and cuda["variant"] in ("cuda", "cpu")
+            # Then the engine offered first is the one measured on this host's hardware
+            assert row["engines"][0]["measured_on"] == want, \
+                f"{backend}/{gb}: {row['model']['name']} has a {want} figure but ranks " \
+                f"{row['engines'][0]['measured_on']} first"
 
-    # And the cpu host never gets TensorFold (no cpu image, no Metal)
-    assert cpu is None or cpu["id"] != "tensorfold"
+    # And the invariant was actually exercised on this store
+    assert checked > 0, "no row carries a figure measured on its own host's class"

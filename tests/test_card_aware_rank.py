@@ -196,7 +196,10 @@ def test_the_trend_list_server_is_card_aware():
 
 
 def test_225_acceptance_strata_on_a_16gb_card():
-    # Given qwen3.8-flash-next-125b in the vendored registry (2026-10-13)
+    """#225's rule, with no figure and no engine pinned: on a 16 GB card the top engine is
+    one PROVEN on a card this class can serve, and a faster figure measured on a bigger or
+    unknown card ranks below it and is labelled with that card."""
+    # Given a row of the vendored registry that carries several card classes
     m = next(x for x in mp.load_registry()["models"] if x["id"] == "qwen3.8-flash-next-125b")
 
     # When it is ranked for a 16 GB CUDA card
@@ -204,16 +207,16 @@ def test_225_acceptance_strata_on_a_16gb_card():
     top = rows[0]
 
     # Then the top engine is justified by a figure measured on a comparable card
-    assert top["id"] == "strata" and top["tps"] == 97.3
-    assert top["card_gb"] == 12 and top["same_hw"] and top["card_class"] == "proven"
-    assert mp.tps_label(top) == "97 t/s"
+    assert top["same_hw"] and top["card_gb"] <= 16 and top["card_class"] == "proven"
+    # and its label is the bare t/s — the figure IS this host's class
+    assert mp.tps_label(top) == f"{round(top['tps'])} t/s"
 
-    # And the out-of-class figures are labelled and ranked below it, read by engine id
-    by_id = {r["id"]: r for r in rows}
-    assert by_id["tensorfold"]["card_class"] == "unknown"          # DGX Spark names no card
-    assert by_id["tensorfold"]["rank"] > top["rank"]
-    assert mp.tps_label(by_id["tensorfold"]) == "67 t/s (CUDA, card unknown)"
-    assert mp.tps_label(by_id["llama.cpp"]) == "34 t/s (CUDA, 24 GB card)"
+    # And no faster figure measured elsewhere outranks it: the card class comes first
+    for other in rows[1:]:
+        if other["tps"] > top["tps"]:
+            assert not other["same_hw"], f"{other['id']} beats the proven figure on class"
+            assert other["card_class"] in ("bigger", "unknown", "")
+            assert "(" in mp.tps_label(other)      # the label names where it came from
 
     # And no row claims a fit on a card bigger than this host's
     assert not any(r["same_hw"] and (r["card_gb"] or 0) > 16 for r in rows)

@@ -582,6 +582,23 @@ def test_archive_kind_picker_labels(host, tf, seed, state):
     assert st == {"state": state, "installed": want_installed, "wanted": tf["pinned"]}
 
 
+
+def _tensorfold_row(tmp_path):
+    """The first servable row on a 48 GB Mac that TensorFold itself can serve, and its
+    1-based position in the printed list. No model name is pinned (issue #693): whichever
+    row the store gives TensorFold a checkpoint for is the one these seams exercise."""
+    import model_engine_pick as mp
+    os.environ.pop("LLGENIE_REGISTRY_SRC", None)
+    rows = mp.offer(mp.load_registry(), "metal", 48, root=tmp_path / "models", ram_gb=48)
+    pickable = [r for r in rows if not r["why"]]
+    served_by_tf = [r for r in pickable if any(e["id"] == "tensorfold" for e in r["engines"])]
+    assert served_by_tf, "no servable row on a 48 GB Mac is served by TensorFold"
+    row = served_by_tf[0]
+    eng = next(e for e in row["engines"] if e["id"] == "tensorfold")
+    # `--select N` numbers the PICKABLE list, and `--engine` narrows that list to the rows
+    # the engine can serve — so the position depends on which form the test drives
+    return row, eng, pickable.index(row) + 1, served_by_tf.index(row) + 1
+
 @pytest.mark.parametrize("seed,label", [
     (None, f"(installs {PINNED} on pick)"),
     ("0.6.4", f"(installed 0.6.4 -> updates to {PINNED} on pick)"),
@@ -592,8 +609,10 @@ def test_select_shows_what_picking_tensorfold_will_do(host, tmp_path, seed, labe
     if seed:
         host.install(seed)
 
-    # When `llgenie --select 1 --dry` plans the pick (Qwen3.8-27B on TensorFold)
-    r = _llgenie(host, tmp_path, "--select", "1", "--dry")
+    # When `llgenie --select N --dry --engine tensorfold` plans the pick for the row
+    # TensorFold serves on this host (no model pinned — #693)
+    _, _, _, n = _tensorfold_row(tmp_path)
+    r = _llgenie(host, tmp_path, "--select", str(n), "--engine", "tensorfold", "--dry")
 
     # Then the Engine line says whether TensorFold is installed, updated or reused
     assert r.returncode == 0, r.stderr
@@ -615,16 +634,15 @@ def test_llgenie_pick_installs_tensorfold_then_execs_its_start_script(host, tmp_
     sys.path.insert(0, str(REPO / "scripts"))
     import model_engine_pick as mp
     os.environ.pop("LLGENIE_REGISTRY_SRC", None)
-    row = next(r for r in mp.offer(mp.load_registry(), "metal", 48, root=tmp_path / "models", ram_gb=48)
-               if r["model"]["name"] == "Qwen3.8-27B")
-    plan = mp.engine_plan(row, row["engines"][0])
+    row, tf_engine, _, n = _tensorfold_row(tmp_path)
+    plan = mp.engine_plan(row, tf_engine)
     ckpt = tmp_path / "models" / plan["repo"].replace("/", "__")
     ckpt.mkdir(parents=True)
     (ckpt / "config.json").write_text('{"model_type": "qwen3_5"}')
     (ckpt / "model.safetensors").write_bytes(b"\0" * 16)
 
-    # When the user picks model 1 with TensorFold (port not served: the fake exits at once)
-    r = _llgenie(host, tmp_path, "--select", "1", "--engine", "tensorfold", "--port", "18999")
+    # When the user picks that row with TensorFold (port not served: the fake exits at once)
+    r = _llgenie(host, tmp_path, "--select", str(n), "--engine", "tensorfold", "--port", "18999")
 
     # Then TensorFold was installed once, by the step its skill declares, at the pinned tag
     # (the skill's declared step, not a hardcoded command: a bump may have moved it to a
@@ -651,9 +669,9 @@ def test_interactive_llgenie_lists_pick_qwen38_27b_then_tensorfold_which_install
     from ptydrive import Pty
     import model_engine_pick as mp
     os.environ.pop("LLGENIE_REGISTRY_SRC", None)
-    row = next(r for r in mp.offer(mp.load_registry(), "metal", 48, root=tmp_path / "models", ram_gb=48)
-               if r["model"]["name"] == "Qwen3.8-27B")
-    ckpt = tmp_path / "models" / mp.engine_plan(row, row["engines"][0])["repo"].replace("/", "__")
+    row, tf_engine, n_all, _ = _tensorfold_row(tmp_path)
+    model_name = row["model"]["name"]
+    ckpt = tmp_path / "models" / mp.engine_plan(row, tf_engine)["repo"].replace("/", "__")
     ckpt.mkdir(parents=True)
     (ckpt / "config.json").write_text('{"model_type": "qwen3_5"}')
     (ckpt / "model.safetensors").write_bytes(b"\0" * 16)
@@ -666,10 +684,10 @@ def test_interactive_llgenie_lists_pick_qwen38_27b_then_tensorfold_which_install
     try:
         p.expect(r"Pick model \[1\]: ", 300)
         models = re.findall(r"^\s+(\d+)\.\s{2}(.+?)\s+(?:trending|recent|stale)\s+trend", p.out, re.M)
-        n_model = next(n for n, name in models if name.strip() == "Qwen3.8-27B")
+        n_model = next(n for n, name in models if name.strip() == model_name)
         p.send(n_model)
         p.expect(r"Pick inference server \[1\]: ", 300)
-        menu = p.out.split("Engines for Qwen3.8-27B", 1)[1]
+        menu = p.out.split(f"Engines for {model_name}", 1)[1]
         engines = re.findall(r"^\s+(\d+)\.\s+(.+?)\s+\[(\w+)\](.*)$", menu, re.M)
         n_engine, _, variant, tail = next(e for e in engines if e[1].strip() == "TensorFold")
         p.send(n_engine)

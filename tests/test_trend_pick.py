@@ -65,24 +65,39 @@ README = REPO / "data" / "trending-README.md"
 
 def _readme_rows() -> list[tuple[str, int]]:
     """(name, VRAM GB) of the vendored upstream README "Most loved" table, parsed
-    straight from the markdown: the list a user reads on GitHub. The VRAM column is
-    `16GB`, a bare `8`, or `CPU` (a CPU-only model); all three parse the same way
-    production does (mp._num: 16, 8, 0)."""
+    straight from the markdown: the list a user reads on GitHub.
+
+    The VRAM column is found BY NAME and read off its annotated cell (`16GB`, `**12GB**<br>
+    <sub>stated by the source …</sub>`, `8`, `CPU` — issue #669/#693), the way production
+    reads the store's `vram_min` (mp._num: 16, 12, 8, 0)."""
     import re
     section = README.read_text().split(sr.MOST_LOVED, 1)[1].split("\n## ", 1)[0]
+    lines = section.splitlines()
+    header = next(l for l in lines if l.startswith("| Model"))
+    vram_at = [c.strip() for c in header.strip().strip("|").split("|")].index("VRAM")
     rows = []
-    for line in section.splitlines():
+    for line in lines:
         m = re.match(r"^\| \[\*\*(.+?)\*\*\]", line)
         if m:
             cells = [c.strip() for c in line.split(" | ")]
-            vram = next(c for c in cells if re.fullmatch(r"\d+GB|\d+|CPU", c))
+            vram = cells[vram_at].split("<br>", 1)[0].replace("*", "").strip()
             rows.append((m.group(1), int(mp._num(vram))))
     return rows
 
 
-def _offer(tmp_path: Path, backend: str, gb: int) -> list[dict]:
+def _fits_names(gb: float, ram_gb: float = 64.0) -> list[str]:
+    """The registry's models this host fits, in README order — the product's own decision
+    (VRAM floor AND the stated system-RAM floor, issue #669/#414), never the README alone."""
+    return [m["name"] for m in mp.load_registry()["models"] if mp.fits(m, gb, ram_gb)]
+
+
+def _offer(tmp_path: Path, backend: str, gb: int, ram_gb: float | None = None) -> list[dict]:
+    """The rows plain `llgenie` prints, through the same call the CLI makes — including the
+    host's system RAM, which the printed list applies (issue #669/#414)."""
     os.environ.pop("LLGENIE_REGISTRY_SRC", None)
-    return mp.offer(mp.load_registry(), backend, gb, root=tmp_path)
+    # the same 64 GiB the CLI's env carries (LLGENIE_SYSTEM_RAM_BYTES), not this process's RAM
+    ram = 64.0 if ram_gb is None else ram_gb
+    return mp.offer(mp.load_registry(), backend, gb, root=tmp_path, ram_gb=ram)
 
 
 def test_sync_writes_valid_registry_and_rejects_invalid(tmp_path, capsys):
@@ -131,11 +146,16 @@ def test_readme_copy_passes_and_a_modified_copy_is_rejected(tmp_path):
     sr.check_readme_matches(data, good.read_text())
     assert sr.sync(str(VENDORED), tmp_path / "out" / "models.json", str(good)) == 0
     best = sr.readme_best(good.read_text(), "CUDA t/s (best)")
-    assert best["Qwen3.8-Flash-Next 125B"] and best["Qwen3.8-27B"]
+    # every README row maps to an engine the store lists for it (no name pinned — #693)
+    assert best and set(best) <= {m["name"] for m in data["models"]}
 
-    # a reordered copy: the first two rows swapped
-    lines = good.read_text().splitlines(keepends=True)
-    rows = [i for i, l in enumerate(lines) if l.startswith("| [**")]
+    # a reordered copy: the first two rows OF THE "Most loved" TABLE swapped
+    text = good.read_text()
+    lines = text.splitlines(keepends=True)
+    start, _ = text.index(sr.MOST_LOVED), None
+    first = next(i for i, l in enumerate(lines) if sr.MOST_LOVED in l)
+    rows = [i for i, l in enumerate(lines) if i > first and l.startswith("| [**")]
+    assert len(rows) > 1, "the Most loved table has fewer than two rows"
     lines[rows[0]], lines[rows[1]] = lines[rows[1]], lines[rows[0]]
     reordered = tmp_path / "reordered.md"
     reordered.write_text("".join(lines))
@@ -150,10 +170,26 @@ def test_readme_copy_passes_and_a_modified_copy_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="!= README 'Most loved' order"):
         sr.check_readme_matches(data, dropped.read_text())
 
-    # a copy whose best CUDA engine was renamed to one the registry does not list
+    # a copy whose best CUDA engine was renamed to one the registry does not list —
+    # renamed inside THAT model's own row, whichever row and engine the store names (#693)
     renamed = tmp_path / "renamed.md"
-    renamed.write_text(good.read_text().replace("[Strata](https://github.com/Niko1221/Strata)",
-                                                "[NotAnEngine](https://github.com/Niko1221/Strata)", 1))
+    cuda_best = sr.readme_best(good.read_text(), "CUDA t/s (best)")
+    model_name = next(iter(cuda_best))
+    head, rest = good.read_text().split(sr.MOST_LOVED, 1)
+    section, tail = rest.split("\n## ", 1)
+    lines = section.splitlines(keepends=True)
+    cols = [c.strip() for c in next(l for l in lines if l.startswith("| Model")).strip()
+            .strip("|").split("|")]
+    cuda_at = cols.index("CUDA t/s (best)")
+    out_lines, done = [], False
+    for line in lines:
+        if not done and line.startswith(f"| [**{model_name}**"):
+            cells = line.rstrip("\n").split(" | ")
+            cells[cuda_at] = re.sub(r"\[[^\]]+\]\(", "[NotAnEngine](", cells[cuda_at], count=1)
+            line, done = " | ".join(cells) + "\n", True
+        out_lines.append(line)
+    assert done, f"could not rename the CUDA engine in {model_name!r}'s row"
+    renamed.write_text(f"{head}{sr.MOST_LOVED}{''.join(out_lines)}\n## {tail}")
     with pytest.raises(ValueError, match="README CUDA t/s \\(best\\) names 'NotAnEngine'"):
         sr.check_readme_matches(data, renamed.read_text())
     assert sr.sync(str(VENDORED), tmp_path / "out3" / "models.json", str(renamed)) == 1
@@ -164,10 +200,15 @@ def test_readme_links_answer_and_a_broken_copy_is_caught():
     pages and the GitHub engine repos. A copy of the README with one link pointed at
     a repo that does not exist is rejected, and the rejection names that link."""
     links = sr.readme_links(README.read_text())
-    assert links and all(l.startswith(("https://huggingface.co/", "https://github.com/")) for l in links)
+    assert links and all(l.startswith("https://") for l in links)
     assert sr.check_links(links) == []
-    broken = README.read_text().replace("https://github.com/Niko1221/Strata",
-                                        "https://github.com/Niko1221/this-repo-does-not-exist-404", 1)
+    github = next(l for l in links if l.startswith("https://github.com/"))
+    text = README.read_text()
+    head, rest = text.split(sr.MOST_LOVED, 1)
+    section, tail = rest.split("\n## ", 1)
+    dead_url = github.rstrip("/") + "-this-repo-does-not-exist-404"
+    assert github in section
+    broken = f"{head}{sr.MOST_LOVED}{section.replace(github, dead_url, 1)}\n## {tail}"
     dead = sr.check_links(sr.readme_links(broken))
     assert len(dead) == 1 and "this-repo-does-not-exist-404" in dead[0]
 
@@ -413,8 +454,18 @@ def test_live_upstream_registry_is_the_live_readme_list():
 def test_vendored_registry_is_the_vendored_readme_list():
     # Given the vendored registry and the README it was synced with
     data = json.loads(VENDORED.read_text())
-    # Then the models are the README "Most loved" rows, same names, same order, same VRAM
-    assert [(m["name"], int(mp._num(m["vram_tier"]))) for m in data["models"]] == _readme_rows()
+    # Then the models are the README "Most loved" rows, same names, same order, and each
+    # row's README VRAM is a figure the store states for it — the measured minimum, else the
+    # display tier (upstream prints one or the other depending on the sync, so neither may
+    # be frozen here; the GATE always prefers the minimum, proved hermetically in
+    # `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`)
+    assert [m["name"] for m in data["models"]] == [n for n, _ in _readme_rows()]
+    for (name, vram), model in zip(_readme_rows(), data["models"]):
+        stated = [v for v in (mp.vram_min_gb(model), mp._num(model.get("vram_tier")))
+                  if v is not None]
+        assert stated, f"{name}: the store states no VRAM figure at all"
+        assert min(abs(v - vram) for v in stated) <= 1, \
+            f"{name}: README {vram}GB vs the store's {stated}GB"
 
 
 @pytest.mark.parametrize("backend,gb", [("cuda", 16), ("cuda", 24), ("cpu", 16), ("rocm", 8),
@@ -423,7 +474,7 @@ def test_llgenie_list_is_the_readme_list_that_fits_the_card(tmp_path, backend, g
     """Every README model whose VRAM fits the card is listed, in README order;
     nothing else is listed. A row that cannot run here stays and says why."""
     # Given the README "Most loved" list
-    want = [name for name, vram in _readme_rows() if vram <= gb]
+    want = _fits_names(gb)
     # When llgenie builds its list for the host
     rows = _offer(tmp_path, backend, gb)
     # Then it is exactly the README models that fit, in README order
@@ -455,10 +506,15 @@ def test_card_16gb_list_on_this_readme(tmp_path, monkeypatch):
     names and engines are locked on tests/fixtures/registry-before, so a newer vendored
     file does not fail this test for naming a different top server."""
     monkeypatch.setenv("LLGENIE_SYSTEM_RAM_BYTES", RAM64)
-    rows = _offer(tmp_path, "cuda", 15.9921875)
+    rows = _offer(tmp_path, "cuda", 15.9921875, ram_gb=64)
     names = [r["model"]["name"] for r in rows]
-    assert names == [n for n, v in _readme_rows() if v <= 16]
-    assert not {n for n, v in _readme_rows() if v > 16} & set(names)
+    assert names == _fits_names(16)
+    # nothing the STORE says needs far more than this card is listed. The README's column is
+    # upstream's display figure and disagrees with the store's measured minimum on some syncs
+    # (issue #669), so the "far too big" set is read from the gate's own field, not from it.
+    too_big = {m["name"] for m in mp.load_registry()["models"]
+               if (mp.vram_min_gb(m) or mp._num(m.get("vram_tier")) or 0) > 32}
+    assert not too_big & set(names)
     # every row is listed; a row that cannot be served here says why (an engine with
     # no downloadable plan, e.g. TensorFold for a model it does not publish)
     for r in rows:
@@ -474,14 +530,44 @@ def test_every_readme_model_maps_to_its_best_engine(tmp_path, monkeypatch):
     with the best figure measured on this hardware and the format llgenie fetches for it.
     This is the permutation the interactive list and `llgenie --trend` print."""
     monkeypatch.setenv("LLGENIE_SYSTEM_RAM_BYTES", RAM64)
-    rows = _offer(tmp_path, "cuda", 15.9921875)
+    rows = _offer(tmp_path, "cuda", 15.9921875, ram_gb=64)
     # and the printed list names that engine on every row
     out = _cli(tmp_path, "--trend").stdout
-    for r in rows:
+    # match POSITIONALLY: a row's name is a prefix of another row's name ("Llama 3.1 8B"
+    # vs "Llama 3.1 8B (WebLLM)"), so a substring lookup reads the wrong line
+    printed = [l for l in out.splitlines() if re.match(r"^\s+(--|\d+\.)\s{2}", l)]
+    assert len(printed) == len(rows), (len(printed), len(rows))
+    for line, r in zip(printed, rows):
+        assert r["model"]["name"] in line, (line, r["model"]["name"])
         if r["why"]:
             continue
-        line = next(l for l in out.splitlines() if r["model"]["name"] in l)
         assert r["engines"][0]["engine"] in line, line
+
+
+def test_the_printed_row_shows_the_figure_the_gate_used(tmp_path, monkeypatch):
+    """The list is gated by `mp.fits()` — the store's measured minimum — so the VRAM column
+    it prints is that same figure, never the display bucket: a row admitted at its 12 GB
+    minimum does not print "48GB" beside itself (issue #669's contradiction, one layer up
+    from the gate)."""
+    monkeypatch.setenv("LLGENIE_SYSTEM_RAM_BYTES", RAM64)
+
+    # Given the printed trend list for a 16 GB cuda card
+    rows = _offer(tmp_path, "cuda", 15.9921875, ram_gb=64)
+    out = _cli(tmp_path, "--trend").stdout
+    printed = [l for l in out.splitlines() if re.match(r"^\s+(--|\d+\.)\s{2}", l)]
+    assert len(printed) == len(rows), (len(printed), len(rows))
+
+    # When  each printed row's VRAM column is read, positionally
+    for line, r in zip(printed, rows):
+        want = mp.vram_label(r["model"])
+
+        # Then  it is the figure the gate read, not a different stated figure
+        assert f"{want:>5}  " in line, (line, want)
+
+    # And   the rows where the two figures disagree prove the column is not the tier
+    differing = [r for r in rows if mp.vram_min_gb(r["model"]) is not None
+                 and abs(mp.vram_min_gb(r["model"]) - mp._num(r["model"].get("vram_tier"))) > 1]
+    assert differing, "no row states two different VRAM figures; this test would prove nothing"
 
 
 # ---------------------------------------------------------------------------
@@ -610,13 +696,14 @@ def test_unservable_row_says_why(tmp_path, monkeypatch):
     # installs its own choice whatever the RAM (setup.py recommends, never forces), so
     # the row stays servable on Strata, with Strata's own first size (Q2_0)
     monkeypatch.setenv("LLGENIE_SYSTEM_RAM_BYTES", str(8 * 2**30))
-    rows = {r["model"]["name"]: r for r in _offer(tmp_path, "cuda", 16)}
-    row = rows["Qwen3.8-Flash-Next 125B"]
-    assert row["why"] == "" and [e["id"] for e in row["engines"]] == ["strata"]
-    assert row["engine_plans"]["strata"]["path"] == "Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf"
-    # and on a cpu host the MLX-only model has no image... mlx has a cpu image, so it stays
-    rows = {r["model"]["name"]: r for r in _offer(tmp_path, "cpu", 16)}
-    assert rows["RavenX-Conjecture-Qwen3-8B-MLX"]["why"] == ""
+    # the first row whose serving set includes Strata (no model name pinned — #693)
+    rows = _offer(tmp_path, "cuda", 16)
+    row = next(r for r in rows if any(e["id"] == "strata" for e in r["engines"]))
+    assert row["why"] == ""
+    assert row["engine_plans"]["strata"]["path"].endswith(".gguf")
+    # and a row whose only engine is MLX keeps a cpu host servable (mlx has a cpu image)
+    cpu_rows = [r for r in _offer(tmp_path, "cpu", 16) if any(e["id"] == "mlx" for e in r["engines"])]
+    assert cpu_rows and all(r["why"] == "" for r in cpu_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -633,7 +720,7 @@ def test_trend_flag_prints_the_numbered_readme_list(tmp_path):
     r = _cli(tmp_path, "--trend")
     assert r.returncode == 0, r.stderr
     lines = [line for line in r.stdout.splitlines() if " trend " in line]
-    names = [n for n, v in _readme_rows() if v <= 16]
+    names = _fits_names(16)
     assert len(lines) == len(names)
     # servable rows are numbered 1..N in README order; unservable rows print "--"
     n = 0
@@ -665,12 +752,15 @@ def test_select_every_row_plans_a_download_and_the_right_engine(tmp_path, monkey
 
 
 def test_select_with_engine_overrides_the_top_engine(tmp_path):
-    # Qwen3.8-27B, whichever README row it is: llama.cpp instead of the top server
+    # The first servable row that llama.cpp is NOT the top engine for: --engine overrides it
     rows = [row for row in _offer(tmp_path, "cuda", 15.9921875) if not row["why"]]
-    pick = next(i for i, row in enumerate(rows, 1) if row["model"]["id"] == "qwen3.8-27b")
+    pick, row = next((i, row) for i, row in enumerate(rows, 1)
+                     if row["engines"][0]["id"] != "llama.cpp"
+                     and any(e["id"] == "llama.cpp" for e in row["engines"]))
     r = _cli(tmp_path, "--select", str(pick), "--engine", "llama.cpp", "--dry")
     assert r.returncode == 0, r.stderr
-    assert "Engine : llama.cpp [cuda]" in r.stdout and "Qwen3.8-27B-GGUF" in r.stdout
+    assert "Engine : llama.cpp [cuda]" in r.stdout
+    assert row["model"]["name"] in r.stdout
 
 
 def test_every_model_in_the_list_downloads_the_first_bytes_of_its_planned_file(tmp_path, monkeypatch):
@@ -683,7 +773,7 @@ def test_every_model_in_the_list_downloads_the_first_bytes_of_its_planned_file(t
     monkeypatch.setenv("LLAMA_MODELS_ROOT", str(tmp_path))   # empty: every row is a download
     rows = [r for r in _offer(tmp_path, "cuda", 15.9921875) if not r["why"]]
     assert rows, "the 16 GB cuda list must have servable rows"
-    assert all(r["model"]["name"] in {n for n, v in _readme_rows() if v <= 16} for r in rows)
+    assert all(r["model"]["name"] in set(_fits_names(16)) for r in rows)
     for row in rows:
         fmt = row["engines"][0]["use_format"]
         plan = mp.engine_plan(row, row["engines"][0])

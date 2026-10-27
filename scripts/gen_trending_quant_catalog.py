@@ -192,6 +192,83 @@ def links_to_validate(new_urls: set, prior: dict | None) -> list[str]:
     return sorted(new_urls - _all_urls(prior))
 
 
+def _plan_key(q: dict) -> tuple:
+    """A plan's identity inside one (model, engine) cell: the repo, the file it loads, the
+    files the download needs, its size and its link. Two plans with the same key are the same
+    download, however the live search ordered them."""
+    return (q.get("repo"), q.get("path"), tuple(q.get("files") or ()),
+            q.get("size_gb"), q.get("url"))
+
+
+def compare(committed: dict, generated: dict) -> tuple[list[str], list[str]]:
+    """The committed table against a fresh generation, as `(failures, notes)`.
+
+    A row the committed table HAS must be regenerated identically: a plan that disappeared,
+    a plan whose repo/files/size/url changed, an engine that lost an arch, or a registry the
+    catalog was not rendered for (`meta.generated_utc`) — each is a FAILURE, because the
+    catalog is what llgenie reads and a silent change would ship an unverified download.
+
+    What the live Hub re-reads is a NOTE, because the table is regenerated from a SEARCH
+    (`mlx_repos()`/`tensorfold_repos()` query huggingface.co `sort=downloads`), so the same
+    set of plans comes back in a different ORDER as the repos' download counts move, and a
+    new conversion upstream publishes shows up as an extra row. Measured 2026-10-27: on
+    `main` itself, `qwen3.8-flash-next-125b`/MLX regenerated as the same 14 plans in a
+    different order, which turned `make check-quant-catalog` red for a reason no PR caused
+    and blocked every PR on the repository. Recording the new order/rows is the weekly
+    `make sync-quant-catalog`'s job; the check reports them and stays green — the same rule
+    the registry guard applies to data the store re-reads.
+    """
+    failures: list[str] = []
+    notes: list[str] = []
+
+    was, now = (committed.get("meta") or {}).get("generated_utc"), \
+               (generated.get("meta") or {}).get("generated_utc")
+    if was != now:
+        failures.append(f"the catalog was rendered for registry {was!r}, the vendored one is "
+                        f"{now!r} — run make sync-quant-catalog")
+
+    old_files, new_files = committed.get("files") or {}, generated.get("files") or {}
+    for mid, engines in old_files.items():
+        if mid not in new_files:
+            failures.append(f"{mid}: the model's whole catalog section is gone")
+            continue
+        for eng, cell in engines.items():
+            fresh = new_files[mid].get(eng)
+            if fresh is None:
+                failures.append(f"{mid}/{eng}: the engine's section is gone")
+                continue
+            if cell.get("arch") != fresh.get("arch"):
+                failures.append(f"{mid}/{eng}: arch list {cell.get('arch')} -> "
+                                f"{fresh.get('arch')}")
+            have = {_plan_key(q) for q in fresh.get("quants") or []}
+            for q in cell.get("quants") or []:
+                if _plan_key(q) not in have:
+                    failures.append(f"{mid}/{eng}: the committed plan {q.get('url')} is no "
+                                    f"longer generated")
+            old_order = [_plan_key(q) for q in cell.get("quants") or []]
+            new_order = [_plan_key(q) for q in fresh.get("quants") or []]
+            if set(old_order) == set(new_order) and old_order != new_order:
+                notes.append(f"{mid}/{eng}: the live search lists the same "
+                             f"{len(new_order)} plan(s) in a different order — the next sync "
+                             f"records it")
+
+    for mid, engines in new_files.items():
+        if mid not in old_files:
+            notes.append(f"{mid}: a model the committed catalog does not cover yet")
+            continue
+        for eng, cell in engines.items():
+            old = old_files[mid].get(eng)
+            if old is None:
+                notes.append(f"{mid}/{eng}: a new (model, engine) section")
+                continue
+            seen = {_plan_key(q) for q in old.get("quants") or []}
+            for q in cell.get("quants") or []:
+                if _plan_key(q) not in seen:
+                    notes.append(f"{mid}/{eng}: a plan the committed table does not record "
+                                 f"yet: {q.get('repo')} ({q.get('size_gb')} GB)")
+    return failures, notes
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="Generate / check the HF class table of the "
@@ -245,13 +322,22 @@ def main():
         if not dest.exists():
             print(f"FAIL: committed catalog missing at {dest} (run make sync-quant-catalog)", file=sys.stderr)
             return 1
-        if dest.read_text() != text:
+        failures, notes = compare(json.loads(dest.read_text()), payload)
+        if failures:
             print(f"FAIL: {dest} is stale (run make sync-quant-catalog)", file=sys.stderr)
-            import difflib
-            sys.stderr.writelines(difflib.unified_diff(dest.read_text().splitlines(True),
-                                                       text.splitlines(True), "committed", "generated"))
+            for line in failures[:40]:
+                print(f"  {line}", file=sys.stderr)
+            if len(failures) > 40:
+                print(f"  ... and {len(failures) - 40} more", file=sys.stderr)
             return 1
-        print(f"OK: {dest} matches the generator")
+        # rows the LIVE Hub now offers and the committed table does not record yet: the
+        # weekly sync writes them, so they are reported, never failed (see compare())
+        for note in notes[:20]:
+            print(f"[quant-catalog] NOTE: {note}")
+        if len(notes) > 20:
+            print(f"[quant-catalog] NOTE: ... and {len(notes) - 20} more")
+        print(f"OK: {dest} matches the generator"
+              f"{f'; {len(notes)} note(s) for the next sync' if notes else ''}")
         return 0
 
     dest.parent.mkdir(parents=True, exist_ok=True)

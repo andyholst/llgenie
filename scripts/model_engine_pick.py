@@ -402,9 +402,35 @@ def card_class_gb(gb: float) -> float:
     return float(round(gb)) if gb > 0 else gb
 
 
+def vram_min_gb(model: dict) -> float | None:
+    """The model's stated minimum card size (`vram_min`) in GB, or None when it states none.
+
+    `vram_min` is the contract's measured minimum; `vram_tier` is the README's display
+    bucket. Measured on the 2026-10-27 store at a 16 GB card, in all 8 rows where the two
+    disagree the README's VRAM column agrees with `vram_min` and never with `vram_tier`
+    (issue #669) — so the label is not the gate, the measurement is.
+    """
+    return stated_gb(model.get("vram_min")) or None
+
+
+def vram_label(model: dict) -> str:
+    """The VRAM figure the gate reads, as the printed list shows it: the store's measured
+    minimum (`vram_min`) when it states one, else the README's display `vram_tier`.
+
+    The list is gated by `fits()`, so this is the same field the gate used: a row admitted at
+    its 12 GB measured minimum never prints "48GB" next to itself, which is exactly the
+    contradiction #669 is about (issue #669).
+    """
+    need = vram_min_gb(model)
+    if need is None:
+        return str(model.get("vram_tier") or "")
+    return f"{need:g}GB"
+
+
 def fits(model: dict, gb: float, ram_gb: float | None = None) -> bool:
-    """README VRAM column (vram_tier) <= the card's nominal size — and, when the store
-    states one, the model's `system_ram_min` <= this host's RAM.
+    """The model's stated minimum (`vram_min`, else the README's `vram_tier`) <= the card's
+    nominal size — and, when the store states one, the model's `system_ram_min` <= this
+    host's RAM (issue #669).
 
     `system_ram_min` is the contract's optional system-RAM requirement (`MODEL_CONTRACT.md`:
     "the CPU and Metal tables are RAM-bound … partial offload keeps the un-offloaded layers +
@@ -412,7 +438,10 @@ def fits(model: dict, gb: float, ram_gb: float | None = None) -> bool:
     below it cannot run the model at the stated quality however much VRAM it has. Absent
     (the common case) keeps the previous behaviour exactly.
     """
-    if gb > 0 and _num(model.get("vram_tier")) > card_class_gb(gb):
+    need = vram_min_gb(model)
+    if need is None:
+        need = _num(model.get("vram_tier"))
+    if gb > 0 and need > card_class_gb(gb):
         return False
     needs_ram = stated_gb(model.get("system_ram_min"))
     return not (needs_ram and ram_gb and ram_gb < needs_ram)
@@ -1279,8 +1308,13 @@ def matrix(registry: dict, gb: float | None = None, ram_gb: float | None = None,
     the full matrix is what the picker's choices reduce to."""
     arch = arch or host_arch()
     gb = card_gb() if gb is None else gb
+    # the host's RAM is resolved the same way the card is: `matrix()` given no ram means
+    # THIS host's ram, so the store's `system_ram_min` floor applies here exactly as it does
+    # in `offer()` (issue #669/#414). Without it `llgenie --matrix` without `--ram` listed
+    # models this host cannot run.
+    ram_gb = (system_ram_gb() or 0.0) if ram_gb is None else ram_gb
     permutations, skipped = [], []
-    for m in trend_list(registry, gb):
+    for m in trend_list(registry, gb, ram_gb):
         engines = rank_engines(m, arch, gb=gb)
         if not engines:
             names = sorted({e["engine"] for e in m.get("engines") or []} | set(m.get("supported_engines") or []))

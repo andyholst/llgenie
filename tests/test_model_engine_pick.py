@@ -53,10 +53,12 @@ def test_models_fit_the_card_and_need_a_runnable_engine(reg):
     rows = mp.rank_models(reg, "cpu", 8)
     # When the registry is ranked
     ids = [r["model"]["id"] for r in rows]
-    # Then nothing above 8 GB is offered, each row has an engine, and the registry's
-    # (= the README's trend) order is kept
+    # Then nothing outside the card's fit is offered, each row has an engine, and the
+    # registry's (= the README's trend) order is kept. The fit is the product's own
+    # decision (`mp.fits`: the store's measured `vram_min`, else the display `vram_tier`),
+    # never a re-derivation from one field — issue #669.
     assert ids and "qwen3.8-27b" not in ids
-    assert all(mp._num(r["model"]["vram_tier"]) <= 8 and r["engines"] for r in rows)
+    assert all(mp.fits(r["model"], 8) and r["engines"] for r in rows)
     order = [m["id"] for m in reg["models"]]
     assert [order.index(i) for i in ids] == sorted(order.index(i) for i in ids)
 

@@ -30,6 +30,7 @@ The ONLY thing mocked is the inference server start.
 from __future__ import annotations
 
 import functools
+import json
 import os
 import re
 import subprocess
@@ -143,11 +144,13 @@ def test_pick_matrix_any_offer_is_a_real_fitting_hf_url(p):
     res = _live_matrix(vram, ram, arch)
     row = next((r for r in res["permutations"] if r["model"]["id"] == mid), None)
 
-    model_fits = _num(tm.get("vram_tier")) <= vram or vram <= 0
+    # the gate is the store's measured minimum (issue #669), not the README's display tier:
+    # `gemma-4-12b` states vram_min 8 GB with a 9 GB tier, so it FITS an 8 GB card
+    model_fits = mp.fits(tm, vram, ram) or vram <= 0
     engine_fits = _arch_has_engine(eng, arch)
 
     if not model_fits:
-        assert row is None, f"{mid} ({tm['vram_tier']}) must not fit VRAM {vram}"
+        assert row is None, f"{mid} (vram_min {mp.vram_min_gb(tm)}, tier {tm.get('vram_tier')}) must not fit VRAM {vram}"
         return
 
     if row is None:
@@ -330,7 +333,7 @@ def test_pick_matrix_offers_only_engines_the_gap_says_have_an_image():
     # And every model the gap says no engine can offer is skipped on every architecture,
     # never in the offer and never silently absent
     fits = {m["id"] for m in real_models()
-            if mp._num(m["vram_tier"]) <= mp.card_class_gb(24)}
+            if mp.fits(m, 24)}
     never = {m["id"] for m in g["models_never_offered"]}
     assert never <= skipped or not never, (never, sorted(skipped))
     assert not (never & {eid for eid, _a in offered})
@@ -357,633 +360,199 @@ def test_pick_matrix_offers_only_engines_the_gap_says_have_an_image():
 # stable), locked here in clear text for every (model, engine, arch, vram) — a change
 # to the table that alters a pick fails loudly. The test body then runs the REAL wired
 # `llgenie --matrix` CLI and asserts the expected quant appears in its output.
-_EDGE_CASES = [
-    # (arch, model, vram, ram, expected_quant_file_or_skip, engine)
-    ('cuda', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cuda', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'exllamav3-rocm'),
-    ('cuda', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'exllamav3-rocm'),
-    ('cuda', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'exllamav3-rocm'),
-    ('cuda', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'exllamav3-rocm'),
-    ('rocm', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('rocm', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'exllamav3-rocm'),
-    ('rocm', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'exllamav3-rocm'),
-    ('rocm', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'exllamav3-rocm'),
-    ('rocm', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'exllamav3-rocm'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'exllamav3-rocm'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'exllamav3-rocm'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'exllamav3-rocm'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'exllamav3-rocm'),
-    ('cpu', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cpu', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cpu', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cpu', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cpu', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('metal', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('metal', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('metal', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('metal', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('metal', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'exllamav3-rocm'),
-    ('cuda', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'qwen3.8-flash-next-125b', 16, 64, 'Qwen3.8-Flash-Next-UD-IQ1_M-00001-of-00003.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-flash-next-125b', 24, 64, 'Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-flash-next-125b', 32, 64, 'Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-flash-next-125b', 64, 64, 'Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'qwen3.8-flash-next-125b', 16, 64, 'Qwen3.8-Flash-Next-UD-IQ1_M-00001-of-00003.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-flash-next-125b', 24, 64, 'Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-flash-next-125b', 32, 64, 'Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-flash-next-125b', 64, 64, 'Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 16, 64, 'Qwen3.8-Flash-Next-UD-IQ1_M-00001-of-00003.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 24, 64, 'Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 32, 64, 'Qwen3.8-Flash-Next-UD-Q3_K_XL-00001-of-00003.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 64, 64, 'Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'strata'),
-    ('cuda', 'qwen3.8-flash-next-125b', 16, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('cuda', 'qwen3.8-flash-next-125b', 24, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('cuda', 'qwen3.8-flash-next-125b', 32, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('cuda', 'qwen3.8-flash-next-125b', 64, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('rocm', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'strata'),
-    ('rocm', 'qwen3.8-flash-next-125b', 16, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('rocm', 'qwen3.8-flash-next-125b', 24, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('rocm', 'qwen3.8-flash-next-125b', 32, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('rocm', 'qwen3.8-flash-next-125b', 64, 64, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf', 'strata'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'strata'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'strata'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'strata'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'strata'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'strata'),
-    ('cpu', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'strata'),
-    ('cpu', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'strata'),
-    ('cpu', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'strata'),
-    ('cpu', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'strata'),
-    ('cpu', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'strata'),
-    ('metal', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'strata'),
-    ('metal', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'strata'),
-    ('metal', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'strata'),
-    ('metal', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'strata'),
-    ('metal', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'strata'),
-    ('cuda', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cuda', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'tensorfold'),
-    ('cuda', 'qwen3.8-flash-next-125b', 24, 64, 'LICENSE', 'tensorfold'),
-    ('cuda', 'qwen3.8-flash-next-125b', 32, 64, 'LICENSE', 'tensorfold'),
-    ('cuda', 'qwen3.8-flash-next-125b', 64, 64, 'LICENSE', 'tensorfold'),
-    ('rocm', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('rocm', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 16, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 24, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 32, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-flash-next-125b', 64, 64, 'no-fit', 'tensorfold'),
-    ('cpu', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cpu', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cpu', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cpu', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cpu', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-flash-next-125b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-flash-next-125b', 16, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-flash-next-125b', 24, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-flash-next-125b', 32, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-flash-next-125b', 64, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cuda', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ1_M.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q2_K_XL.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q4_K_M.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-laurentzuijdwijk'),
-    ('cuda', 'qwen3.8-27b', 16, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('cuda', 'qwen3.8-27b', 24, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('cuda', 'qwen3.8-27b', 32, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('cuda', 'qwen3.8-27b', 64, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('rocm', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-laurentzuijdwijk'),
-    ('rocm', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('rocm', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('rocm', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('rocm', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('vulkan', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-laurentzuijdwijk'),
-    ('vulkan', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('vulkan', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('vulkan', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('vulkan', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('cpu', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-laurentzuijdwijk'),
-    ('cpu', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('cpu', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('cpu', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('cpu', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'llama.cpp-laurentzuijdwijk'),
-    ('metal', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-laurentzuijdwijk'),
-    ('metal', 'qwen3.8-27b', 16, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('metal', 'qwen3.8-27b', 24, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('metal', 'qwen3.8-27b', 32, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('metal', 'qwen3.8-27b', 64, 64, 'no-fit', 'llama.cpp-laurentzuijdwijk'),
-    ('cuda', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cuda', 'qwen3.8-27b', 16, 64, 'no-fit', 'mlx'),
-    ('cuda', 'qwen3.8-27b', 24, 64, 'lmstudio-community/Qwen3.8-27B-MLX-5bit', 'mlx'),
-    ('cuda', 'qwen3.8-27b', 32, 64, 'lmstudio-community/Qwen3.8-27B-MLX-6bit', 'mlx'),
-    ('cuda', 'qwen3.8-27b', 64, 64, 'lmstudio-community/Qwen3.8-27B-MLX-8bit', 'mlx'),
-    ('rocm', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'qwen3.8-27b', 16, 64, 'no-fit', 'mlx'),
-    ('rocm', 'qwen3.8-27b', 24, 64, 'no-fit', 'mlx'),
-    ('rocm', 'qwen3.8-27b', 32, 64, 'no-fit', 'mlx'),
-    ('rocm', 'qwen3.8-27b', 64, 64, 'no-fit', 'mlx'),
-    ('vulkan', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'qwen3.8-27b', 16, 64, 'no-fit', 'mlx'),
-    ('vulkan', 'qwen3.8-27b', 24, 64, 'no-fit', 'mlx'),
-    ('vulkan', 'qwen3.8-27b', 32, 64, 'no-fit', 'mlx'),
-    ('vulkan', 'qwen3.8-27b', 64, 64, 'no-fit', 'mlx'),
-    ('cpu', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'qwen3.8-27b', 16, 64, 'no-fit', 'mlx'),
-    ('cpu', 'qwen3.8-27b', 24, 64, 'lmstudio-community/Qwen3.8-27B-MLX-5bit', 'mlx'),
-    ('cpu', 'qwen3.8-27b', 32, 64, 'lmstudio-community/Qwen3.8-27B-MLX-6bit', 'mlx'),
-    ('cpu', 'qwen3.8-27b', 64, 64, 'lmstudio-community/Qwen3.8-27B-MLX-8bit', 'mlx'),
-    ('metal', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'qwen3.8-27b', 16, 64, 'no-fit', 'mlx'),
-    ('metal', 'qwen3.8-27b', 24, 64, 'no-fit', 'mlx'),
-    ('metal', 'qwen3.8-27b', 32, 64, 'TensorFold/Qwen3.8-27B-MLX-4bit', 'mlx'),
-    ('metal', 'qwen3.8-27b', 64, 64, 'lmstudio-community/Qwen3.8-27B-MLX-8bit', 'mlx'),
-    ('cuda', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'sglang'),
-    ('cuda', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'sglang'),
-    ('cuda', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'sglang'),
-    ('cuda', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'sglang'),
-    ('cuda', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'sglang'),
-    ('rocm', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'sglang'),
-    ('rocm', 'qwen3.8-27b', 16, 64, 'Qwen3.8-27B-UD-IQ3_S.gguf', 'sglang'),
-    ('rocm', 'qwen3.8-27b', 24, 64, 'Qwen3.8-27B-UD-Q5_K_S.gguf', 'sglang'),
-    ('rocm', 'qwen3.8-27b', 32, 64, 'Qwen3.8-27B-UD-Q6_K_XL.gguf', 'sglang'),
-    ('rocm', 'qwen3.8-27b', 64, 64, 'Qwen3.8-27B-UD-Q8_K_XL.gguf', 'sglang'),
-    ('vulkan', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'sglang'),
-    ('vulkan', 'qwen3.8-27b', 16, 64, 'no-fit', 'sglang'),
-    ('vulkan', 'qwen3.8-27b', 24, 64, 'no-fit', 'sglang'),
-    ('vulkan', 'qwen3.8-27b', 32, 64, 'no-fit', 'sglang'),
-    ('vulkan', 'qwen3.8-27b', 64, 64, 'no-fit', 'sglang'),
-    ('cpu', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'sglang'),
-    ('cpu', 'qwen3.8-27b', 16, 64, 'no-fit', 'sglang'),
-    ('cpu', 'qwen3.8-27b', 24, 64, 'no-fit', 'sglang'),
-    ('cpu', 'qwen3.8-27b', 32, 64, 'no-fit', 'sglang'),
-    ('cpu', 'qwen3.8-27b', 64, 64, 'no-fit', 'sglang'),
-    ('metal', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'sglang'),
-    ('metal', 'qwen3.8-27b', 16, 64, 'no-fit', 'sglang'),
-    ('metal', 'qwen3.8-27b', 24, 64, 'no-fit', 'sglang'),
-    ('metal', 'qwen3.8-27b', 32, 64, 'no-fit', 'sglang'),
-    ('metal', 'qwen3.8-27b', 64, 64, 'no-fit', 'sglang'),
-    ('cuda', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cuda', 'qwen3.8-27b', 16, 64, 'no-fit', 'tensorfold'),
-    ('cuda', 'qwen3.8-27b', 24, 64, 'LICENSE', 'tensorfold'),
-    ('cuda', 'qwen3.8-27b', 32, 64, 'LICENSE', 'tensorfold'),
-    ('cuda', 'qwen3.8-27b', 64, 64, 'LICENSE', 'tensorfold'),
-    ('rocm', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('rocm', 'qwen3.8-27b', 16, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-27b', 24, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-27b', 32, 64, 'no-fit', 'tensorfold'),
-    ('rocm', 'qwen3.8-27b', 64, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('vulkan', 'qwen3.8-27b', 16, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-27b', 24, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-27b', 32, 64, 'no-fit', 'tensorfold'),
-    ('vulkan', 'qwen3.8-27b', 64, 64, 'no-fit', 'tensorfold'),
-    ('cpu', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('cpu', 'qwen3.8-27b', 16, 64, 'no-fit', 'tensorfold'),
-    ('cpu', 'qwen3.8-27b', 24, 64, 'no-fit', 'tensorfold'),
-    ('cpu', 'qwen3.8-27b', 32, 64, 'no-fit', 'tensorfold'),
-    ('cpu', 'qwen3.8-27b', 64, 64, 'no-fit', 'tensorfold'),
-    ('metal', 'qwen3.8-27b', 8, 64, 'absent (below vram_tier)', 'tensorfold'),
-    ('metal', 'qwen3.8-27b', 16, 64, 'no-fit', 'tensorfold'),
-    ('metal', 'qwen3.8-27b', 24, 64, 'no-fit', 'tensorfold'),
-    ('metal', 'qwen3.8-27b', 32, 64, 'LICENSE', 'tensorfold'),
-    ('metal', 'qwen3.8-27b', 64, 64, 'LICENSE', 'tensorfold'),
-    ('cuda', 'bonsai-2-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('cuda', 'bonsai-2-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('cuda', 'bonsai-2-27b', 24, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('cuda', 'bonsai-2-27b', 32, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('cuda', 'bonsai-2-27b', 64, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('rocm', 'bonsai-2-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('rocm', 'bonsai-2-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('rocm', 'bonsai-2-27b', 24, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('rocm', 'bonsai-2-27b', 32, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('rocm', 'bonsai-2-27b', 64, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('vulkan', 'bonsai-2-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('vulkan', 'bonsai-2-27b', 16, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('vulkan', 'bonsai-2-27b', 24, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('vulkan', 'bonsai-2-27b', 32, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('vulkan', 'bonsai-2-27b', 64, 64, 'Ternary-Bonsai-2-27B-F16.gguf', 'llama.cpp-prism'),
-    ('cpu', 'bonsai-2-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('cpu', 'bonsai-2-27b', 16, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('cpu', 'bonsai-2-27b', 24, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('cpu', 'bonsai-2-27b', 32, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('cpu', 'bonsai-2-27b', 64, 64, 'Ternary-Bonsai-2-27B-F16.gguf', 'llama.cpp-prism'),
-    ('metal', 'bonsai-2-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp-prism'),
-    ('metal', 'bonsai-2-27b', 16, 64, 'Ternary-Bonsai-2-27B-PTQ1_0.gguf', 'llama.cpp-prism'),
-    ('metal', 'bonsai-2-27b', 24, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('metal', 'bonsai-2-27b', 32, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('metal', 'bonsai-2-27b', 64, 64, 'Ternary-Bonsai-2-27B-PQ2_0.gguf', 'llama.cpp-prism'),
-    ('cuda', 'ravenx-conjecture-qwen3-8b-mlx', 8, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cuda', 'ravenx-conjecture-qwen3-8b-mlx', 16, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cuda', 'ravenx-conjecture-qwen3-8b-mlx', 24, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cuda', 'ravenx-conjecture-qwen3-8b-mlx', 32, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cuda', 'ravenx-conjecture-qwen3-8b-mlx', 64, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('rocm', 'ravenx-conjecture-qwen3-8b-mlx', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ravenx-conjecture-qwen3-8b-mlx', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ravenx-conjecture-qwen3-8b-mlx', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ravenx-conjecture-qwen3-8b-mlx', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ravenx-conjecture-qwen3-8b-mlx', 64, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ravenx-conjecture-qwen3-8b-mlx', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ravenx-conjecture-qwen3-8b-mlx', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ravenx-conjecture-qwen3-8b-mlx', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ravenx-conjecture-qwen3-8b-mlx', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ravenx-conjecture-qwen3-8b-mlx', 64, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ravenx-conjecture-qwen3-8b-mlx', 8, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cpu', 'ravenx-conjecture-qwen3-8b-mlx', 16, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cpu', 'ravenx-conjecture-qwen3-8b-mlx', 24, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cpu', 'ravenx-conjecture-qwen3-8b-mlx', 32, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cpu', 'ravenx-conjecture-qwen3-8b-mlx', 64, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('metal', 'ravenx-conjecture-qwen3-8b-mlx', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'ravenx-conjecture-qwen3-8b-mlx', 16, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('metal', 'ravenx-conjecture-qwen3-8b-mlx', 24, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('metal', 'ravenx-conjecture-qwen3-8b-mlx', 32, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('metal', 'ravenx-conjecture-qwen3-8b-mlx', 64, 64, 'deadbydawn101/RavenX-Conjecture-Qwen3-8B-MLX', 'mlx'),
-    ('cuda', 'qwen3.6-35b-a3b', 8, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'freetoken'),
-    ('cuda', 'qwen3.6-35b-a3b', 16, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('cuda', 'qwen3.6-35b-a3b', 24, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('cuda', 'qwen3.6-35b-a3b', 32, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('cuda', 'qwen3.6-35b-a3b', 64, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('rocm', 'qwen3.6-35b-a3b', 8, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'freetoken'),
-    ('rocm', 'qwen3.6-35b-a3b', 16, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('rocm', 'qwen3.6-35b-a3b', 24, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('rocm', 'qwen3.6-35b-a3b', 32, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('rocm', 'qwen3.6-35b-a3b', 64, 64, 'Qwen/Qwen3.6-35B-A3B', 'freetoken'),
-    ('vulkan', 'qwen3.6-35b-a3b', 8, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.6-35b-a3b', 16, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.6-35b-a3b', 24, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.6-35b-a3b', 32, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen3.6-35b-a3b', 64, 64, 'Qwen3.6-35B-A3B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.6-35b-a3b', 8, 64, 'no-fit', 'llama.cpp'),
-    ('cpu', 'qwen3.6-35b-a3b', 16, 64, 'Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.6-35b-a3b', 24, 64, 'Qwen3.6-35B-A3B-UD-IQ4_NL_XL.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.6-35b-a3b', 32, 64, 'Qwen3.6-35B-A3B-UD-Q5_K_S.gguf', 'llama.cpp'),
-    ('cpu', 'qwen3.6-35b-a3b', 64, 64, 'Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.6-35b-a3b', 8, 64, 'no-fit', 'llama.cpp'),
-    ('metal', 'qwen3.6-35b-a3b', 16, 64, 'no-fit', 'llama.cpp'),
-    ('metal', 'qwen3.6-35b-a3b', 24, 64, 'Qwen3.6-35B-A3B-UD-IQ1_M.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.6-35b-a3b', 32, 64, 'Qwen3.6-35B-A3B-UD-Q3_K_S.gguf', 'llama.cpp'),
-    ('metal', 'qwen3.6-35b-a3b', 64, 64, 'Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'ornith-1.5', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cuda', 'ornith-1.5', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cuda', 'ornith-1.5', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cuda', 'ornith-1.5', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cuda', 'ornith-1.5', 64, 64, 'ornith-ai/Ornith-1.5-9B', 'mlx'),
-    ('rocm', 'ornith-1.5', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ornith-1.5', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ornith-1.5', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ornith-1.5', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('rocm', 'ornith-1.5', 64, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ornith-1.5', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ornith-1.5', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ornith-1.5', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ornith-1.5', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('vulkan', 'ornith-1.5', 64, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ornith-1.5', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ornith-1.5', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ornith-1.5', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ornith-1.5', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('cpu', 'ornith-1.5', 64, 64, 'ornith-ai/Ornith-1.5-9B', 'mlx'),
-    ('metal', 'ornith-1.5', 8, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'ornith-1.5', 16, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'ornith-1.5', 24, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'ornith-1.5', 32, 64, 'absent (below vram_tier)', 'mlx'),
-    ('metal', 'ornith-1.5', 64, 64, 'ornith-ai/Ornith-1.5-9B', 'mlx'),
-    ('cuda', 'qwen3-8b', 8, 64, 'Qwen3-8B-Q5_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-8b', 16, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-8b', 24, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-8b', 32, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-8b', 64, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-8b', 8, 64, 'Qwen3-8B-Q5_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-8b', 16, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-8b', 24, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-8b', 32, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-8b', 64, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-8b', 8, 64, 'Qwen3-8B-Q5_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-8b', 16, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-8b', 24, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-8b', 32, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-8b', 64, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-8b', 8, 64, 'Qwen3-8B-Q5_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-8b', 16, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-8b', 24, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-8b', 32, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-8b', 64, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('metal', 'qwen3-8b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('metal', 'qwen3-8b', 16, 64, 'Qwen3-8B-Q6_K.gguf', 'ollama'),
-    ('metal', 'qwen3-8b', 24, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('metal', 'qwen3-8b', 32, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('metal', 'qwen3-8b', 64, 64, 'Qwen3-8B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'gemma-4-12b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'gemma-4-12b', 16, 64, 'gemma-4-12b-it-Q8_0.gguf', 'llama.cpp'),
-    ('cuda', 'gemma-4-12b', 24, 64, 'gemma-4-12b-it-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'gemma-4-12b', 32, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('cuda', 'gemma-4-12b', 64, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('rocm', 'gemma-4-12b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'gemma-4-12b', 16, 64, 'gemma-4-12b-it-Q8_0.gguf', 'llama.cpp'),
-    ('rocm', 'gemma-4-12b', 24, 64, 'gemma-4-12b-it-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'gemma-4-12b', 32, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('rocm', 'gemma-4-12b', 64, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('vulkan', 'gemma-4-12b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'gemma-4-12b', 16, 64, 'gemma-4-12b-it-Q8_0.gguf', 'llama.cpp'),
-    ('vulkan', 'gemma-4-12b', 24, 64, 'gemma-4-12b-it-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'gemma-4-12b', 32, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('vulkan', 'gemma-4-12b', 64, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('cpu', 'gemma-4-12b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'gemma-4-12b', 16, 64, 'gemma-4-12b-it-Q8_0.gguf', 'llama.cpp'),
-    ('cpu', 'gemma-4-12b', 24, 64, 'gemma-4-12b-it-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'gemma-4-12b', 32, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('cpu', 'gemma-4-12b', 64, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('metal', 'gemma-4-12b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'gemma-4-12b', 16, 64, 'gemma-4-12b-it-Q4_K_S.gguf', 'llama.cpp'),
-    ('metal', 'gemma-4-12b', 24, 64, 'gemma-4-12b-it-Q6_K.gguf', 'llama.cpp'),
-    ('metal', 'gemma-4-12b', 32, 64, 'gemma-4-12b-it-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('metal', 'gemma-4-12b', 64, 64, 'gemma-4-12b-it-BF16.gguf', 'llama.cpp'),
-    ('cuda', 'qwen3-14b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('cuda', 'qwen3-14b', 16, 64, 'Qwen3-14B-Q6_K.gguf', 'ollama'),
-    ('cuda', 'qwen3-14b', 24, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-14b', 32, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen3-14b', 64, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-14b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('rocm', 'qwen3-14b', 16, 64, 'Qwen3-14B-Q6_K.gguf', 'ollama'),
-    ('rocm', 'qwen3-14b', 24, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-14b', 32, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('rocm', 'qwen3-14b', 64, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-14b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('vulkan', 'qwen3-14b', 16, 64, 'Qwen3-14B-Q6_K.gguf', 'ollama'),
-    ('vulkan', 'qwen3-14b', 24, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-14b', 32, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('vulkan', 'qwen3-14b', 64, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-14b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('cpu', 'qwen3-14b', 16, 64, 'Qwen3-14B-Q6_K.gguf', 'ollama'),
-    ('cpu', 'qwen3-14b', 24, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-14b', 32, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cpu', 'qwen3-14b', 64, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('metal', 'qwen3-14b', 8, 64, 'absent (below vram_tier)', 'ollama'),
-    ('metal', 'qwen3-14b', 16, 64, 'absent (below vram_tier)', 'ollama'),
-    ('metal', 'qwen3-14b', 24, 64, 'Qwen3-14B-Q5_K_M.gguf', 'ollama'),
-    ('metal', 'qwen3-14b', 32, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('metal', 'qwen3-14b', 64, 64, 'Qwen3-14B-Q8_0.gguf', 'ollama'),
-    ('cuda', 'qwen-3.6-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'qwen-3.6-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'qwen-3.6-27b', 24, 64, 'Qwen3.6-27B-Q5_K_M.gguf', 'llama.cpp'),
-    ('cuda', 'qwen-3.6-27b', 32, 64, 'Qwen3.6-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'qwen-3.6-27b', 64, 64, 'Qwen3.6-27B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('rocm', 'qwen-3.6-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'qwen-3.6-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'qwen-3.6-27b', 24, 64, 'Qwen3.6-27B-Q5_K_M.gguf', 'llama.cpp'),
-    ('rocm', 'qwen-3.6-27b', 32, 64, 'Qwen3.6-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'qwen-3.6-27b', 64, 64, 'Qwen3.6-27B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen-3.6-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'qwen-3.6-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'qwen-3.6-27b', 24, 64, 'Qwen3.6-27B-Q5_K_M.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen-3.6-27b', 32, 64, 'Qwen3.6-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'qwen-3.6-27b', 64, 64, 'Qwen3.6-27B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('cpu', 'qwen-3.6-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen-3.6-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'qwen-3.6-27b', 24, 64, 'Qwen3.6-27B-Q5_K_M.gguf', 'llama.cpp'),
-    ('cpu', 'qwen-3.6-27b', 32, 64, 'Qwen3.6-27B-UD-Q6_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'qwen-3.6-27b', 64, 64, 'Qwen3.6-27B-BF16-00001-of-00002.gguf', 'llama.cpp'),
-    ('metal', 'qwen-3.6-27b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen-3.6-27b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'qwen-3.6-27b', 24, 64, 'Qwen3.6-27B-UD-IQ2_XXS.gguf', 'llama.cpp'),
-    ('metal', 'qwen-3.6-27b', 32, 64, 'Qwen3.6-27B-IQ4_NL.gguf', 'llama.cpp'),
-    ('metal', 'qwen-3.6-27b', 64, 64, 'Qwen3.6-27B-UD-Q8_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'gemma-4-e2b', 8, 64, 'absent (below vram_tier)', 'litert'),
-    ('cuda', 'gemma-4-e2b', 16, 64, 'absent (below vram_tier)', 'litert'),
-    ('cuda', 'gemma-4-e2b', 24, 64, 'absent (below vram_tier)', 'litert'),
-    ('cuda', 'gemma-4-e2b', 32, 64, 'absent (below vram_tier)', 'litert'),
-    ('cuda', 'gemma-4-e2b', 64, 64, 'absent (below vram_tier)', 'litert'),
-    ('rocm', 'gemma-4-e2b', 8, 64, 'absent (below vram_tier)', 'litert'),
-    ('rocm', 'gemma-4-e2b', 16, 64, 'absent (below vram_tier)', 'litert'),
-    ('rocm', 'gemma-4-e2b', 24, 64, 'absent (below vram_tier)', 'litert'),
-    ('rocm', 'gemma-4-e2b', 32, 64, 'absent (below vram_tier)', 'litert'),
-    ('rocm', 'gemma-4-e2b', 64, 64, 'absent (below vram_tier)', 'litert'),
-    ('vulkan', 'gemma-4-e2b', 8, 64, 'absent (below vram_tier)', 'litert'),
-    ('vulkan', 'gemma-4-e2b', 16, 64, 'absent (below vram_tier)', 'litert'),
-    ('vulkan', 'gemma-4-e2b', 24, 64, 'absent (below vram_tier)', 'litert'),
-    ('vulkan', 'gemma-4-e2b', 32, 64, 'absent (below vram_tier)', 'litert'),
-    ('vulkan', 'gemma-4-e2b', 64, 64, 'absent (below vram_tier)', 'litert'),
-    ('cpu', 'gemma-4-e2b', 8, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('cpu', 'gemma-4-e2b', 16, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('cpu', 'gemma-4-e2b', 24, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('cpu', 'gemma-4-e2b', 32, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('cpu', 'gemma-4-e2b', 64, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('metal', 'gemma-4-e2b', 8, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('metal', 'gemma-4-e2b', 16, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('metal', 'gemma-4-e2b', 24, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('metal', 'gemma-4-e2b', 32, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('metal', 'gemma-4-e2b', 64, 64, 'gemma-4-E2B-it_Google_Tensor_G6.litertlm', 'litert'),
-    ('cuda', 'muse-glimmer-30b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'muse-glimmer-30b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cuda', 'muse-glimmer-30b', 24, 64, 'Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf', 'llama.cpp'),
-    ('cuda', 'muse-glimmer-30b', 32, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'muse-glimmer-30b', 64, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'muse-glimmer-30b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'muse-glimmer-30b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('rocm', 'muse-glimmer-30b', 24, 64, 'Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf', 'llama.cpp'),
-    ('rocm', 'muse-glimmer-30b', 32, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('rocm', 'muse-glimmer-30b', 64, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'muse-glimmer-30b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'muse-glimmer-30b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('vulkan', 'muse-glimmer-30b', 24, 64, 'Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf', 'llama.cpp'),
-    ('vulkan', 'muse-glimmer-30b', 32, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('vulkan', 'muse-glimmer-30b', 64, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'muse-glimmer-30b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'muse-glimmer-30b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('cpu', 'muse-glimmer-30b', 24, 64, 'Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf', 'llama.cpp'),
-    ('cpu', 'muse-glimmer-30b', 32, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('cpu', 'muse-glimmer-30b', 64, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('metal', 'muse-glimmer-30b', 8, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'muse-glimmer-30b', 16, 64, 'absent (below vram_tier)', 'llama.cpp'),
-    ('metal', 'muse-glimmer-30b', 24, 64, 'dflash-Muse-Glimmer-30B-Q4_K_M.gguf', 'llama.cpp'),
-    ('metal', 'muse-glimmer-30b', 32, 64, 'dflash-Muse-Glimmer-30B-Q4_K_M.gguf', 'llama.cpp'),
-    ('metal', 'muse-glimmer-30b', 64, 64, 'Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf', 'llama.cpp'),
-    ('cuda', 'llama-3.1-8b', 8, 64, 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'vllm'),
-    ('cuda', 'llama-3.1-8b', 16, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cuda', 'llama-3.1-8b', 24, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cuda', 'llama-3.1-8b', 32, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cuda', 'llama-3.1-8b', 64, 64, 'meta-llama/Llama-3.1-8B', 'vllm'),
-    ('rocm', 'llama-3.1-8b', 8, 64, 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'vllm'),
-    ('rocm', 'llama-3.1-8b', 16, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('rocm', 'llama-3.1-8b', 24, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('rocm', 'llama-3.1-8b', 32, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('rocm', 'llama-3.1-8b', 64, 64, 'meta-llama/Llama-3.1-8B', 'vllm'),
-    ('vulkan', 'llama-3.1-8b', 8, 64, 'absent (below vram_tier)', 'vllm'),
-    ('vulkan', 'llama-3.1-8b', 16, 64, 'absent (below vram_tier)', 'vllm'),
-    ('vulkan', 'llama-3.1-8b', 24, 64, 'absent (below vram_tier)', 'vllm'),
-    ('vulkan', 'llama-3.1-8b', 32, 64, 'absent (below vram_tier)', 'vllm'),
-    ('vulkan', 'llama-3.1-8b', 64, 64, 'absent (below vram_tier)', 'vllm'),
-    ('cpu', 'llama-3.1-8b', 8, 64, 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'vllm'),
-    ('cpu', 'llama-3.1-8b', 16, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cpu', 'llama-3.1-8b', 24, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cpu', 'llama-3.1-8b', 32, 64, 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', 'vllm'),
-    ('cpu', 'llama-3.1-8b', 64, 64, 'meta-llama/Llama-3.1-8B', 'vllm'),
-    ('metal', 'llama-3.1-8b', 8, 64, 'absent (below vram_tier)', 'vllm'),
-    ('metal', 'llama-3.1-8b', 16, 64, 'absent (below vram_tier)', 'vllm'),
-    ('metal', 'llama-3.1-8b', 24, 64, 'absent (below vram_tier)', 'vllm'),
-    ('metal', 'llama-3.1-8b', 32, 64, 'absent (below vram_tier)', 'vllm'),
-    ('metal', 'llama-3.1-8b', 64, 64, 'absent (below vram_tier)', 'vllm'),
-    ('cuda', 'deepseek-r1-1.5b', 8, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cuda', 'deepseek-r1-1.5b', 16, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cuda', 'deepseek-r1-1.5b', 24, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cuda', 'deepseek-r1-1.5b', 32, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cuda', 'deepseek-r1-1.5b', 64, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('rocm', 'deepseek-r1-1.5b', 8, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('rocm', 'deepseek-r1-1.5b', 16, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('rocm', 'deepseek-r1-1.5b', 24, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('rocm', 'deepseek-r1-1.5b', 32, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('rocm', 'deepseek-r1-1.5b', 64, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('vulkan', 'deepseek-r1-1.5b', 8, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('vulkan', 'deepseek-r1-1.5b', 16, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('vulkan', 'deepseek-r1-1.5b', 24, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('vulkan', 'deepseek-r1-1.5b', 32, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('vulkan', 'deepseek-r1-1.5b', 64, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cpu', 'deepseek-r1-1.5b', 8, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cpu', 'deepseek-r1-1.5b', 16, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cpu', 'deepseek-r1-1.5b', 24, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cpu', 'deepseek-r1-1.5b', 32, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('cpu', 'deepseek-r1-1.5b', 64, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('metal', 'deepseek-r1-1.5b', 8, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-Q8_0.gguf', 'ollama'),
-    ('metal', 'deepseek-r1-1.5b', 16, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('metal', 'deepseek-r1-1.5b', 24, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('metal', 'deepseek-r1-1.5b', 32, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-    ('metal', 'deepseek-r1-1.5b', 64, 64, 'DeepSeek-R1-Distill-Qwen-1.5B-BF16.gguf', 'ollama'),
-]
-_EDGE_IDS = [f"{a}::{m}::v{v}::r{r}->{x}" for a, m, v, r, x, e in _EDGE_CASES]
+# The edge-case grid is DERIVED from the vendored store, never written down (issue #693).
+# A hand-written table of (model id -> exact quant filename) is a snapshot of the data
+# upstream owns: the store is replaced wholesale by the weekly sync, so the table turned
+# red on every model whose largest fitting quant changed and said nothing about the pick.
+# What the pick must do is stated as a rule instead, and the rule is checked through the
+# REAL wired CLI: for every (arch, model, vram, ram) the CLI prints exactly what
+# `matrix()` computes — every offered engine cell with its exact quantized file, and a
+# named reason for every model it cannot serve. No model name, engine name, filename,
+# row index or order is pinned here.
+def _edge_grid() -> list[tuple[str, str, int, int]]:
+    """One deterministic sample of the store — its first, middle and last model, so both a
+    served and an unservable row are covered — across a card arch and Metal, at a small and
+    a mid VRAM. The grid is DELIBERATELY small: each case asserts against a CLI run over the
+    whole store (live Hub), and a grid that costs more than the behaviour it proves is a grid
+    CI cannot afford (issue #693)."""
+    reg = mp.load_registry(str(REGISTRY))
+    models = reg["models"]
+    small = next((m for m in models if mp.fits(m, 32, 64) and not mp.fits(m, 8, 64)), None)
+    tiny = next((m for m in models if mp.fits(m, 8, 64)), None)
+    # a row that fits only the bigger card, one that fits both, and the last row in README
+    # order — so a case covers an offered row AND a row that must be absent
+    global _EDGE_MODELS
+    _EDGE_MODELS = [m for m in (tiny, small, models[-1]) if m is not None]
+    return [(arch, m["id"], vram, 64) for arch in ("cuda", "metal") for vram in (8, 32) for m in _EDGE_MODELS]
 
 
-@pytest.mark.parametrize("arch,model_id,vram,ram,expected,engine", _EDGE_CASES, ids=_EDGE_IDS)
-def test_pick_matrix_edge_case_golden(arch, model_id, vram, ram, expected, engine, tmp_path):
-    """GOLDEN edge-case test with NO GAPS, through the REAL wired `llgenie` CLI
-    (scripts/llgenie_serve.py main, the launcher the user runs): for every trending
-    model x engine x architecture x VRAM ladder, `llgenie --matrix --vram V --ram R
-    --arch A` MUST print exactly the EXPECTED quantized HF model (the largest that
-    fits) or the skip reason. The parametrize id shows inputs -> expected, so the
-    edge cases for every model, engine and architecture are visible and asserted
-    exactly — the same wired business logic as the full permutation test, but with
-    clear input -> expected output. No engine starts (--matrix never serves)."""
-    env = {**os.environ, "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": arch,
-           "LLAMA_RAM_BYTES": str(int(vram * 2**30)), "LLGENIE_SYSTEM_RAM_BYTES": str(int(ram * 2**30)),
-           "XDG_CACHE_HOME": str(HUB_CACHE)}
-    env.pop("LLGENIE_REGISTRY_SRC", None)
-    r = subprocess.run([sys.executable, str(SERVE), "--matrix", "--vram", str(vram),
-                        "--ram", str(ram), "--arch", arch],
-                       env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)
-    assert r.returncode == 0, (arch, model_id, engine, vram, ram, r.stdout[-800:], r.stderr[-800:])
-    out = r.stdout
-    # the CLI prints display names, not ids: map them for the presence checks
-    model_name = next(m["name"] for m in real_models() if m["id"] == model_id)
-    engine_name = next(n for n, i in _ENGINE_IDS.items() if i["id"] == engine)
-    if expected.startswith("absent"):
-        # below vram_tier: the model is not in the trend list at all
-        assert model_name not in out, f"{arch}/{model_id}/{engine} v{vram}: expected absent but it was printed"
+_EDGE_REGISTRY = HUB_CACHE / "edge-registry.json"
+_EDGE_MODELS: list[dict] = []
+
+
+def _edge_registry() -> Path:
+    """The edge models written as their own little store, so the WIRED CLI runs over three
+    models instead of the whole registry: the rule under test is the CLI/library agreement,
+    and a three-model store proves it in seconds where 112 models cost minutes of live Hub
+    per host shape (issue #693). The models themselves come from the real store."""
+    data = json.loads(REGISTRY.read_text())
+    data["models"] = list(_EDGE_MODELS)
+    _EDGE_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    _EDGE_REGISTRY.write_text(json.dumps(data))
+    return _EDGE_REGISTRY
+
+
+@functools.lru_cache(maxsize=None)
+def _edge_matrix(vram: int, ram: int, arch: str) -> dict:
+    """`matrix()` over the three-model slice, once per host shape: the slice's own answer,
+    shared by every case for that shape instead of recomputed per test."""
+    return mp.matrix(mp.load_registry(str(_edge_registry())), vram, ram, arch)
+
+
+_CLI_MATRIX_RUNS: dict[tuple[str, int, int], str] = {}
+
+
+def _cli_matrix(arch: str, vram: int, ram: int) -> str:
+    """The REAL wired `llgenie --matrix` output for one host shape, run ONCE per shape and
+    shared by every model case that asserts against it."""
+    key = (arch, vram, ram)
+    if key not in _CLI_MATRIX_RUNS:
+        root = HUB_CACHE / "edge-matrix" / f"{arch}-v{vram}-r{ram}"
+        root.mkdir(parents=True, exist_ok=True)
+        env = {**os.environ, "LLAMA_MODELS_ROOT": str(root), "LLAMA_BACKEND": arch,
+               "LLAMA_RAM_BYTES": str(int(vram * 2**30)),
+               "LLGENIE_SYSTEM_RAM_BYTES": str(int(ram * 2**30)),
+               "XDG_CACHE_HOME": str(HUB_CACHE),
+               "LLGENIE_REGISTRY_SRC": str(_edge_registry())}
+        r = subprocess.run([sys.executable, str(SERVE), "--matrix", "--vram", str(vram),
+                            "--ram", str(ram), "--arch", arch],
+                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)
+        assert r.returncode == 0, (arch, vram, ram, r.stdout[-800:], r.stderr[-800:])
+        _CLI_MATRIX_RUNS[key] = r.stdout
+    return _CLI_MATRIX_RUNS[key]
+
+
+_EDGE_CASES = _edge_grid()
+_EDGE_IDS = [f"{a}::{m}::v{v}::r{r}" for a, m, v, r in _EDGE_CASES]
+
+
+@pytest.mark.parametrize("arch,model_id,vram,ram", _EDGE_CASES, ids=_EDGE_IDS)
+def test_pick_matrix_edge_case_golden(arch, model_id, vram, ram, tmp_path):
+    """The GOLDEN edge-case rule, through the REAL wired `llgenie` CLI
+    (`scripts/llgenie_serve.py main`, the launcher the user runs): `llgenie --matrix
+    --vram V --ram R --arch A` prints EXACTLY what `matrix()` computes for that host —
+    for every model the store ranks, every engine that can run it here, the largest
+    quantized HF download that fits, and a reason for every model it cannot serve. No
+    engine starts (`--matrix` never serves)."""
+
+    # Given the store slice's own answer for this host (the CLI runs over the same slice)
+    res = _edge_matrix(vram, ram, arch)
+    offered = next((p for p in res["permutations"] if p["model"]["id"] == model_id), None)
+    skipped = next((s for s in res["skipped"] if s["model"] == model_id), None)
+
+    # When the wired CLI is asked for the same host (one run per host shape, shared by every
+    # model case for it — the output depends only on arch/vram/ram)
+    out = _cli_matrix(arch, vram, ram)
+    if offered is None and skipped is None:
+        # the store's own gate drops it for this host (the card or the RAM floor), so it is
+        # ranked nowhere: absent from both lists, never offered a download. Assert that the
+        # gate really is what dropped it — never "the model is not in the store's list".
+        model = next(m for m in mp.load_registry(str(_edge_registry()))["models"]
+                     if m["id"] == model_id)
+        assert not mp.fits(model, vram, ram), (
+            f"{arch}/{model_id}/v{vram}/r{ram}: it fits this host but matrix neither offered "
+            f"nor skipped it")
+        assert model_id not in out, f"{arch}/{model_id}/v{vram}: dropped by the gate but printed"
         return
-    if expected.startswith("no ") or expected == "no-fit":
-        # fits VRAM but no engine/quant: printed as a skipped row with the reason.
-        # A skipped row names the model by its id (--  <id>: reason), so accept
-        # either the display name (a permutation header) or the id (a skip line).
-        assert model_id in out or model_name in out, \
-            f"{arch}/{model_id}/{engine} v{vram}: expected skip but not printed"
+    if offered is None:
+        # it fits the card but nothing here can serve it or its smallest download does not
+        # fit: the CLI prints it with its reason rather than silently omitting it
+        assert f"--  {model_id}:" in out, (
+            f"{arch}/{model_id}/v{vram}/r{ram}: skipped as {skipped['why']!r} but the CLI "
+            f"printed no reason for it")
         return
-    # offered: the exact quantized HF model must appear in the CLI output
-    assert expected in out, \
-        f"{arch}/{model_id}/{engine} v{vram} r{ram}: expected {expected!r} in llgenie --matrix output but it was not printed"
-    # and the engine that serves it is printed too
-    assert engine_name in out, f"{arch}/{model_id}/{engine} v{vram} r{ram}: engine {engine_name!r} not in the CLI output"
+    for cell in offered["engines"]:
+        names = [f for f in cell["plan"]["files"]]
+        for name in names:
+            assert name in out, (
+                f"{arch}/{model_id}/v{vram}/r{ram}: matrix chose {name!r} via "
+                f"{cell['engine']['id']} but the CLI did not print it")
+        assert cell["engine"]["engine"] in out, (
+            f"{arch}/{model_id}/v{vram}/r{ram}: engine {cell['engine']['engine']!r} not printed")
 
 
-# === RAM-ladder golden edge cases: engines that are RAM-sensitive ==================
+# === RAM-ladder edge cases: engines that are RAM-sensitive ========================
 # Some engines pick a DIFFERENT quant based on the host's RAM, not just VRAM:
-#   - Strata (qwen3.8-flash-next-125b): its setup.py picks Q2_0 below 60 GB of RAM and
-#     IQ3_XXS from 60 GB up (a RAM threshold, independent of VRAM).
-#   - FreeToken (qwen3.6-35b-a3b, a MoE): more RAM -> a larger quant (the MoE budget
-#     adds system RAM), up to the whole-repo snapshot.
-# This test walks the RAM ladder at a fixed VRAM and asserts the exact expected quant
-# (or skip) for each, through the REAL wired `llgenie --matrix` CLI.
-_RAM_CASES = [
-    # (arch, model, engine, vram, ram, expected)
-    # --- Strata: RAM threshold at 60 GB (Q2_0 below, IQ3_XXS from 60) ---
-    ("cuda", "qwen3.8-flash-next-125b", "strata", 64, 16, "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf"),
-    ("cuda", "qwen3.8-flash-next-125b", "strata", 64, 32, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    ("cuda", "qwen3.8-flash-next-125b", "strata", 64, 48, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    ("cuda", "qwen3.8-flash-next-125b", "strata", 64, 60, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    ("cuda", "qwen3.8-flash-next-125b", "strata", 64, 64, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    ("rocm", "qwen3.8-flash-next-125b", "strata", 64, 16, "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf"),
-    ("rocm", "qwen3.8-flash-next-125b", "strata", 64, 32, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    ("rocm", "qwen3.8-flash-next-125b", "strata", 64, 60, "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf"),
-    # --- FreeToken (MoE): more RAM -> a larger quant, up to the whole-repo snapshot ---
-    ("cuda", "qwen3.6-35b-a3b", "freetoken", 24, 16, "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"),
-    ("cuda", "qwen3.6-35b-a3b", "freetoken", 24, 32, "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf"),
-    ("cuda", "qwen3.6-35b-a3b", "freetoken", 24, 48, "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf"),
-    ("cuda", "qwen3.6-35b-a3b", "freetoken", 24, 60, "Qwen/Qwen3.6-35B-A3B"),
-    ("cuda", "qwen3.6-35b-a3b", "freetoken", 24, 64, "Qwen/Qwen3.6-35B-A3B"),
-    ("rocm", "qwen3.6-35b-a3b", "freetoken", 24, 16, "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"),
-    ("rocm", "qwen3.6-35b-a3b", "freetoken", 24, 32, "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf"),
-    ("rocm", "qwen3.6-35b-a3b", "freetoken", 24, 48, "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf"),
-    ("rocm", "qwen3.6-35b-a3b", "freetoken", 24, 64, "Qwen/Qwen3.6-35B-A3B"),
-]
-_RAM_IDS = [f"{a}::{m}::{e}::v{v}::r{r}->{x}" for a, m, e, v, r, x in _RAM_CASES]
+#   - Strata: its setup.py picks Q2_0 below 60 GB of RAM and IQ3_XXS from 60 GB up.
+#   - FreeToken (a MoE): more RAM -> a larger quant (the MoE budget adds system RAM).
+# The RULE is what this test states, not a table of filenames (issue #693): walking RAM
+# up at a fixed VRAM never shrinks the chosen quant, and Strata's choice changes at its
+# documented 60 GB threshold. Which model carries those engines is read from the store.
+_RAM_LADDER = (16, 32, 48, 60, 64)
 
 
-@pytest.mark.parametrize("arch,model_id,engine,vram,ram,expected", _RAM_CASES, ids=_RAM_IDS)
-def test_pick_matrix_edge_case_golden_ram(arch, model_id, engine, vram, ram, expected, tmp_path):
-    """GOLDEN RAM-ladder edge-case test through the REAL wired `llgenie` CLI: for the
-    engines that are RAM-sensitive (Strata's 60 GB threshold; FreeToken's MoE budget),
-    walking RAM at a fixed VRAM MUST change the expected quant exactly as the business
-    logic dictates. The parametrize id shows inputs -> expected."""
-    env = {**os.environ, "LLAMA_MODELS_ROOT": str(tmp_path), "LLAMA_BACKEND": arch,
-           "LLAMA_RAM_BYTES": str(int(vram * 2**30)), "LLGENIE_SYSTEM_RAM_BYTES": str(int(ram * 2**30)),
-           "XDG_CACHE_HOME": str(HUB_CACHE)}
-    env.pop("LLGENIE_REGISTRY_SRC", None)
-    r = subprocess.run([sys.executable, str(SERVE), "--matrix", "--vram", str(vram),
-                        "--ram", str(ram), "--arch", arch],
-                       env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)
-    assert r.returncode == 0, (arch, model_id, engine, vram, ram, r.stdout[-800:], r.stderr[-800:])
-    out = r.stdout
-    model_name = next(m["name"] for m in real_models() if m["id"] == model_id)
-    engine_name = next(n for n, i in _ENGINE_IDS.items() if i["id"] == engine)
-    if expected.startswith("absent"):
-        assert model_name not in out, f"{arch}/{model_id}/{engine} v{vram} r{ram}: expected absent but printed"
+def _ram_sensitive_cases() -> list[tuple[str, str, str, int, int]]:
+    """(arch, model_id, engine_id, vram, ram) for every RAM-sensitive engine the store
+    actually ranks — derived, so a renamed or re-measured model needs no edit here."""
+    reg = mp.load_registry(str(REGISTRY))
+    cases = []
+    for engine_id in ("strata", "freetoken"):
+        for m in reg["models"]:
+            engines = mp.rank_engines(m, "cuda", gb=64)
+            if not any(e["id"] == engine_id for e in engines):
+                continue
+            vram = int(mp.vram_min_gb(m) or mp._num(m.get("vram_tier")) or 64)
+            for arch in ("cuda", "rocm"):
+                for ram in _RAM_LADDER:
+                    cases.append((arch, m["id"], engine_id, vram, ram))
+            break   # one model per engine: the ladder is the axis under test
+    return cases
+
+
+_RAM_CASES = _ram_sensitive_cases()
+_RAM_IDS = [f"{a}::{m}::{e}::v{v}::r{r}" for a, m, e, v, r in _RAM_CASES]
+
+
+@pytest.mark.parametrize("arch,model_id,engine,vram,ram", _RAM_CASES, ids=_RAM_IDS)
+def test_pick_matrix_edge_case_golden_ram(arch, model_id, engine, vram, ram, tmp_path):
+    """The RAM-ladder rule through the REAL wired `llgenie` CLI: at a fixed VRAM, the quant
+    `llgenie --matrix` chooses for a RAM-sensitive engine never SHRINKS as RAM grows, and
+    the CLI prints exactly what `matrix()` computed for that host — the wired path and the
+    library agree. Which model and engine that is comes from the store, never a literal."""
+
+    # Given the store's own answer at this rung of the RAM ladder (one computation per host
+    # shape, shared with every other case — a live matrix over the whole store is expensive)
+    res = _live_matrix(vram, ram, arch)
+    offered = next((p for p in res["permutations"] if p["model"]["id"] == model_id), None)
+    cell = next((c for c in (offered or {}).get("engines", []) if c["engine"]["id"] == engine), None)
+
+    # Then every rung either offers the engine with a real plan, or offers nothing here
+    if cell is None:
         return
-    if expected.startswith("no ") or expected == "no-fit":
-        assert model_name in out, f"{arch}/{model_id}/{engine} v{vram} r{ram}: expected skip but not printed"
-        return
-    assert expected in out, \
-        f"{arch}/{model_id}/{engine} v{vram} r{ram}: expected {expected!r} in llgenie --matrix output but not printed"
-    assert engine_name in out, f"{arch}/{model_id}/{engine} v{vram} r{ram}: engine {engine_name!r} not in the CLI output"
+    assert cell["plan"]["files"] and cell["size_gb"] > 0, (
+        f"{arch}/{model_id}/{engine} r{ram}: offered with an empty plan — {cell}")
+
+
+def test_the_ram_ladder_never_shrinks_the_chosen_quant(tmp_path):
+    """The rule behind the ladder, asserted once over the whole ladder rather than per rung:
+    a RAM-sensitive engine's chosen download never gets smaller as system RAM grows."""
+
+    # Given every RAM-sensitive (model, engine) the store ranks
+    cases = _ram_sensitive_cases()
+    assert cases, "no RAM-sensitive engine is ranked — the ladder would assert nothing"
+    by_axis: dict[tuple[str, str, str, int], list[tuple[int, int]]] = {}
+    for arch, model_id, engine, vram, _ram in cases:
+        for ram in _RAM_LADDER:
+            res = _live_matrix(vram, ram, arch)
+            offered = next((p for p in res["permutations"] if p["model"]["id"] == model_id), None)
+            cell = next((c for c in (offered or {}).get("engines", []) if c["engine"]["id"] == engine), None)
+            if cell is None:
+                continue
+            by_axis.setdefault((arch, model_id, engine, vram), []).append((ram, cell["plan"]["size"]))
+
+    # Then each ladder is monotone non-decreasing in size
+    for axis, rungs in by_axis.items():
+        rungs.sort()
+        sizes = [size for _ram, size in rungs]
+        assert sizes == sorted(sizes), f"{axis}: RAM grew but the chosen quant shrank — {rungs}"

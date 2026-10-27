@@ -87,8 +87,11 @@ make install
 
 1. **The trend list**: exactly the [trending-local-llms](https://github.com/andyholst/trending-local-llms)
    README "Most loved" list, in README order (🔥 trending -> 🕑 recent -> 💤 stale, then trend score),
-   every model whose README VRAM column fits this card (a 16 GB card is 16 GB even though
-   `nvidia-smi` reports 15.99 GiB). Every model you can run here is numbered, downloaded or not
+   every model whose **stated minimum** fits this card — `vram_min` (the store's measured minimum)
+   when the store states one, else the README's VRAM column — and the figure printed beside each row
+   is that same one, so the list never shows a number it did not gate on (a 16 GB card is 16 GB even
+   though `nvidia-smi` reports 15.99 GiB, and a model the store proves runs at 12 GB is listed under
+   12GB, not under a bigger display bucket). Every model you can run here is numbered, downloaded or not
    (`[local]` = already in `~/models`); one that cannot run here stays in the list as `--` with the reason.
 2. **Engines** for the chosen model, each with the format llgenie fetches for it. A figure is
    compared to **this host's card**, not just its backend: first the figures measured
@@ -288,6 +291,13 @@ make sync-quant-catalog   # regenerate the HF class table data/trending-quant-ca
                           # fixture (model -> engine -> arch + real quant plans with per-quant links)
                           # from the registry + live Hub; validates the newly-added links vs the prior table
 make check-quant-catalog  # CI: fail if the committed quant catalog differs from the generator's output
+                          # "differs" = a row the committed table HAS is no longer generated (a plan
+                          # gone, a plan whose repo/files/size/link changed, an engine's arch list
+                          # changed, or a table rendered for another registry). What the LIVE Hub
+                          # re-reads is printed as a NOTE and does not fail: the table is regenerated
+                          # from a `sort=downloads` search, so the same plans come back in a different
+                          # order as those counts move, and a conversion upstream publishes shows up as
+                          # an extra row — recording both is `make sync-quant-catalog`'s job.
                           # A NEWLY-generated link is probed on the live Hub: readable (200/206) is fine,
                           # GATED (401/403 — the file exists, the token may not read it) is reported as
                           # `gated=N` and does not fail the sync, and only a DEAD link (404/410, 5xx, a

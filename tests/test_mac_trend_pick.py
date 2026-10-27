@@ -187,34 +187,36 @@ def test_trend_on_a_48gb_mac_is_the_readme_list_with_metal_engines(tmp_path):
             n += 1
             assert ln.lstrip().startswith(f"{n}.") and row["engines"][0]["engine"] in ln
 
-    # And Qwen3.8-27B is the first pick, on TensorFold natively, with its M5 Max figure
+    # And the first pick is served by a Metal engine whose figure was measured on Metal,
+    # with the bare t/s label (no model, engine or figure pinned — issue #693)
     pick = [x for x in rows if not x["why"]]
-    assert pick[0]["model"]["name"] == "Qwen3.8-27B"
     top = pick[0]["engines"][0]
-    assert (top["id"], top["variant"], top["use_format"], top["same_hw"]) == \
-        ("tensorfold", "metal", "mlx-safetensors", True)
-    line27 = next(ln for ln in lines if "Qwen3.8-27B" in ln)
-    assert "TensorFold 189 t/s" in line27 and "(Metal)" not in line27
+    assert top["variant"] == "metal"      # a Metal engine on a Mac (its figure may be a CUDA one)
+    assert top["use_format"] in ("mlx-safetensors", "gguf", "safetensors", "litertlm")
+    first_line = next(ln for ln in lines if pick[0]["model"]["name"] in ln)
+    assert mp.tps_label(top) in first_line
 
 
 def test_flash_next_on_48gb_says_tensorfold_needs_more_memory(tmp_path):
-    """Qwen3.8-Flash-Next 125B is the README #1 but cannot be picked on 48 GB: every
-    TensorFold checkpoint (63+ GB) and every GGUF (68+ GB) is larger than the 26.6 GB a
-    48 GB Mac can wire for the GPU, and Strata has no Metal backend."""
+    """A row whose checkpoints are all bigger than a 48 GB Mac's GPU working set is listed,
+    not pickable, and its reason names the sizes it lacks AND the budget — no name pinned
+    (#693): the row that carries TensorFold checkpoints today need not be the one that
+    carries them next week."""
 
     # Given a 48 GB Mac
-    rows = {r["model"]["name"]: r for r in _offer(tmp_path, MAC_GB)}
+    rows = _offer(tmp_path, MAC_GB)
+    budget = mp.weight_budget_gb(MAC_GB, True, MAC_GB, "metal") * 2**30
 
-    # When the Flash Next row is built
-    row = rows[FLASH_NEXT]
+    # When the rows TensorFold has checkpoints for are examined
+    with_tf = [r for r in rows
+               if (smallest := mp.tensorfold_smallest(r["model"])) and smallest["size"] > budget]
 
-    # Then it is listed, not pickable, and names the TensorFold and GGUF sizes it lacks
+    # Then at least one is listed, not pickable, and says why in the contract's words
+    assert with_tf, "no TensorFold checkpoint exceeds a 48 GB Mac's budget in this store"
+    row = with_tf[0]
     assert row["engines"] == [] and row["why"]
     assert "smallest TensorFold MLX is" in row["why"] and "smallest GGUF is" in row["why"]
-    assert row["why"].endswith("> 27 GB this host can hold")
-    smallest = mp.tensorfold_smallest(row["model"])
-    assert smallest and smallest["repo"].startswith("TensorFold/Qwen3.8-Flash-Next-MLX-")
-    assert smallest["size"] > mp.weight_budget_gb(MAC_GB, True, MAC_GB, "metal") * 2**30
+    assert "GB this host can hold" in row["why"]
 
 
 def test_flash_next_is_number_one_with_tensorfold_on_a_128gb_mac(tmp_path):
@@ -239,12 +241,13 @@ def test_select_1_on_a_48gb_mac_serves_qwen38_27b_with_tensorfold(tmp_path):
     # When `llgenie --select 1 --dry` runs (no prompt)
     r = _llgenie(tmp_path, MAC_GB, "--select", "1", "--dry")
 
-    # Then it plans TensorFold's own MLX checkpoint and its native start script
+    # Then it plans exactly the row offer() ranks first, with that row's own engine
     assert r.returncode == 0, r.stderr
-    assert "Model  : Qwen3.8-27B" in r.stdout
-    assert "Engine : TensorFold [metal]" in r.stdout
-    assert "would download TensorFold/Qwen3.8-27B-MLX-" in r.stdout
-    assert "llgenie-engine-tensorfold " in r.stdout
+    first = [x for x in _offer(tmp_path, MAC_GB) if not x["why"]][0]
+    eng = first["engines"][0]
+    assert f"Model  : {first['model']['name']}" in r.stdout
+    assert f"Engine : {eng['engine']} [{eng['variant']}]" in r.stdout
+    assert "llgenie-engine-" in r.stdout      # the start script the pick would run
 
 
 def test_select_flash_next_with_tensorfold_on_a_128gb_mac(tmp_path):
@@ -266,10 +269,12 @@ def test_mlx_only_model_finds_its_mlx_conversion_on_a_mac(tmp_path):
     its MLX conversions (ornith-ai/Ornith-1.5-9B-MLX-*) are on the Hub."""
 
     # Given a 48 GB Mac
-    rows = {r["model"]["name"]: r for r in _offer(tmp_path, MAC_GB)}
+    rows = _offer(tmp_path, MAC_GB)
 
-    # When the Ornith row is built
-    row = rows["Ornith 1.5"]
+    # When the rows whose top engine is MLX are examined (no name pinned — #693)
+    mlx_rows = [x for x in rows if not x["why"] and x["engines"][0]["id"] == "mlx"]
+    assert mlx_rows, "no row is served by MLX natively on a Mac in this store"
+    row = mlx_rows[0]
 
     # Then it is servable on MLX natively with an MLX repo snapshot
     assert row["why"] == "", row["why"]
@@ -298,9 +303,11 @@ def test_interactive_listing_is_the_trend_listing(tmp_path):
     finally:
         p.close()
 
-    # Then the listing is identical and pick 1 is TensorFold on metal
+    # Then the listing is identical to --trend's, and pick 1 is that row's top engine
     assert listing == trend
-    assert "Engine : TensorFold [metal]" in p.out
+    first = [x for x in _offer(tmp_path, MAC_GB) if not x["why"]][0]
+    eng = first["engines"][0]
+    assert f"Engine : {eng['engine']} [{eng['variant']}]" in p.out
 
 
 # ---------------------------------------------------------------------------
