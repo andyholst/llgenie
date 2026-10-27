@@ -107,6 +107,11 @@ VARIANT_BY_ID = {info["id"]: info["variants"] for info in ENGINE_IDS.values()}
 def matrix_env(monkeypatch):
     monkeypatch.setattr(mp, "_tree", lambda repo, revision="main": _trees().get(repo, []))
     monkeypatch.setattr(mp, "engine_ids", lambda: ENGINE_IDS)
+    # The stubbed Hub above is this file's whole world: the pick must resolve the stubs' own
+    # trees, never the committed HF class table. Measured on the 2026-10-27 store: a stub id
+    # (`qwen3-8b`) also exists upstream, so the wrapper answered from the real catalog and a
+    # cuda cell's `use_format` became `safetensors` — a real table for models the test invents.
+    monkeypatch.setenv("LLGENIE_QUANT_CATALOG", "0")
 
 
 # -- spec scenario: the EXHAUSTIVE arch x vram x ram permutation set -------------

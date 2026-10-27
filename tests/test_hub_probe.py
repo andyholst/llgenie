@@ -122,6 +122,28 @@ def test_a_definitive_non_404_status_is_not_retried_and_reports_its_own_attempt_
     assert waits == []
 
 
+def test_a_gated_file_verifies_and_says_it_is_gated():
+    """A 401 is a gated repo, not an absent file: the link exists, the credential may not read it.
+
+    Measured on the 2026-10-27 store: `google/gemma-3-1b-it` answers 401 to an unauthenticated
+    ranged GET, and the pick suite called the real file missing (issue #418's rule, applied to
+    the probe).
+    """
+    waits: list[int] = []
+
+    # Given a Hub that answers 401 (a gated repository)
+    with hub([401]) as (url, log):
+
+        # When  the shared probe verifies the link
+        hit = hub_probe.probe(url, sleeper=waits.append)
+
+    # Then  it exists, is marked gated, and the answer names the status
+    assert hit.exists and hit.gated
+    assert "HTTP 401" in hit.detail and "gated" in hit.detail
+    assert hit.attempts == 1 and len(log) == 1, "a gated answer is definitive, never retried"
+    assert waits == []
+
+
 def test_a_transient_5xx_is_retried_before_the_link_is_called_missing():
     """One Hub 503 must not redden a lane: the link verifies on the retry."""
     waits: list[int] = []

@@ -331,19 +331,23 @@ def test_pick_matrix_offers_only_engines_the_gap_says_have_an_image():
     assert all(g["engines"][name]["variants"] == [] for name in no_image)
 
     # And every model the gap says no engine can offer is skipped on every architecture,
-    # never in the offer and never silently absent
-    fits = {m["id"] for m in real_models()
-            if mp.fits(m, 24)}
+    # never in the offer and never silently absent. A host's own gate (the card, or the
+    # store's `system_ram_min` floor on this 64 GB host) keeps a row out of the list
+    # entirely, which is not "absent" — it is a host the model does not fit (#669).
+    all_ids = {m["id"] for m in real_models()}
+    fits_here = {m["id"] for m in real_models()
+                 if mp.fits(m, 24, 64)}
     never = {m["id"] for m in g["models_never_offered"]}
-    assert never <= skipped or not never, (never, sorted(skipped))
+    assert never <= all_ids, f"the gap names models the store does not list: {sorted(never - all_ids)}"
+    assert never <= skipped | (all_ids - fits_here), \
+        (sorted(never - skipped - (all_ids - fits_here)),)
     assert not (never & {eid for eid, _a in offered})
-    assert never <= fits, (sorted(never), sorted(fits))
 
-    # And every model within the card is either offered or skipped with a reason
+    # And every model this host fits is either offered or skipped with a reason
     for arch in ARCHES:
         res = _live_matrix(24, 64, arch)
         seen = {r["model"]["id"] for r in res["permutations"]} | {s["model"] for s in res["skipped"]}
-        assert seen == fits, arch
+        assert seen == fits_here, arch
         assert all(s["why"] for s in res["skipped"]), arch
 
 

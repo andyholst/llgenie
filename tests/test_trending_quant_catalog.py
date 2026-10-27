@@ -140,29 +140,96 @@ def test_bounded_sample_of_real_links_exist_http_200():
     assert ok >= len(sample) * 0.9, f"{missing}/{len(sample)} of the sample links did not answer HTTP 200"
 
 
+def _offered_rows(arch: str = "cuda") -> list[dict]:
+    """Every row plain `llgenie` prints for a host that fits the whole store.
+
+    `offer()` — not the raw rank list — is the path that decides what a user can pick: it drops an
+    engine it cannot fetch and keeps the row with a `why` when nothing is left. So it is where
+    "a model llgenie serves is one the table covers" is either true or not, and it is the surface
+    these two rules are stated on (issue #750: the raw `rank_engines` list is a step ahead of what
+    can actually be downloaded, which is #731's own work item).
+    """
+    reg = mp.load_registry(str(REGISTRY))
+    return mp.offer(reg, arch=arch, gb=1024, ram_gb=1024)
+
+
 def test_every_engine_and_arch_that_llgenie_offers_is_catalogued():
-    # Given every (model, engine) that llgenie would actually recommend on some arch
-    reg = mp.load_registry(str(REGISTRY))["models"]
+    # Given every (model, engine) that llgenie actually offers on a host that fits the store
     d = catalog()
-    for m in reg:
-        engines = mp.rank_engines(m)
-        for eng in engines:
-            cell = mp.catalog_engine_cell(m["id"], eng["engine"])
+    rows = _offered_rows()
+
+    # When each offered cell is looked up in the committed table
+    for row in rows:
+        for eng in row["engines"]:
+            cell = (d["files"].get(row["model"]["id"]) or {}).get(eng["engine"])
+
+            # Then it has a table cell, and that cell lists the arch it is offered on
             assert cell is not None, \
-                f"{m['id']}/{eng['engine']}: llgenie offers an engine that has no catalog entry"
+                f"{row['model']['id']}/{eng['engine']}: llgenie offers an engine that has no catalog entry"
             assert eng["variant"] in cell["arch"], \
-                f"{m['id']}/{eng['engine']} offered on {eng['variant']} but the catalog arch " \
+                f"{row['model']['id']}/{eng['engine']} offered on {eng['variant']} but the catalog arch " \
                 f"list {cell['arch']} excludes it"
 
 
 def test_every_registry_model_has_a_catalog_entry_or_a_documented_skip():
-    # Given a model that llgenie CAN serve on some architecture
-    reg = mp.load_registry(str(REGISTRY))["models"]
+    # Given every row plain llgenie prints for a host that fits the whole store
     d = catalog()
-    names = [m["id"] for m in reg if mp.recommend({"models": [m]})]
-    for mid in names:
-        assert mid in d["files"], f"{mid}: no catalog entry for a servable model"
+    rows = _offered_rows()
 
+    # When each row is asked what it offers
+    for row in rows:
+        mid = row["model"]["id"]
+        if row["engines"]:
+            # Then a served model has a table entry ...
+            assert mid in d["files"], f"{mid}: no catalog entry for a servable model"
+        else:
+            # ... and a model nothing here can serve is explained, never silently blank
+            assert row["why"], f"{mid}: not offered and no reason given"
+
+
+
+# --------------------------------------------- what the generator may plan a cell from (#750)
+# Measured on the 2026-10-27 store: the table carried a `safetensors` plan taken from an
+# MLX-converted repo (`qwen3-4b` served by vLLM) and an `mlx-safetensors` plan taken from the
+# BASE repo (`google/gemma-3-1b-it`, which answers 401), while `plan_download()` — the code
+# that actually resolves a download — refuses both. The generator now applies that same rule.
+def test_a_safetensors_cell_is_planned_only_from_a_non_mlx_repo(monkeypatch):
+    """`safetensors` and `mlx-safetensors` are told apart by the repo's NAME, as plan_download does."""
+
+    # Given a store row whose only format repo is an MLX conversion
+    m = {"id": "m1", "hf": "org/m1", "formats": [{"name": "MLX", "hf": "org/m1-mlx-4bit"}]}
+    monkeypatch.setattr(mp, "mlx_repos", lambda _m: ["org/m1-MLX-8bit"])
+
+    # When  the repos each format may be planned from are computed
+    safe = gen._repos_for(m, "safetensors")
+    mlx = gen._repos_for(m, "mlx-safetensors")
+
+    # Then  an MLX-named repo is never a `safetensors` plan, and never the other way round
+    assert safe == []
+    assert mlx == ["org/m1-mlx-4bit", "org/m1-MLX-8bit"]
+
+
+def test_a_strata_cell_exists_only_for_the_family_strata_serves(monkeypatch):
+    """Strata installs one family's checkpoints, so it has no plan for any other model."""
+
+    # Given a model Strata was MEASURED on and a real-looking Strata plan
+    plan = {"repo": "ISTA-DASLab/some-pack", "revision": "abc", "path": "Q2_0/shard-1.gguf",
+            "files": ["Q2_0/shard-1.gguf"], "size": 4 * 2**30}
+    model = {"id": "not-the-family", "hf": "org/not-the-family",
+             "formats": [{"name": "GGUF", "hf": "org/not-the-family-GGUF"}],
+             "supported_engines": ["Strata"]}
+    monkeypatch.setattr(mp, "strata_plan", lambda _ram=None: plan)
+
+    # When  the cell is generated for a model Strata does NOT serve, then for one it does
+    monkeypatch.setattr(mp, "strata_serves", lambda _m: False)
+    not_served = gen._model_catalog(model)
+
+    # Then  no cell is invented ...
+    assert "Strata" not in not_served
+    # ... and the same model served by Strata does get its own plan
+    monkeypatch.setattr(mp, "strata_serves", lambda _m: True)
+    served = gen._model_catalog(model)
+    assert served["Strata"]["quants"][0]["repo"] == "ISTA-DASLab/some-pack"
 
 
 # ----------------------------------------------------------- the drift guard (`--check`)

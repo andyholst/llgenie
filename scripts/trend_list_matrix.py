@@ -45,12 +45,18 @@ def case_key(arch: str, vram: float, ram: float) -> str:
 
 
 def trend_rows(registry: dict, vram: float, ram: float, arch: str) -> list[dict]:
-    """What `llgenie --matrix --vram --ram --arch` lists, in README order."""
+    """What `llgenie --matrix --vram --ram --arch` lists, in README order.
+
+    The row set is the one `matrix()` itself considered: `trend_list` applies the store's
+    `system_ram_min` floor as well as the card gate (issue #669), so asking it without the
+    RAM printed a row `matrix()` never looked at — a model with an empty server AND an empty
+    reason (measured on the 2026-10-27 store, cuda/16 GB/8 GB RAM).
+    """
     res = mp.matrix(registry, vram, ram, arch)
     listed = {row["model"]["id"]: row for row in res["permutations"]}
     skipped = {item["model"]: item["why"] for item in res["skipped"]}
     rows = []
-    for model in mp.trend_list(registry, vram):
+    for model in mp.trend_list(registry, vram, ram):
         hit = listed.get(model["id"])
         if hit:
             engine = hit["engines"][0]["engine"]

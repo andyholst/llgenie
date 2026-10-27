@@ -50,6 +50,23 @@ def _engine_formats(eng):
     return info["formats"] if info else []
 
 
+def _repos_for(model, fmt):
+    """The Hub repos a `mlx-safetensors` / `safetensors` cell may be planned from.
+
+    The SAME rule `model_engine_pick.plan_download()` applies, because the table is what the
+    pick reads: an `mlx-safetensors` plan comes only from a repo whose name marks MLX (the
+    store's `formats[].hf` plus the `<name>-MLX*` conversions the live search finds), and a
+    `safetensors` plan only from a repo whose name does not. Measured on the 2026-10-27 store:
+    without this a `safetensors` cell pointed at an MLX-converted repo (`qwen3-4b` served by
+    vLLM), and the MLX cell pointed at the base repo (`google/gemma-3-1b-it`, gated), so the
+    table offered a download the engine cannot load while `plan_download()` refused it.
+    """
+    repos = [f["hf"] for f in model.get("formats") or [] if f.get("hf")]
+    if fmt == "mlx-safetensors":
+        repos += mp.mlx_repos(model)
+    return [r for r in dict.fromkeys(repos) if ("mlx" in r.lower()) == (fmt == "mlx-safetensors")]
+
+
 def _plan_row(repo, revision, path, files, size_gb, dir=False):
     return {"repo": repo, "revision": revision, "path": path, "files": files,
             "size_gb": round(size_gb, 6),
@@ -70,6 +87,14 @@ def _model_catalog(m):
         # own-checkpoint engines (Strata/TensorFold): only THEIR real plans (pinned
         # shards / MLX checkpoints) belong in the catalog, never a generic repo
         if eng_id == "strata":
+            # Strata's setup.py installs ONE family of checkpoints — the repo its default
+            # family names — so a model that is not that family has no Strata plan at all,
+            # however many t/s measurements say Strata ran it (`strata_serves`, the same gate
+            # `plan_download(engine="strata")` applies). Measured on the 2026-10-27 store:
+            # without it every model Strata was measured on got a cell pointing at the
+            # Qwen3.8-Flash-Next pack (61.9 GB) as its own weights.
+            if not mp.strata_serves(m):
+                continue
             # Strata is RAM-sensitive: its setup.py picks Q2_0 below 60 GB of RAM and
             # IQ3_XXS from 60 GB up. Record BOTH real plans so the pick can choose the
             # right quant for the host's RAM (the catalog is the source of truth).
@@ -103,16 +128,8 @@ def _model_catalog(m):
                     for w in mp.gguf_weights(repo):
                         items.append(_plan_row(repo, "main", w["files"][0], w["files"],
                                                w["size"] / GB))
-            elif fmt == "mlx-safetensors":
-                repos = [f["hf"] for f in m.get("formats") or [] if f.get("hf")]
-                repos += mp.mlx_repos(m)
-                for repo in dict.fromkeys(repos):
-                    snap = mp._snapshot(repo)
-                    if snap:  # the pick filters by the host's budget; the table lists ALL real quants
-                        items.append(_plan_row(repo, "main", "", snap["files"],
-                                               snap["size"] / GB, dir=True))
-            elif fmt == "safetensors":
-                for repo in [f["hf"] for f in m.get("formats") or [] if f.get("hf")]:
+            elif fmt in ("mlx-safetensors", "safetensors"):
+                for repo in _repos_for(m, fmt):
                     snap = mp._snapshot(repo)
                     if snap:  # the pick filters by the host's budget; the table lists ALL real quants
                         items.append(_plan_row(repo, "main", "", snap["files"],
