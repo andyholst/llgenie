@@ -173,7 +173,17 @@ label back (a `--label` on create is dropped on the CI token path, #724/#757), a
 `make engine-skill-scaffold ENGINE="<registry name>"` — the target that writes
 `skills/engines/<id>/SKILL.md` from the registry's own entry (engine, repo URL, backends) and leaves
 every upstream fact it cannot prove EMPTY, so `make skills-validate` names the remaining work instead of
-a guessed pin building. `data/engine-skill-gap.json` also
+a guessed pin building.
+
+**Who runs the scaffold: the issue-bot, before the agent starts.** `scripts/issue_implementer.py
+dispatch` (the `make issue-bot-dispatch` step of `issue-bot.yml`) recognises a tracking issue by the
+title `engine_skill_gap.issue_title()` gives it, runs `engine_skill_scaffold.scaffold()` for that
+engine, and appends a `## Scaffold` section to `issue.md` naming the file it wrote, the backends and
+what is still empty — so the implement leg starts from a correctly shaped skill instead of a blank
+page, deterministically rather than by the agent remembering to. A dry dispatch writes nothing, and a
+plain issue gets neither the section nor a file. An engine the vendored store no longer names is
+reported in that section instead of failing the run (the issue is then stale, not unworkable).
+`data/engine-skill-gap.json` also
 names the models no engine can offer at all, so a model cannot vanish from the
 list unnoticed. `make skills-validate REGISTRY=data/models.json
 UNSUPPORTED=data/unsupported-engines.json` tolerates the recorded decisions per

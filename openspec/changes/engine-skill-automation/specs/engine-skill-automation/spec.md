@@ -96,3 +96,38 @@ so `make skills-validate` names each one.
 - **When** the scaffold runs in dry mode
 - **Then** no file is written
 - **Test:** `tests/test_engine_skill_scaffold.py::test_dry_writes_nothing`
+
+### Requirement: the issue-bot scaffolds an engine tracking issue before the agent starts
+
+`scripts/issue_implementer.py dispatch` (`make issue-bot-dispatch`, the step `issue-bot.yml` runs
+before the implement leg) MUST recognize an engine tracking issue by its title, write the skill for the
+engine it names, and append a `## Scaffold` section to `issue.md` naming the file, its backends and what
+is still empty. It MUST NOT do this on a dry run, MUST NOT write anything for a plain issue, and MUST
+report an engine the vendored store no longer names in that section instead of failing the dispatch.
+
+WHEN the issue-bot picks up a tracking issue for an engine llgenie does not ship
+THEN `skills/engines/<id>/SKILL.md` exists before the agent reads `issue.md`, and `issue.md` says so.
+
+#### Scenario: the skill is written before the agent reads issue.md
+
+- **Given** an `agent:implement` issue titled `engine: <name> has no llgenie skill (…)` and a registry
+  naming that engine with a repo URL and `backend: CUDA / ROCm`
+- **When** `make issue-bot-dispatch` runs
+- **Then** `skills/engines/<id>/SKILL.md` is written with the repo URL and `backends: [cuda, rocm]`
+- **And** `issue.md` carries a `## Scaffold` section naming that path, the empty keys and
+  `make generate-engine-params`
+- **Test:** `tests/test_issue_implementer.py::test_dispatch_scaffolds_the_skill_of_an_engine_tracking_issue`
+
+#### Scenario: a plain issue is untouched
+
+- **Given** an ordinary implementation issue
+- **When** `make issue-bot-dispatch` runs
+- **Then** no skill file is written and `issue.md` carries no `## Scaffold` section
+- **Test:** `tests/test_issue_implementer.py::test_dispatch_scaffolds_nothing_for_a_plain_issue`
+
+#### Scenario: a dry dispatch writes nothing
+
+- **Given** an engine tracking issue
+- **When** `make issue-bot-dispatch DRY=1` runs
+- **Then** no skill file is written
+- **Test:** `tests/test_issue_implementer.py::test_a_dry_dispatch_scaffolds_nothing`

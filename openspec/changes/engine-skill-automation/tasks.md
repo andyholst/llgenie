@@ -9,3 +9,5 @@
 - [x] 7. Both files green: `python -m pytest tests/test_engine_skill_scaffold.py tests/test_engine_skill_gap.py` in `llgenie/test:latest` — **82 passed**
 - [x] 8. `agent-wiki/2026-10-27-engine-skill-automation.md` records the work (issue #757) and `CHANGES.md` indexes it
 - [x] 9. `make lint`, `make check-docs`, `make check-wiring`, `make test-unit` and `make openspec-validate NAME=engine-skill-automation` exit 0
+- [x] 10. `scripts/issue_implementer.py dispatch` scaffolds an engine tracking issue BEFORE the agent: it recognizes `engine_skill_gap.issue_title()`, writes the skill, and appends a `## Scaffold` section to `issue.md` (no file on a dry run, no section for a plain issue, a reported-not-fatal line when the store no longer names the engine)
+- [x] 11. The dispatch path is green: `python -m pytest tests/test_issue_implementer.py tests/test_engine_skill_scaffold.py tests/test_engine_skill_gap.py` in `llgenie/test:latest` — **126 passed**

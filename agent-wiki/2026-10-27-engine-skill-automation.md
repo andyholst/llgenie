@@ -30,10 +30,27 @@ half was the skill and the routing.
   `engine_skills.validate()` treats empty as missing and names each key, so the scaffold is a loud
   to-do list. No overwrite without `FORCE=1`, no invented backend, no unknown engine.
 
+## Who runs it, and when — the bot, not the agent's memory
+
+The scaffold is called by `scripts/issue_implementer.py dispatch` (`make issue-bot-dispatch`, the step
+`issue-bot.yml` runs before the implement leg). It recognizes a tracking issue by the title
+`engine_skill_gap.issue_title()` produces, runs `engine_skill_scaffold.scaffold()` for that engine, and
+appends a `## Scaffold` section to `issue.md` naming the file, its backends and what is still empty. So
+`skills/engines/<id>/SKILL.md` exists before the agent reads `issue.md` — the whole point of queueing the
+issue is that the file, not the recollection of `REQUIRED_KEYS`, is what the implement leg starts from. A
+dry dispatch writes nothing; a plain issue gets no section and no file; an engine the vendored store no
+longer names is reported in that section (the issue is stale) instead of failing the dispatch.
+
+The order, end to end: `registry-sync` (weekly) -> `data/models.json` carries the engine ->
+`make render-engine-skill-gap` + `make spawn-engine-skill-issues` (queued, `agent:implement`, read back)
+-> `issue-bot.yml` -> `make issue-bot-dispatch` writes the skill -> the implement leg fills the empty
+keys -> `make generate-engine-params` -> `engine-image-*` builds and publishes per arch.
+
 ## Verified
 
-- `tests/test_engine_skill_scaffold.py` (6 cases) and the two label-routing cases in
-  `tests/test_engine_skill_gap.py` — **82 passed** in `llgenie/test:latest`.
+- `tests/test_issue_implementer.py` (3 dispatch-scaffold cases), `tests/test_engine_skill_scaffold.py`
+  (7 cases) and the label-routing cases in `tests/test_engine_skill_gap.py` — **126 passed** in
+  `llgenie/test:latest` (the three files together).
 - `make lint`, `make check-wiring` (232 documents, the new script and test wired through `test-unit`),
   `make check-engine-skill-gap`, `make check-issue-bodies`, `make check-docs` green.
 - A real scaffold run (`ENGINE="Ollama"`, `--id zz-test`, into a scratch dir) writes the file and the

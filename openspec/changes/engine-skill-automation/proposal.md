@@ -41,6 +41,14 @@ with no workflow edit.
   overwritten, `DRY=1` writes nothing.
 - **`issue_body()`** names the scaffold command as the first fix step, so the bot that picks the issue
   up reads the exact command and the remaining checklist.
+- **`scripts/issue_implementer.py dispatch` runs the scaffold for that issue, before the agent.** The
+  dispatcher recognizes the tracking-issue title `engine_skill_gap.issue_title()` produces, calls
+  `engine_skill_scaffold.scaffold()` for the engine it names, and appends a `## Scaffold` section to
+  `issue.md` naming the written file, its backends and what is still empty. So the answer to "which
+  bot calls it, and when" is a step in the bot rather than the agent's memory: `issue-bot.yml` ->
+  `make issue-bot-dispatch` -> the file exists before the implement leg starts. A dry dispatch writes
+  nothing; a plain issue gets no section and no file; an engine the vendored store no longer names is
+  reported in that section (the issue is stale) instead of failing the dispatch.
 - **Tests** (real code, no mock of the product): `tests/test_engine_skill_scaffold.py` drives the real
   `scaffold()`/`skill_text()`/`backends()` and the real parser + `validate()` against a fixture registry
   file; `tests/test_engine_skill_gap.py` gains the label-routing cases through a `gh` executable on
