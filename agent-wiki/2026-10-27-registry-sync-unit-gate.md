@@ -49,6 +49,12 @@ families, and only one of them is really "the data changed":
   job reds on; it was `36 failed, 14486 passed` before this change).
 - The families separately, in the test image: the pick suite, the catalog file, the trend-list matrix
   and the hub probe all green.
+- `make ci-engines BACKEND=cpu` (the `install-published` stage CI runs): green — `2 passed`, and
+  llama-server, prism-server, `--pick --engine ollama` and the 1/1 pty trend pick each answered. Three
+  store-shape assumptions in that path had to become rules first: the test asked `offer()` without
+  the host RAM the CLI passes, matched `Bonsai 2 4B` inside the `Bonsai 2 4B on a CMF Phone 2 Pro`
+  line, and compared the served file with `plan_download()`'s largest quant although the runner
+  pre-seeds the health model and the pick reuses that local copy.
 - `make test-strata-live` (kept out of the hermetic gate): `31 passed`. Its
   `test_the_registry_model_is_the_one_strata_serves` pinned "exactly one store row is Strata's model";
   the new store carries six per-box rows of that same base model, so the test now asserts the rule —
