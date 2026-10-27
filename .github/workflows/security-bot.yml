@@ -1,0 +1,88 @@
+name: security-bot — turns ONE auto-fixable vulnerability issue into a green PR (never merges)
+
+# Issue #717 (parent #713). The scans file tagged issues (#716); this leg reads ONE of them, applies
+# the advisory's pin to the ONE file that owns it, and opens a focused PR that closes the issue.
+# The deterministic work is `scripts/security_bot.py` — this workflow is the trigger and the
+# permission scope, not a second implementation.
+#
+# Trigger surface: issues labelled (the `auto-fixable` label is what makes an issue eligible),
+#                  schedule daily 05:09 UTC (its own odd minute), and workflow_dispatch for a manual run.
+# Flow: guard (owner / repository bot / collaborator with write) -> make security-bot
+#       (select the oldest `security`+`vulnerability`+`auto-fixable` issue -> edit the pin in
+#       tools/requirements*.in -> make lint check-wiring check-docs check-security-scan ->
+#       branch + commit + push + `gh pr create` with Issue/Fix/Benefit/Technical and `closes #N`).
+# Never: never merges, never pushes to main, never force-pushes, never edits a compiled
+#        requirements*.txt, and never opens a PR whose gates are red — a red gate reverts the edit,
+#        comments the real output on the issue, and opens nothing.
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: "9 5 * * *"    # daily 05:09 UTC — its own odd minute (issue #275: no bot shares a slot)
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Preview the issue it would take and the edit it would make, pushing nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-bot
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Owner / collaborator trigger guard
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          # The run's head repository: empty for every non-PR event (issue #510).
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            # The repository's own bot is a GitHub App login, so it is never a collaborator and the
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
+            if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
+              echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+
+  fix:
+    needs: [guard]
+    # A label event that is not `auto-fixable` is nothing this bot acts on.
+    if: github.event_name != 'issues' || github.event.label.name == 'auto-fixable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write        # the branch + commit
+      issues: write          # reading the issue, commenting a refusal
+      pull-requests: write   # opening the PR
+    env:
+      GH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: make check-security-bot (the bot's contract with the issue roster)
+        run: make check-security-bot
+      - name: make security-bot (one issue -> one green PR, or a comment instead)
+        run: make security-bot SLUG="${{ github.repository }}" ${{ github.event.inputs.dry == 'true' && 'DRY=1' || '' }}
