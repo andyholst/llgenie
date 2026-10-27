@@ -114,6 +114,14 @@ jobs:
           # engines on 2026-10-26, no sync PR since 2026-10-13).
           make skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json ALLOW_NEW_ENGINES=1
           make test-unit
+      - name: State what changed in ONE issue (runs even when a gate above is red)
+        # issue #704: the analysis is most valuable exactly when the store cannot land, so this
+        # step runs whatever the check step's outcome was. It UPDATEs the issue carrying this
+        # store's generated_utc instead of filing another, so a re-run is idempotent.
+        if: always() && steps.diff.outputs.changed
+        env:
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
+        run: make sync-change-issue REPO="${{ github.repository }}"
       - name: Spawn one tracking issue per NEW unskilled engine
         if: steps.diff.outputs.changed
         env:

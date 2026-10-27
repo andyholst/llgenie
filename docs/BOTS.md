@@ -84,6 +84,15 @@ size, and RAM size, in README order, with the server `llgenie --matrix` would pu
 first. A sync that updates `data/models.json` and leaves the fixture stale fails
 `make test-unit`.
 
+A changed store also opens **one** issue that states what changed (issue #704):
+`make sync-change-issue` renders `make registry-change-report` — `generated_utc` old → new,
+added/removed/renamed model ids, new and gone engines, the `formats` vocabulary, every contract change
+(required keys, new `backend` enum values), the README row changes and the derived-table counts — into the
+issue shape, labelled `agent:implement`, with a checklist of what llgenie must now do. The workflow runs
+it with `if: always()`, so the issue exists even when a gate reds and the PR step is skipped: it is what
+the landing change is written from (#677/#693). The body carries a marker for the store's
+`generated_utc`, so a re-run updates that issue instead of filing another.
+
 #### The unit gate is hermetic: live-Hub work has its own target (issue #438)
 
 `make test-unit` is the gate every change runs, so nothing in it may leave the machine. Three tests

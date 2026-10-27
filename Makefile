@@ -65,7 +65,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	install-prism-cuda install-upstream-cuda install-prism-metal install-upstream-metal \
 	sync-registry check-registry skills-validate engine-list engine-hardware engine-plan engine-check engine-install engine-detect engine-smoke test-engine ci-engine-images build-engine-base build-engines generate-build-engine-params test-engine-image push-engine test-published-engine test-install-published engine-launchers test-built-engine test-uninstalled \
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
-	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
+	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues registry-change-report sync-change-issue sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
 	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
@@ -305,6 +305,10 @@ engine-skill-gap: ## Show the unskilled-engine gap: shipped / known-unsupported 
 
 engine-skill-gap-md: ## The same gap report as MARKDOWN, for a PR/issue body (the registry-sync workflow embeds it)
 	python3 scripts/engine_skill_gap.py report --md
+registry-change-report: ## Print what the working-tree vendored registry changed vs HEAD (models, engines, contract keys, derived tables)
+	python3 scripts/registry_change_issue.py report
+sync-change-issue: ## Open ONE issue stating what a changed vendored registry changed — updates it in place for the same store (the sync job runs this; DRY=1 previews, REPO= picks the repo)
+	python3 scripts/registry_change_issue.py open $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry engine (the sync job runs this; DRY=1 previews, REPO= picks the repo)
 	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 # ---- issue-bot: one issue per run, at most 3/day (issue #248) -----------------
@@ -1495,6 +1499,8 @@ help:
 	@echo "  make check-engine-skill-gap      CI gate: a registry engine with no skill and no dated decision in data/unsupported-engines.json, a stale decision, or a stale file"
 	@echo "  make engine-skill-gap            show the gap: shipped / known-unsupported / NEW-unresolved engines"
 	@echo "  make spawn-engine-skill-issues   open one tracking issue per NEW unskilled engine (the weekly sync runs this)"
+	@echo "  make registry-change-report      print what the vendored registry changed vs HEAD"
+	@echo "  make sync-change-issue           open ONE issue stating the change (the weekly sync runs this)"
 	@echo "  make check-wiring                CI: fail when a test/script is wired to no make target, or only to one CI never runs (tests/fixtures/host-only-wiring.json records the deliberate ones)"
 	@echo "  make check-secret-output         CI: fail when any file prints a secret's VALUE (an echo of a token variable), passes it on a command line (a value after -e), runs under a shell xtrace, dumps the environment around it, or commits a credential-shaped literal"
 	@echo "  make wiring-report               show how every test/script is wired (target + whether CI runs it) and the host-only exceptions"

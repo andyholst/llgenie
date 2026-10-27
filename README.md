@@ -295,6 +295,10 @@ make check-quant-catalog  # CI: fail if the committed quant catalog differs from
 make render-trend-list-matrix  # rewrite tests/fixtures/trend-list-matrix.json: the trending
                               # list for every arch x vram x ram, from `llgenie --matrix`
 make check-trend-list-matrix   # CI: fail if that file differs from a fresh matrix() call
+make registry-change-report    # print what the working-tree store changed vs HEAD: added/removed/
+                               # renamed models, new engines, contract keys, README rows, table counts
+make sync-change-issue         # open ONE issue stating that change (the weekly sync runs it; it
+                               # updates that issue in place for the same generated_utc, DRY=1 previews)
 make render-engine-skill-gap   # rewrite data/engine-skill-gap.json: the per-engine list (status,
                                # image variants, the models each engine is the top engine for,
                                # per arch) + the models no engine can offer
