@@ -70,6 +70,24 @@ Then   it exits non-zero and prints the advisory, package, current → fixed and
 
 - **Test:** `tests/test_security_scan.py::test_full_mode_fails_on_a_high_with_a_fix`
 
+#### Scenario: the shipped pull-request policy is report-only
+
+Given this repository's `data/security-policy.json`,
+When   a `pr` verdict runs over a CRITICAL with a fix,
+Then   it exits 0 and prints that the run is report-only, while the full mode fails on the same
+       finding.
+
+- **Test:** `tests/test_security_scan.py::test_the_shipped_pr_policy_is_report_only`
+
+#### Scenario: the scanner writes its report as the invoking user
+
+Given a scan launched by `make security-scan`,
+When   the container is started,
+Then   `--user <uid>:<gid>` is on the command line, so the report is written into the runner's
+       checkout and no root-owned file is left behind.
+
+- **Test:** `tests/test_security_scan.py::test_the_scanner_runs_as_the_invoking_user`
+
 #### Scenario: pr mode does not fail on a pre-existing high
 
 Given the same HIGH advisory,

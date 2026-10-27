@@ -9,7 +9,7 @@ same `make` targets.
 
 | Event | When | Failure policy |
 |---|---|---|
-| `pull_request` (main) | every PR | **`pr` mode** — fails on `pr_fail_on` (critical, with a fix) |
+| `pull_request` (main) | every PR | **report-only** — `pr_fail_on` is empty, so a PR is never gated by a pre-existing advisory |
 | `push` (main) | every merge | `full` mode — `fail_on` (critical + high, with a fix) |
 | `schedule` | daily 04:23 UTC | `full` mode |
 | `workflow_dispatch` | owner, repository bot, collaborator with write | the `enforce` input, default `full` |
@@ -27,9 +27,15 @@ with a fix) and still uploads every report; the daily and manual runs enforce th
 sets live in `data/security-policy.json`, never in a workflow literal.
 
 ```json
-{"fail_on": ["critical", "high"], "pr_fail_on": ["critical"],
+{"fail_on": ["critical", "high"], "pr_fail_on": [],
  "require_fix": true, "issue_severities": ["critical", "high"]}
 ```
+
+`pr_fail_on` is **empty on purpose**: any repository eventually carries a High with a fix nobody has
+applied yet, and gating every PR on it reds PRs that fix something else — the standard way a security
+gate gets switched off. A PR run therefore *reports* (SARIF + the artifact) and files nothing; the
+daily schedule and a manual dispatch enforce `fail_on` and file the issues. Set `pr_fail_on` to a
+subset of `fail_on` when the tree is clean enough to gate PRs on it.
 
 `require_fix: true` means an advisory with no fixed version is **recorded, never blocking** — it is
 work nobody can do today, and #716 decides which recorded findings become issues.
@@ -41,6 +47,10 @@ A `pull_request` run before the first publish — and any run whose token cannot
 does not skip the scan: the **same Dockerfile** the publish job builds (digest-pinned base, exact
 versions) is built locally and tagged with the ref the run asked for, and the log says which path was
 taken. A build that fails fails the run, loudly; there is no third path and no silent skip.
+
+Every scanner runs as the **invoking user** (`docker run --user <uid>:<gid>`): the mounted checkout
+belongs to the runner, so without it trivy cannot create its report (`permission denied`) and the run
+would leave root-owned files in the tree (issue #433).
 
 ## Outputs
 
