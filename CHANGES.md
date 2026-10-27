@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-27 | Renovate owns the low-risk pins, and nothing generated | [2026-10-27-renovate-dependencies.md](agent-wiki/2026-10-27-renovate-dependencies.md) | #718 |
 | 2026-10-27 | every GitHub Action runs at a commit, not at a tag | [2026-10-27-pin-github-actions.md](agent-wiki/2026-10-27-pin-github-actions.md) | #719 |
 | 2026-10-27 | the bot turns one auto-fixable issue into one green PR, or nothing | [2026-10-27-security-bot.md](agent-wiki/2026-10-27-security-bot.md) | #717 |
 | 2026-10-27 | a finding becomes exactly one tagged issue, and never a duplicate | [2026-10-27-security-issues.md](agent-wiki/2026-10-27-security-issues.md) | #716 |
