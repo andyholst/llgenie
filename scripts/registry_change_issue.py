@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""State what changed in the vendored registry, and open ONE issue about it (issue #704).
+
+  registry_change_issue.py report [--prev-rev REV] [--out FILE]
+  registry_change_issue.py open   [--prev-rev REV] [--repo OWNER/REPO] [--dry]
+
+`report` compares the PREVIOUS store — `git show <rev>:data/…`, which is the registry the
+repository currently carries — with the working tree's, and renders a markdown body in the
+shape this repository's issues use. `open` files one issue labelled `agent:implement` that
+carries a marker for the store's `generated_utc`; a later run for the same store UPDATES
+that issue instead of opening a second one.
+
+No model is in this path: the diff is the artefact, and this is its index. The judgement —
+which contract key to read, which golden to re-derive, which new engine to ship or defer —
+belongs to the agent that picks the issue up (#677/#693/#673).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+STORE = "data/models.json"
+CONTRACT = "data/model_contract.json"
+README = "data/trending-README.md"
+CATALOG = "data/trending-quant-catalog.json"
+MATRIX = "tests/fixtures/trend-list-matrix.json"
+GAP = "data/engine-skill-gap.json"
+FILES = (STORE, CONTRACT, README, CATALOG, MATRIX, GAP)
+MARKER = "<!-- registry-sync-changes: {utc} -->"
+LABEL = "agent:implement"
+
+
+def _git_show(rev: str, path: str) -> bytes | None:
+    """The file at `rev`, or None when it does not exist there."""
+    out = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True)
+    return out.stdout if out.returncode == 0 else None
+
+
+def _read(path: str, rev: str | None) -> bytes | None:
+    """The working tree's file when `rev` is None, else the file at that revision."""
+    if rev is None:
+        p = REPO / path
+        return p.read_bytes() if p.exists() else None
+    return _git_show(rev, path)
+
+
+def _json(raw: bytes | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _readme_rows(raw: bytes | None) -> list[str]:
+    """The model names of the README "Most loved" table, in order."""
+    import re
+    if not raw:
+        return []
+    text = raw.decode("utf-8", "replace")
+    if "## ❤️ Most loved" not in text:
+        return []
+    section = text.split("## ❤️ Most loved", 1)[1].split("\n## ", 1)[0]
+    return re.findall(r"^\| \[\*\*(.+?)\*\*\]", section, re.M)
+
+
+def _formats(store: dict) -> set[str]:
+    return {str(f.get("name")) for m in store.get("models") or []
+            for f in m.get("formats") or []}
+
+
+def _required(schema: dict, *path: str) -> list[str]:
+    node = schema
+    for key in path:
+        node = (node or {}).get(key) or {}
+    return list(node.get("required") or [])
+
+
+def _enum(schema: dict, *path: str) -> list[str]:
+    node = schema
+    for key in path:
+        node = (node or {}).get(key) or {}
+    return list(node.get("enum") or [])
+
+
+def compare(prev: dict[str, bytes | None], cur: dict[str, bytes | None]) -> dict:
+    """The facts that changed between two snapshots of the six files."""
+    ps, cs = _json(prev.get(STORE)), _json(cur.get(STORE))
+    pc, cc = _json(prev.get(CONTRACT)), _json(cur.get(CONTRACT))
+    pm = {m.get("id"): m for m in ps.get("models") or []}
+    cm = {m.get("id"): m for m in cs.get("models") or []}
+    pe, ce = set(ps.get("engines") or {}), set(cs.get("engines") or {})
+    prow, crow = _readme_rows(prev.get(README)), _readme_rows(cur.get(README))
+    row_req = ("properties", "models", "items")
+    facts = {
+        "utc_before": ps.get("generated_utc", "(none)"),
+        "utc_after": cs.get("generated_utc", "(none)"),
+        "models_before": len(pm), "models_after": len(cm),
+        "engines_before": len(pe), "engines_after": len(ce),
+        "added_models": [{"id": i, "name": cm[i].get("name"), "vram_tier": cm[i].get("vram_tier")}
+                         for i in sorted(set(cm) - set(pm))],
+        "removed_models": sorted(set(pm) - set(cm)),
+        "renamed_models": [{"id": i, "was": pm[i].get("name"), "now": cm[i].get("name")}
+                           for i in sorted(set(pm) & set(cm))
+                           if pm[i].get("name") != cm[i].get("name")],
+        "new_engines": sorted(ce - pe),
+        "gone_engines": sorted(pe - ce),
+        "formats_before": sorted(_formats(ps)), "formats_after": sorted(_formats(cs)),
+        "contract_changed": prev.get(CONTRACT) != cur.get(CONTRACT),
+        "row_required_added": sorted(set(_required(cc, *row_req)) - set(_required(pc, *row_req))),
+        "row_required_removed": sorted(set(_required(pc, *row_req)) - set(_required(cc, *row_req))),
+        "backend_enum_added": sorted(set(_enum(cc, "properties", "engines", "additionalProperties",
+                                               "properties", "backend"))
+                                     - set(_enum(pc, "properties", "engines", "additionalProperties",
+                                                 "properties", "backend"))),
+        "readme_rows_before": len(prow), "readme_rows_after": len(crow),
+        "readme_added": [n for n in crow if n not in prow][:20],
+        "readme_removed": [n for n in prow if n not in crow][:20],
+        "catalog": _catalog_counts(cur.get(CATALOG)),
+        "catalog_before": _catalog_counts(prev.get(CATALOG)),
+        "matrix_cases": len(_json(cur.get(MATRIX)).get("cases") or _json(cur.get(MATRIX)) or []),
+        "unresolved_engines": len(_json(cur.get(GAP)).get("unresolved") or []),
+        "changed": {p for p in FILES if prev.get(p) != cur.get(p)},
+    }
+    return facts
+
+
+def _catalog_counts(raw: bytes | None) -> dict:
+    data = _json(raw)
+    models = data.get("files") or {}
+    links = sum(len(cell.get("quants") or []) for engs in models.values() if isinstance(engs, dict)
+                for cell in engs.values() if isinstance(cell, dict))
+    return {"models": len(models), "links": links}
+
+
+#: How many rows of one kind the issue body lists before it stops and points at the diff.
+LIST_CAP = 40
+
+
+def _bullet(items, empty="none", cap: int = LIST_CAP) -> str:
+    if not items:
+        return f"- {empty}"
+    shown = list(items)[:cap]
+    out = "\n".join(f"- {i}" for i in shown)
+    if len(items) > cap:
+        out += f"\n- … and {len(items) - cap} more (the full set is the `{STORE}` diff)"
+    return out
+
+
+def render(f: dict) -> str:
+    """The issue body: the issue shape this repository reads, with the diff as the index."""
+    added = [f"`{m['id']}` — {m['name']} (VRAM {m['vram_tier']})" for m in f["added_models"]]
+    renamed = [f"`{m['id']}`: {m['was']!r} -> {m['now']!r}" for m in f["renamed_models"]]
+    work = []
+    if f["added_models"] or f["removed_models"]:
+        work.append("**Re-derive the trend/pick goldens** for the new row set (#693, #677) — they "
+                    "read the store's rows, so an added or removed model reds them.")
+    if f["new_engines"]:
+        work.append("**Decide each new engine**: ship a skill, or record a dated decision in "
+                    "`data/unsupported-engines.json` (#673/#686). `make check-engine-skill-gap` "
+                    "refuses the store until then.")
+    if f["row_required_added"] or f["backend_enum_added"]:
+        work.append("**Teach llgenie's contract reader** the new field/enum value, then let "
+                    "`make check-registry` validate it (#694 vendored the contract).")
+    if f["formats_after"] != f["formats_before"]:
+        work.append("**Check the formats vocabulary** the pick resolves downloads from "
+                    "(#687/#692) — the normaliser narrows it on the way in.")
+    work.append("**Run the job's gates on the synced files**: `make check-registry`, "
+                "`check-registry-keys`, `check-quant-catalog`, `check-trend-list-matrix`, "
+                "`skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json`, "
+                "`check-engine-skill-gap`, then `make test-unit`.")
+
+    return f"""Issue: the weekly `registry-sync` produced a new vendored registry —
+`generated_utc` `{f['utc_before']}` -> `{f['utc_after']}` — and llgenie must be brought to it:
+the trend list, the pick, the contract it validates against, and the tests that pin the old rows.
+
+## What changed (measured against `{f.get('prev_rev', 'HEAD')}`)
+
+- models: **{f['models_before']} -> {f['models_after']}**, engines: **{f['engines_before']} -> {f['engines_after']}**
+- quant catalog: {f['catalog_before']['models']} models / {f['catalog_before']['links']} links -> **{f['catalog']['models']} / {f['catalog']['links']}**
+- trend-list matrix cases: {f['matrix_cases']}; unresolved engines in the skill gap: {f['unresolved_engines']}
+- files changed: {', '.join('`' + p + '`' for p in sorted(f['changed'])) or 'none'}
+
+### Models added ({len(f['added_models'])})
+
+{_bullet(added)}
+
+### Models removed ({len(f['removed_models'])})
+
+{_bullet(['`' + i + '`' for i in f['removed_models']])}
+
+### Renamed ({len(f['renamed_models'])})
+
+{_bullet(renamed)}
+
+### Engines new to the registry ({len(f['new_engines'])})
+
+{_bullet(['`' + e + '`' for e in f['new_engines']])}
+
+### Contract ({'changed' if f['contract_changed'] else 'unchanged'})
+
+- required keys added per model row: {f['row_required_added'] or 'none'}
+- required keys removed per model row: {f['row_required_removed'] or 'none'}
+- engine `backend` values added: {f['backend_enum_added'] or 'none'}
+
+### README "Most loved" ({f['readme_rows_before']} -> {f['readme_rows_after']} rows)
+
+{_bullet(['added: ' + n for n in f['readme_added']] + ['removed: ' + n for n in f['readme_removed']])}
+
+## What this implies for llgenie
+
+{_bullet(work)}
+
+## Not covered
+
+- the ranking rule the trend list is built on is its own decision (#669): this issue reports the
+  data, it does not choose the gate.
+- the sync PR itself: it opens when the job's own gates pass; this issue exists whether it does
+  or not, and it is what the landing change is written from.
+"""
+
+
+def _title(utc: str) -> str:
+    return f"sync: review the {utc} trending registry (llgenie must follow the new store)"
+
+
+def run_gh(args: list[str]) -> str:
+    """`gh` is the external system; tests replace this function."""
+    out = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(args)} failed: {out.stderr.strip()}")
+    return out.stdout
+
+
+def open_issue(body: str, utc: str, repo: str | None, dry: bool = False) -> str:
+    """Create ONE issue for this store, or update the open one carrying its marker."""
+    marker = MARKER.format(utc=utc)
+    body = f"{body}\n\n{marker}\n"
+    title = _title(utc)
+    base = ["--repo", repo] if repo else []
+    listing = json.loads(run_gh(["issue", "list", *base, "--state", "open", "--limit", "100",
+                                 "--json", "number,body"]))
+    for issue in listing:
+        if marker in (issue.get("body") or ""):
+            if dry:
+                return f"would update #{issue['number']}"
+            run_gh(["issue", "edit", str(issue["number"]), *base, "--body", body])
+            return f"updated #{issue['number']}"
+    if dry:
+        return "would create one issue"
+    url = run_gh(["issue", "create", *base, "--title", title, "--label", LABEL,
+                  "--body", body]).strip()
+    return url
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("cmd", choices=("report", "open"))
+    ap.add_argument("--prev-rev", default="HEAD")
+    ap.add_argument("--out")
+    ap.add_argument("--repo")
+    ap.add_argument("--dry", action="store_true")
+    a = ap.parse_args(argv)
+
+    prev = {p: _read(p, a.prev_rev) for p in FILES}
+    cur = {p: _read(p, None) for p in FILES}
+    if prev[STORE] is None:
+        print(f"[registry-change] {a.prev_rev}:{STORE} does not exist — nothing to compare "
+              f"(a first import is not a change)", file=sys.stderr)
+        return 0
+    if prev[STORE] == cur[STORE] and prev[CONTRACT] == cur[CONTRACT] \
+            and prev[README] == cur[README]:
+        print("[registry-change] the store, contract and README are unchanged — no issue")
+        return 0
+
+    facts = compare(prev, cur)
+    facts["prev_rev"] = a.prev_rev
+    body = render(facts)
+    if a.out:
+        Path(a.out).write_text(body)
+        print(f"[registry-change] wrote {a.out}")
+    if a.cmd == "report":
+        if not a.out:
+            print(body)
+        return 0
+    utc = facts["utc_after"]
+    print(f"[registry-change] {open_issue(body, utc, a.repo, a.dry)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
