@@ -4,8 +4,8 @@ name: security-scan — Trivy/Grype/Snyk/Semgrep + CycloneDX SBOM on PR, push, s
 # containers/scanners/digests.json (a content hash of the Dockerfile, built by this repository —
 # issue #714). Nothing is installed at scan time and no `uses:` here floats on a tag.
 #
-# Trigger surface: pull_request (main), push to main, schedule daily 04:23 UTC (an odd minute, its
-#                  own slot), and workflow_dispatch — the manual form is available to the owner,
+# Trigger surface: pull_request (main), push to main, schedule daily 04:05 UTC (its own odd minute —
+#                  no bot shares a cron slot, issue #275), and workflow_dispatch — the manual form is available to the owner,
 #                  the repository bot and any collaborator with write access (the `guard` job).
 # Flow: guard (owner / repository bot on a same-repo head / collaborator with write, BEFORE any
 #       scanner runs) -> make check-security-scan (policy + digests sane) -> make security-scan-all
@@ -19,7 +19,7 @@ on:
   push:
     branches: ["main"]
   schedule:
-    - cron: "23 4 * * *"   # daily 04:23 UTC — its own slot (issue #275)
+    - cron: "5 4 * * *"    # daily 04:05 UTC — its own odd minute (issue #275: no bot shares a slot)
   workflow_dispatch:
     inputs:
       tools:
@@ -37,15 +37,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-scan-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A bot never cancels an in-progress run (issue #275): the group is this workflow's own, and
+  # `cancel-in-progress` is false so a second scan waits instead of killing one mid-upload.
+  group: security-scan
+  cancel-in-progress: false
 
 jobs:
   guard:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Owner / repository bot / collaborator trigger guard
+      - name: Owner / collaborator trigger guard
         env:
           ACTOR: ${{ github.actor }}
           TRIGGER: ${{ github.triggering_actor }}
@@ -59,8 +61,10 @@ jobs:
           for u in "$ACTOR" "$TRIGGER"; do
             if [ "$u" = "$OWNER" ]; then continue; fi
             # The repository's own bot is a GitHub App login, so it is never a collaborator and the
-            # permission read answers 404 -> `none`. It may pass ONLY when the run's head is a
-            # branch in THIS repository (a token with write access produced it).
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
             if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
               echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
               continue
