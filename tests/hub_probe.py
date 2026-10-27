@@ -53,6 +53,10 @@ BACKOFF = (1, 2, 4, 8)
 #: gateway/overload family #256 measured (22x HTTP 500 + 11x HTTP 504 in a single run).
 TRANSIENT_STATUS = (429, 500, 502, 503, 504)
 
+#: The statuses that mean "the file is there, you may not read it": a gated Hub repo. Definitive
+#: (never retried) and NOT missing — the repository treats a credential-gated link as reachable.
+GATED_STATUS = (401, 403)
+
 #: How many probes may exhaust the retry budget before the Hub is treated as degraded for the
 #: rest of this process (one attempt each, cause named). A time bound, never a skip.
 OUTAGE_LIMIT = 3
@@ -65,11 +69,19 @@ class Probe:
     `detail` is the status or the transport reason — `HTTP 206`, `HTTP 404`,
     `HTTP 503 after 5 attempts (15s of backoff)`, `URLError: <urlopen error ...>` — so a failing
     assertion can say which one it saw.
+
+    `gated` marks the one answered status that means the file EXISTS but this credential may
+    not read it (401/403). The repository's own rule is that a credential-gated URL is not a
+    dead one (`make web-coverage`, `gen_trending_quant_catalog._probe_status`, issue #418), and
+    the catalog records gated plans on purpose — `google/gemma-3-1b-it` is a gated repo, so a
+    probe that called it missing made the pick suite red on a real file. A gated link therefore
+    verifies (`exists`), and says so in `detail`.
     """
 
     exists: bool
     detail: str
     attempts: int
+    gated: bool = False
 
     def __bool__(self) -> bool:
         return self.exists
@@ -117,6 +129,10 @@ def probe(url: str, *, attempts: int = ATTEMPTS, backoff: tuple[int, ...] = BACK
             used = i + 1
             break
         except urllib.error.HTTPError as e:
+            if e.code in GATED_STATUS:
+                # The file is there; this credential may not read it. Not a dead link (#418).
+                return Probe(True, f"HTTP {e.code} (gated: the file exists, this credential may "
+                                    f"not read it)", i + 1, gated=True)
             if e.code not in TRANSIENT_STATUS:
                 return Probe(False, f"HTTP {e.code}", i + 1)
             last = f"HTTP {e.code}"

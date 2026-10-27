@@ -139,3 +139,54 @@ def test_disabled_images_are_never_offered(reg):
         for arch in ("cpu", "cuda", "rocm", "vulkan"):
             for r in mp.rank_engines(m, arch):
                 assert not ei.disabled(r["id"], r["variant"]), (m["id"], arch, r)
+
+# ------------------------------------- an engine with no downloadable plan is not offered (#750)
+# `rank_engines` used to offer an engine on the strength of a t/s measurement alone, so the pick
+# could hand a user a model it cannot fetch (`MLX` on the ternary Bonsai rows, `vLLM` on an
+# MLX-only repo — 12 cells on the 2026-10-27 store). The committed table says what can actually
+# be downloaded; for a model it covers, an engine with no cell has no plan.
+def _catalog_file(tmp_path, cells):
+    import json
+    f = tmp_path / "catalog.json"
+    f.write_text(json.dumps({"meta": {"generated_utc": "2026-01-01T00:00:00Z"}, "files": cells}))
+    return f
+
+
+def _measured_model(mid="m-no-plan"):
+    return {"id": mid, "name": "M", "hf": "org/m", "vram_min": "4GB",
+            "formats": [{"name": "GGUF", "hf": "org/m-GGUF"}],
+            "engines": [{"engine": "llama.cpp", "tps": "40", "hardware": "RTX 4090"},
+                        {"engine": "MLX", "tps": "90", "hardware": "M5 Max"}],
+            "supported_engines": []}
+
+
+def test_an_engine_with_no_catalog_cell_is_not_offered_for_a_covered_model(tmp_path, monkeypatch):
+    """A measurement says somebody ran it; the table says whether this host can download it."""
+
+    # Given a model the committed table covers with llama.cpp only, and a measurement on MLX too
+    cat = _catalog_file(tmp_path, {"m-no-plan": {"llama.cpp": {"arch": ["cuda"], "quants": [
+        {"repo": "org/m-GGUF", "revision": "main", "path": "m-Q4.gguf", "files": ["m-Q4.gguf"],
+         "size_gb": 4.0, "url": "https://huggingface.co/org/m-GGUF/resolve/main/m-Q4.gguf"}]}}})
+    monkeypatch.setenv("LLGENIE_QUANT_CATALOG", str(cat))
+    monkeypatch.setattr(mp, "_QUANT_CATALOG_CACHE", None, raising=False)
+
+    # When  the engines are ranked for a CUDA host
+    rows = mp.rank_engines(_measured_model(), "cuda")
+
+    # Then  only the engine the table can plan is offered
+    assert [r["engine"] for r in rows] == ["llama.cpp"]
+
+
+def test_a_model_the_catalog_does_not_cover_keeps_its_engines(tmp_path, monkeypatch):
+    """A store synced a step before its catalog must still be served (live resolution)."""
+
+    # Given a table rendered for OTHER models, and the same measured model
+    cat = _catalog_file(tmp_path, {"some-other-model": {"llama.cpp": {"arch": ["cuda"], "quants": []}}})
+    monkeypatch.setenv("LLGENIE_QUANT_CATALOG", str(cat))
+    monkeypatch.setattr(mp, "_QUANT_CATALOG_CACHE", None, raising=False)
+
+    # When  the engines are ranked
+    rows = mp.rank_engines(_measured_model("m-uncatalogued"), "cuda")
+
+    # Then  nothing is refused for a model the table has not been rendered for
+    assert {r["engine"] for r in rows} == {"llama.cpp", "MLX"}
