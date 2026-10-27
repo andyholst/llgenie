@@ -65,7 +65,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	install-prism-cuda install-upstream-cuda install-prism-metal install-upstream-metal \
 	sync-registry check-registry skills-validate engine-list engine-hardware engine-plan engine-check engine-install engine-detect engine-smoke test-engine ci-engine-images build-engine-base build-engines generate-build-engine-params test-engine-image push-engine test-published-engine test-install-published engine-launchers test-built-engine test-uninstalled \
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
-	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues registry-change-report sync-change-issue registry-review-brief registry-sync-review registry-review-publish sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
+	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues engine-skill-scaffold registry-change-report sync-change-issue registry-review-brief registry-sync-review registry-review-publish sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
 	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
@@ -315,6 +315,10 @@ sync-change-issue: ## Open ONE issue stating what a changed vendored registry ch
 	python3 scripts/registry_change_issue.py open $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry engine (the sync job runs this; DRY=1 previews, REPO= picks the repo)
 	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
+engine-skill-scaffold: ## Write skills/engines/<id>/SKILL.md for a registry engine from its registry entry, with every unprovable key left EMPTY (ENGINE=<registry name>, ID=<kebab>, BACKENDS=, DRY=1 previews, FORCE=1 overwrites)
+	python3 scripts/engine_skill_scaffold.py scaffold --engine "$(ENGINE)" \
+		$(if $(ID),--id "$(ID)",) $(if $(BACKENDS),--backends "$(BACKENDS)",) \
+		$(if $(DRY),--dry,) $(if $(FORCE),--force,)
 # ---- registry-sync review (issue #709): a GREEN sync PR -> ONE agent:implement issue --------
 # sync-change-issue (#704) states what a store CHANGED, even when a gate is red. This bot answers
 # the other question, for a store that can LAND: at each VRAM llgenie sells, does the trending list

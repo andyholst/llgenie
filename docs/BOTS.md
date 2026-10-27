@@ -167,7 +167,13 @@ a `reason` and the tracking `issue` — 8 engines are recorded today
 per-engine view into `data/engine-skill-gap.json`). An engine upstream adds with
 no skill and no entry is **new and unresolved**: `make check-engine-skill-gap`
 fails naming it, and the sync opens one tracking issue per new engine, so the gap
-is a linkable work item instead of a log line. `data/engine-skill-gap.json` also
+is a linkable work item instead of a log line. That issue is created **in the bots' queue**: the sync
+labels it `agent:implement` with an explicit `gh issue edit --add-label` after the create and reads the
+label back (a `--label` on create is dropped on the CI token path, #724/#757), and its body names
+`make engine-skill-scaffold ENGINE="<registry name>"` — the target that writes
+`skills/engines/<id>/SKILL.md` from the registry's own entry (engine, repo URL, backends) and leaves
+every upstream fact it cannot prove EMPTY, so `make skills-validate` names the remaining work instead of
+a guessed pin building. `data/engine-skill-gap.json` also
 names the models no engine can offer at all, so a model cannot vanish from the
 list unnoticed. `make skills-validate REGISTRY=data/models.json
 UNSUPPORTED=data/unsupported-engines.json` tolerates the recorded decisions per
