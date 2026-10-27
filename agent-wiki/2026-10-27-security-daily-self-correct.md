@@ -57,7 +57,18 @@ forever. A gate that cannot go green is not a gate.
 - `tests/test_renovate_config.py` — schema, managers, grouping, ignored paths, no automerge, the
   generator task, and a pinned CLI + SHA-pinned actions.
 - `make check-security-scan check-security-bumps check-workflows check-wiring check-docs
-  check-dispatch-forms` green; `make test-unit` green.
+  check-dispatch-forms check-pr-authors check-actions` green; `make test-unit` 4849 passed.
+
+## Why the pin bump is NOT in this PR
+
+The mechanism was proven locally against the real reports: the floors resolve through the real
+`pip-compile` to `certifi 2026.10.23`, `filelock 4.2.4`, `urllib3 2.8.0` — and shipping that here
+turned `ci-images` and `install-published-*` red, because a **fork** PR's token cannot write the
+organisation's packages (`denied: installation not allowed to Write organization package`, #155), so
+the new test-image tag the bumped lockfile needs is never published. The bump therefore belongs to the
+daily run, whose branch is pushed from THIS repository by `BUMP_TOKEN` and whose PR can publish.
+Filed the fork gap as its own issue rather than widening this change; the floors file ships empty and
+`make security-bumps` fills it on the next scheduled (or manually dispatched) run.
 
 ## Status
 

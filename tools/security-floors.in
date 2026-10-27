@@ -4,6 +4,3 @@
 # Every line is the MINIMUM version the scanner says clears the advisories named beside it. The
 # `-c security-floors.in` line in requirements*.in makes pip-compile honour it, so the compiled
 # requirements.txt is still regenerated, never edited.
-certifi>=2026.10.18     # trivy GHSA-6q48-6c7w-9gw2: 2026.7.22 -> 2026.10.18
-filelock>=4.2.1         # trivy CVE-2026-112940: 3.32.5 -> 4.2.1
-urllib3>=2.8.0          # trivy CVE-2026-97687, trivy CVE-2026-97689: 2.7.0 -> 2.8.0

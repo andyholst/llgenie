@@ -6,9 +6,8 @@
 #
 anyio==4.15.1
     # via httpx
-certifi==2026.10.23
+certifi==2026.7.22
     # via
-    #   -c security-floors.in
     #   httpcore
     #   httpx
     #   requests
@@ -16,10 +15,8 @@ charset-normalizer==3.5.1
     # via requests
 click==8.5.0
     # via huggingface-hub
-filelock==4.2.4
-    # via
-    #   -c security-floors.in
-    #   huggingface-hub
+filelock==3.32.5
+    # via huggingface-hub
 fsspec==2026.7.0
     # via huggingface-hub
 gguf==0.19.0
@@ -61,7 +58,5 @@ typing-extensions==4.16.0
     # via
     #   anyio
     #   huggingface-hub
-urllib3==2.8.0
-    # via
-    #   -c security-floors.in
-    #   requests
+urllib3==2.7.0
+    # via requests
