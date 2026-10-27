@@ -2,7 +2,7 @@
 
 Issue: [#738](https://github.com/asimov-agent/llgenie/issues/738) · implements
 [#718](https://github.com/asimov-agent/llgenie/issues/718) · defers
-[#739](https://github.com/asimov-agent/llgenie/issues/739) · PR: #<pr>
+[#739](https://github.com/asimov-agent/llgenie/issues/739) · PR: #740
 
 ## What was wrong
 
