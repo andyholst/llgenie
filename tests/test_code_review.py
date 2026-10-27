@@ -21,6 +21,7 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import code_review as cr  # noqa: E402
+import issue_body  # noqa: E402  (the one issue shape, issue #745)
 
 
 def _tree(tmp_path: Path, workflows: dict[str, str]) -> Path:
@@ -505,6 +506,9 @@ def test_filing_creates_one_issue_per_new_finding_carrying_the_marker_and_the_ev
     assert cr.MARKER.format(key="check/a.yml") in body          # the memory for the next run
     assert "measured: 3 of 7" in body                            # the evidence travels with the claim
     assert "analysis finding, not a fix" in body
+    # And the body is the repository's issue shape, the goal before the file path (issue #745)
+    assert issue_body.missing(body) == [], issue_body.missing(body)
+    assert issue_body.headings(body)[-1] == "Technical"
 
 
 def test_an_already_filed_finding_is_not_filed_again(tmp_path):

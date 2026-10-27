@@ -29,6 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 ALARM = REPO / "scripts" / "queued_run_alarm.py"
 sys.path.insert(0, str(REPO / "scripts"))
 import queued_run_alarm as alarm  # noqa: E402
+import issue_body  # noqa: E402  (the one issue shape, issue #745)
 
 OWNER = "asimov-agent"
 
@@ -189,6 +190,9 @@ def test_a_run_with_no_pr_files_one_deduped_issue_per_label(tmp_path):
     assert len(creates) == 1, creates
     assert "macos-15-intel" in creates[0], creates[0]
     assert not [c for c in log.read_text().splitlines() if c.startswith("api -X POST")]
+
+    # And the filed body is the repository's issue shape, the pasted report as `## Technical`
+    assert issue_body.headings(log.read_text()) == list(issue_body.SECTIONS), log.read_text()
 
     # Given that issue is already open (the marker in its body), a second sweep files nothing
     log2 = gh_stub(tmp_path, RUN, {"111": [job("macos / unit")]}, run_meta=RUN_META_PUSH,

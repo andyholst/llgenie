@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import registry_change_issue as RCI  # noqa: E402
+import issue_body  # noqa: E402  (the one issue shape, issue #745)
 
 
 def _store(utc: str, models: list[dict], engines: dict) -> bytes:
@@ -86,6 +87,10 @@ def test_the_report_names_an_added_model_a_new_engine_and_an_added_contract_key(
     assert "'ROCm'" in body
     assert "#693, #677" in body and "#673/#686" in body
     assert "## Not covered" in body and "#669" in body
+    # And the body is the repository's issue shape: the goal first, the diff as `## Technical`
+    assert issue_body.missing(body) == [], issue_body.missing(body)
+    assert issue_body.headings(body)[-1] == "Technical"
+    assert "`m2` — Model Two (VRAM 8GB)" in issue_body.section_body(body, "Technical")
 
 
 def test_a_second_open_for_the_same_store_updates_instead_of_duplicating(monkeypatch):

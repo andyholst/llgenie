@@ -119,10 +119,16 @@ def test_the_body_states_advisory_package_versions_and_action(tmp_path):
     # When  the issue body is rendered
     body = si.body_for(finding, "https://github.com/o/r/actions/runs/1")
 
-    # Then  every required element is present
+    # Then  every required element is present, in the shape every issue carries (issue #745)
     for fragment in ("CVE-1", "numpy", "1.0", "1.1", "https://github.com/o/r/actions/runs/1",
-                     "Suggested action", "Not covered"):
+                     "## Problem", "## Why it matters", "## How we fix it", "## Benefit",
+                     "## Acceptance criteria", "## Not covered", "## Technical"):
         assert fragment in body, fragment
+
+    # And the sections are in order, with the technical detail last
+    assert [h for h in si.issue_body.headings(body) if h in si.issue_body.SECTIONS] == \
+        list(si.issue_body.SECTIONS)
+    assert si.issue_body.headings(body)[-1] == "Technical"
 
 
 def _calls(log: Path) -> list[list[str]]:

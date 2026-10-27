@@ -28,6 +28,10 @@ import datetime as dt
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import issue_body  # noqa: E402  (the one issue shape, #745)
 
 MARKER = "queued-run-alarm"
 
@@ -183,11 +187,14 @@ def comment_run(repo: str, number: int, run_id: int, body: str, dry: bool = Fals
     return ""
 
 
-def file_label_issue(repo: str, label: str, body: str, dry: bool = False) -> str:
+def file_label_issue(repo: str, label: str, body: str, dry: bool = False,
+                     rows: list[dict] | None = None, minutes: float = 0.0) -> str:
     """ONE open issue per stuck runner LABEL, for the runs no PR tracks; "" when filed or open.
 
     A schedule or `push` run has no PR to comment on, and a missing runner is a property of the
-    LABEL, not of one run — so the fallback is one deduped issue per label, never one per run.
+    LABEL, not of one run — so the fallback is one deduped issue per label, never one per run. The
+    body is the shape every issue in this repository carries (issue #745); the raw report is its
+    `## Technical` detail.
     """
     try:
         found = json.loads(_gh(["issue", "list", "--repo", repo, "--state", "open",
@@ -199,9 +206,43 @@ def file_label_issue(repo: str, label: str, body: str, dry: bool = False) -> str
         return ""
     if dry:
         return ""
+    count = len(rows) if rows else 0
+    text = issue_body.render(
+        problem=(
+            f"No runner matches the label `{label}`: "
+            f"{f'{count} job(s) have' if count else 'jobs have'} been queued longer than "
+            f"{minutes:.0f} minutes with no machine to pick them up, in run(s) no pull request "
+            "tracks."
+        ),
+        why=(
+            "GitHub does not fail a job whose runner never arrives — it stays `queued` and the run "
+            "never concludes, so every pull request's checks stay pending and the work looks slow "
+            "instead of stuck (issue #254)."
+        ),
+        how=[
+            "Bring a runner back for that label: a self-hosted runner is offline or unregistered, "
+            "or the account's hosted-runner minutes/spending limit for that OS is exhausted.",
+            "Re-dispatch the affected run once a runner exists: a queued job does not start by "
+            "itself.",
+            "If the label is retired, remove it from the workflow that asks for it.",
+        ],
+        benefit=(
+            "A missing runner becomes one filed work item naming the label that is missing, instead "
+            "of a silent pile of pending checks that nobody can distinguish from a slow queue."
+        ),
+        acceptance=[
+            f"a runner matching `{label}` picks up new runs again",
+            "the runs named in the report below conclude instead of staying queued",
+        ],
+        technical=[
+            f"label: `{label}`",
+            f"threshold: queued longer than {minutes:.0f} minutes",
+            f"```\n{body}\n```",
+        ],
+    )
     title = f"ci: no runner matches `{label}` — jobs are queued with no machine to run them"
     r = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title,
-                        "--body", f"{body}\n\n_{label_marker(label)}_"],
+                        "--body", f"{text}\n\n_{label_marker(label)}_"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         return f"issue create for `{label}` failed ({r.returncode}): {r.stderr.strip()}"
@@ -243,7 +284,7 @@ def deliver(repo: str, rows: list[dict], minutes: float, dry: bool = False) -> l
         body = (f"{len(label_rows)} job(s) have been queued on `{label}` for longer than "
                 f"{minutes:.0f} minutes, in run(s) no pull request tracks:\n\n"
                 f"```\n{render(label_rows, minutes)}\n```")
-        why = file_label_issue(repo, label, body, dry=dry)
+        why = file_label_issue(repo, label, body, dry=dry, rows=label_rows, minutes=minutes)
         if why:
             failures.append(why)
     return failures

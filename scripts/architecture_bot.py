@@ -42,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import issue_body  # the one issue shape every producer renders through (issue #745)
 import module_name_guard  # the shared rename rule (#573): the same check `make test-unit` runs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -314,27 +315,45 @@ def _title(stamp: str) -> str:
 
 
 def render_issue(d: dict, stamp: str, head: str, doc: str) -> str:
+    """The refresh issue: the shape every issue in this repository carries (issue #745)."""
     paths = ", ".join(f"`{p.split(chr(9))[-1]}`" for p in d["paths"][:10]) or "(the doc has no history)"
-    return "\n".join([
-        f"<!-- architecture-bot:{stamp} -->",
-        "",
-        f"Issue: `{doc}` no longer matches the tree at `{head}`. Its last update was "
-        f"`{d['doc_sha'][:12] or 'none'}` and {len(d['commits'])} commit(s) plus "
-        f"{len(d['paths'])} changed path(s) have landed since, so a reviewer reconstructs "
-        "the shipped path from source.",
-        "",
-        "Fix: `make architecture-bot-brief` derived the surface and the drift from real "
-        "`git` state, `make architecture-bot-doc` rewrote the doc inside the agent image "
-        f"(only `{doc}` is writable), and the deterministic publish step commits that one "
-        "file on its own branch and opens the linked PR.",
-        "",
-        "Benefit: the architecture map tracks the code on a 6-hour cadence instead of "
-        "ageing silently, and every refresh is reviewed like any other change.",
-        "",
-        f"Technical: drift = `git diff {d['doc_sha'] or 'HEAD'}..HEAD` excluding the doc; "
-        f"changed paths include {paths}. Branch `{BRANCH_PREFIX}{stamp}`, commit authored "
-        f"`{AUTHOR_NAME} <{AUTHOR_EMAIL}>`.",
-    ]) + "\n"
+    return issue_body.render(
+        marker=f"<!-- architecture-bot:{stamp} -->",
+        problem=(
+            f"`{doc}` no longer matches the tree at `{head}`. Its last update was "
+            f"`{d['doc_sha'][:12] or 'none'}` and {len(d['commits'])} commit(s) plus "
+            f"{len(d['paths'])} changed path(s) have landed since, so a reviewer reconstructs the "
+            "shipped path from source."
+        ),
+        why=(
+            "The architecture doc is the map a contributor and an agent read before changing "
+            "anything: once it lags the code it stops being a summary and becomes a second, wrong "
+            "source of truth that is more convincing than no doc at all."
+        ),
+        how=[
+            "`make architecture-bot-brief` derives the surface and the drift from real `git` state.",
+            "`make architecture-bot-doc` rewrites the doc inside the agent image, where only the "
+            f"doc (`{doc}`) is writable.",
+            "The deterministic publish step commits that one file on its own branch and opens the "
+            "linked PR — the refresh is reviewed like any other change.",
+        ],
+        benefit=(
+            "The architecture map tracks the code on a 6-hour cadence instead of ageing silently, "
+            "and every refresh is a one-file PR a reviewer can check against the drift it names."
+        ),
+        acceptance=[
+            f"`{doc}` describes the tree at `{head}` after the refresh",
+            "the refresh commit touches no file other than the doc",
+            "the PR that carries it names this issue and `closes` it",
+        ],
+        technical=[
+            f"drift = `git diff {d['doc_sha'] or 'HEAD'}..HEAD` excluding the doc",
+            f"changed paths include {paths}",
+            f"branch `{BRANCH_PREFIX}{stamp}`, commit authored `{AUTHOR_NAME} <{AUTHOR_EMAIL}>`",
+            "`make architecture-bot-brief` -> `make architecture-bot-doc` (Hermes, agent image) -> "
+            "`make architecture-bot-publish`; the bot never merges and never pushes to `main`.",
+        ],
+    ) + "\n"
 
 
 def render_pr(issue: int, d: dict, stamp: str, head: str, doc: str, branch: str) -> str:
@@ -479,15 +498,15 @@ def publish(root: Path, repo: str, doc: str = DOC_DEFAULT, stamp: str = "",
     d = drift(root, doc)
     head = head_sha(root)
     branch = f"{BRANCH_PREFIX}{stamp}"
-    issue_body = render_issue(d, stamp, head, doc)
+    issue_text = render_issue(d, stamp, head, doc)
     pr_body = render_pr(0, d, stamp, head, doc, branch)
     result = {"action": "would-publish", "doc": doc, "branch": branch, "head": head,
-              "issue_body": issue_body, "pr_body": pr_body}
+              "issue_body": issue_text, "pr_body": pr_body}
     if dry:
         return result
 
     issue_url = _gh(gh, "issue", "create", "--repo", repo, "--title", _title(stamp),
-                    "--body", issue_body)
+                    "--body", issue_text)
     issue_num = int(issue_url.rstrip("/").rsplit("/", 1)[-1])
     pr_body = render_pr(issue_num, d, stamp, head, doc, branch)
 
@@ -497,7 +516,7 @@ def publish(root: Path, repo: str, doc: str = DOC_DEFAULT, stamp: str = "",
     # producer, and a name it cannot resolve is a violation, not a shorthand.
     git(root, "config", "user.name", "Asimov Agent")
     git(root, "config", "user.email", "support@docondee.com")
-    git(root, "commit", "-m", _title(stamp), "-m", issue_body)
+    git(root, "commit", "-m", _title(stamp), "-m", issue_text)
     commit = git(root, "rev-parse", "HEAD").strip()
     git(root, "push", "-u", "origin", branch)
     # A GitHub 502/504 here means the answer was lost, not that the PR was refused: retry, then look
@@ -519,7 +538,7 @@ def publish(root: Path, repo: str, doc: str = DOC_DEFAULT, stamp: str = "",
 
     result = {"action": "published", "doc": doc, "branch": branch, "commit": commit,
               "issue": issue_num, "issue_url": issue_url, "pr_url": pr_url,
-              "head": head, "issue_body": issue_body, "pr_body": pr_body}
+              "head": head, "issue_body": issue_text, "pr_body": pr_body}
     return result
 
 

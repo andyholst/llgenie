@@ -38,6 +38,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import engine_skills as es  # noqa: E402
+from issue_body import render as render_body  # noqa: E402  (the one issue shape, #745; the
+#   local ``issue_body()`` keeps its published name, so the renderer is imported under another one)
 import model_engine_pick as mp  # noqa: E402
 
 GAP_FILE = REPO / "data" / "engine-skill-gap.json"
@@ -233,38 +235,54 @@ def issue_title(name: str) -> str:
 
 
 def issue_body(name: str, registry: dict, g: dict) -> str:
+    """The tracking issue: the shape every issue in this repository carries (issue #745)."""
     spec = (registry.get("engines") or {}).get(name) or {}
     models = g["engines"].get(name, {}).get("models") or []
     only = [m["id"] for m in g["models_never_offered"] if name in m["engines"]]
-    return "\n".join([
-        f"`registry-sync` (#179) carries the engine `{name}` in `data/models.json`, but llgenie ships no "
-        f"`skills/engines/<id>/SKILL.md`, no `containers/engines/params/<id>.json` and no image for it.",
-        "",
-        "## Evidence",
-        "",
-        f"- registry engine: `{name}` (backend {spec.get('backend') or '?'})",
-        f"- upstream: {spec.get('url') or 'unknown'}",
-        f"- registry note: {spec.get('note') or 'none'}",
-        f"- models that list this engine: {', '.join(f'`{m}`' for m in models) or 'none'}",
-        f"- models whose ONLY engines are unskilled (they can never be offered): "
-        f"{', '.join(f'`{m}`' for m in only) or 'none'}",
-        "",
-        "## Why it matters",
-        "",
-        "`rank_engines` drops an engine with no image, so a model whose only engines are unskilled is "
-        "silently absent from the trend offer instead of being visible work.",
-        "",
-        "## What to do (one of)",
-        "",
-        f"1. Add `skills/engines/<kebab>/SKILL.md` for `{name}` (README + build docs at a pinned sha), then "
-        "`make generate-engine-params ENGINE=<kebab>`, commit the Dockerfile/params, and let CI build the "
-        "engine image (`engine-image-*`).",
-        "2. Or record the deliberate decision in `data/unsupported-engines.json` "
-        "(`decision`, `decided`, `reason`) so the omission is a dated decision, not an accident.",
-        "",
-        f"Opened automatically by the weekly registry sync for #229; closed when the skill ships or the "
-        f"decision is recorded.",
-    ])
+    return render_body(
+        problem=(
+            f"`registry-sync` (#179) carries the engine `{name}` in `data/models.json`, but llgenie "
+            f"ships no `skills/engines/<id>/SKILL.md`, no `containers/engines/params/<id>.json` and "
+            f"no image for it, so the engine cannot be offered for any model that lists it."
+        ),
+        why=(
+            "`rank_engines` drops an engine with no image, and a model whose ONLY engines are "
+            "unskilled is then silently absent from the trend offer: the model looks unavailable "
+            "instead of looking like work. That silence is why the omission has to become a dated "
+            "decision or a shipped skill, not a gap nobody sees."
+        ),
+        how=[
+            f"Ship the skill: add `skills/engines/<kebab>/SKILL.md` for `{name}` (README + build "
+            "docs at a pinned sha), run `make generate-engine-params ENGINE=<kebab>`, commit the "
+            "Dockerfile and params, and let CI build the engine image (`engine-image-*`).",
+            "Or record the deliberate decision in `data/unsupported-engines.json` (`decision`, "
+            "`decided`, `reason`) so the omission is a decision with a date and a reason.",
+            "Either way the registry stays as upstream published it: llgenie never edits the "
+            "vendored store to make a gate pass.",
+        ],
+        benefit=(
+            f"`{name}` stops being an unresolved gap: either it becomes selectable for the models "
+            "that list it, or the reason it is not is written down where the next sync reads it."
+        ),
+        acceptance=[
+            f"`make check-engine-skill-gap` passes with `{name}` either shipped as a skill or "
+            "recorded in `data/unsupported-engines.json`",
+            "`make skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json` "
+            "is green",
+            "the models whose only engines are unskilled are offered (or the decision names why not)",
+        ],
+        technical=[
+            f"registry engine: `{name}` (backend `{spec.get('backend') or '?'}`)",
+            f"upstream: {spec.get('url') or 'unknown'}",
+            f"registry note: {spec.get('note') or 'none'}",
+            "models that list this engine: "
+            + (", ".join(f"`{m}`" for m in models) or "none"),
+            "models whose ONLY engines are unskilled (they can never be offered): "
+            + (", ".join(f"`{m}`" for m in only) or "none"),
+            "opened automatically by the weekly registry sync for #229; closed when the skill ships "
+            "or the decision is recorded.",
+        ],
+    )
 
 
 def _gh(gh: str, args: list[str]) -> str:

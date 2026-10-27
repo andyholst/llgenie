@@ -62,6 +62,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bot_claims  # the shared protocol (issue #279)
 import fix_bot_sweep  # the eligibility rules we REUSE, never duplicate (issue #222)
+from issue_body import render as render_body  # the one issue shape (issue #745); the local
+#   ``issue_body()`` below keeps its published name, so the renderer is imported under another one
 import resolve_run_pr  # the run -> PR resolver auto-merge uses (#509), reused, never rewritten
 
 #: This bot, as the claim marker names it (scripts/bot_claims.py). The name is the workflow's bot
@@ -380,36 +382,62 @@ def _pr_from_run(repo: str, run: dict, run_id: int, rest: dict | None = None) ->
 
 
 def issue_body(run: dict, job: dict, log_tail: str, marker: str) -> str:
-    """The issue body: the failing job, its step, the log tail, and the dedupe marker."""
+    """The issue body: the shape every issue in this repository carries (issue #745)."""
     step = ""
     for s in (job.get("steps") or []):
         if (s.get("conclusion") or "").lower() in ("failure", "cancelled", "timed_out"):
             step = s.get("name") or ""
             break
-    lines = [
-        f"A CI run failed and no PR this bot can repair was found for it, so this issue tracks "
-        f"the failure as a work item for the issue-bot.",
-        "",
-        f"- **workflow:** `{run.get('workflowName') or '?'}`",
-        f"- **run:** `{run.get('displayTitle') or '?'}`",
-        f"- **event:** `{run.get('event') or '?'}`",
-        f"- **head sha:** `{(run.get('headSha') or '')[:12]}`",
-        f"- **failing job:** `{job.get('name') or '?'}`",
-        f"- **failing step:** `{step or '(none named)'}`",
-        "",
-        "Failing log tail:",
-        "",
-        "```",
-        log_tail,
-        "```",
-        "",
-        "Filed by the run-failure reactor (`scripts/run_failure_reactor.py`). The issue-bot owns "
-        "the implementation; the fix-bot owns PR repair. Nothing was changed by the run that "
-        "filed this.",
-        "",
-        marker,
-    ]
-    return "\n".join(lines)
+    workflow = run.get("workflowName") or "?"
+    job_name = job.get("name") or "?"
+    return render_body(
+        marker=marker,
+        problem=(
+            f"The `{workflow}` run `{run.get('displayTitle') or '?'}` (event "
+            f"`{run.get('event') or '?'}`, head `{(run.get('headSha') or '')[:12]}`) failed in job "
+            f"`{job_name}`, step `{step or '(none named)'}`, and no pull request this bot can repair "
+            "was found for it."
+        ),
+        why=(
+            "A failed run that no bot repairs and nobody tracks is work that quietly stops being "
+            "done: `main` stays red, or a bot's scheduled job stops producing its artifact, and the "
+            "next reader has to reconstruct the failure from a log that has since expired."
+        ),
+        how=[
+            "Read the failing log tail in `## Technical` and reproduce the failure with the make "
+            "target that step ran (`make <target>`), never by re-running the workflow blind.",
+            "Fix the cause in the repository, so the gate is green for the next run instead of this "
+            "one being retried.",
+            "Reference this issue from the PR (`closes #<n>`) so the failure and its fix stay one "
+            "work item.",
+        ],
+        benefit=(
+            "Every failed run has an owner and a work item: the failure is reproduced from its own "
+            "log instead of guessed at, and the class of failure is fixed rather than re-run."
+        ),
+        acceptance=[
+            "the failing make target is green locally on this host, with its real output recorded",
+            "the PR that fixes it is green in CI on the same job that failed",
+            "`closes #<this issue>` is in that PR, so merging it closes the failure",
+        ],
+        technical=[
+            f"**workflow:** `{workflow}`",
+            f"**run:** `{run.get('displayTitle') or '?'}`",
+            f"**event:** `{run.get('event') or '?'}`",
+            f"**head sha:** `{(run.get('headSha') or '')[:12]}`",
+            f"**failing job:** `{job_name}`",
+            f"**failing step:** `{step or '(none named)'}`",
+            "Failing log tail (`gh run view <id> --log-failed`):",
+            "",
+            "```",
+            log_tail,
+            "```",
+            "",
+            "Filed by the run-failure reactor (`scripts/run_failure_reactor.py`). The issue-bot owns "
+            "the implementation; the fix-bot owns PR repair. Nothing was changed by the run that "
+            "filed this. The marker on line 1 is the dedupe key (`workflow/job@sha`).",
+        ],
+    )
 
 
 def filed(repo: str, marker: str) -> bool:

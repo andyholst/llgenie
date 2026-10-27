@@ -267,6 +267,47 @@ git merge-base --is-ancestor origin/main HEAD 2>/dev/null \
      the owner PAT for exactly that reason — a merge made with the job token starts
      no workflows, so that run would never happen.
 
+## Every issue carries the problem, why, the fix and the benefit — then the technical solution (MANDATORY, durable)
+
+An issue is the root of the pipeline — issue → feature branch → OpenSpec change → code → PR →
+`closes #n` — and it is the text an implementer starts from. A body that lists machine fields is
+readable only by the run that filed it, so **every issue carries these six sections, in this order**:
+
+```markdown
+## Problem              what is wrong, observed — the measured symptom, never the ticket title
+## Why it matters       the consequence of leaving it: what breaks, what it costs, what it blocks
+## How we fix it        numbered, plain language — what changes, and why that addresses the cause
+## Benefit              what the reader gets once it is fixed; what stops happening
+## Acceptance criteria  one `- [ ]` item per provable outcome — what "done" looks like, tickable
+## Technical            LAST, and the only technical section: files, targets, tests, gates, measured numbers
+```
+
+`## Not covered` is optional and, when present, sits between `## Acceptance criteria` and
+`## Technical`. Each item in it names the issue it was filed as — out-of-scope work is its own linked
+issue, never prose.
+
+- **One renderer, never a hand-built body.** `scripts/issue_body.py::render` is the ONLY place those
+  headings are spelled. Every producer that files an issue renders through it:
+  `security_issues.body_for`, `code_review.issue_body`, `run_failure_reactor.issue_body`,
+  `engine_skill_gap.issue_body`, `registry_change_issue.render`, `architecture_bot.render_issue`,
+  `queued_run_alarm.file_label_issue`. A change that adds a producer adds it to
+  `issue_body.PRODUCERS` in the same change.
+- **The dedupe marker is the body's first line, unchanged.** Every producer's idempotence reads its
+  marker back (`security_issues.MARKER_RE`, `filed()` in `code_review`/`run_failure_reactor`,
+  `registry_change_issue`'s marker search, `queued_run_alarm.label_marker`). Restructuring a body
+  must never cost a producer its memory of what it filed.
+- **The mapping to a PR body is fixed**, so the two cannot drift: issue `Problem` ↔ PR `Issue:`,
+  `How we fix it` ↔ `Fix:`, `Benefit` ↔ `Benefit:`, `Technical` ↔ `Technical:`. The PR body has its
+  own gate (below); the issue body has `make check-issue-bodies`.
+- **The agent legs enforce it on issues no script wrote.** `issue-triage`'s `REFINED:` block and
+  `issue-refiner`'s `RESTATED:` block carry the same six sections — those two legs are the only
+  mechanism that reaches a human-written issue.
+- **`make check-issue-bodies` is the gate** (`scripts/check_issue_body.py`, inside `ci-unit`, and
+  classified in `scripts/issue_bot_gates.py`): it fails on a producer that hand-builds a body, a rendered body
+  missing a section / out of order / with `## Technical` anywhere but last, `## Acceptance criteria`
+  with no `- [ ]` item, an `AGENTS.md` that has lost this section, and an issue skill that no longer
+  states the shape. `make issue-bodies-report` prints what it reads.
+
 ## Every PR body and commit message carries the issue, the fix and the benefit (MANDATORY, durable)
 
 A commit and a PR are read on their own. A reviewer, a `git log`, a `git bisect` must learn from

@@ -1598,6 +1598,27 @@ The in-repo producers follow the same rule: `engine-bump.yml`, `issue-bot.yml` a
 build their commit message (and PR body) as a subject plus the `Issue:`/`Fix:`/`Benefit:`/`Technical:`
 body, so a bot's commit reads like a human's.
 
+### Every issue body carries the goal, then the technical solution (issue #745)
+
+An issue is the root of the pipeline — issue → branch → OpenSpec change → code → PR → `closes #n` —
+so its body is read by someone who was not in the run that filed it. Every issue this repository
+files carries six sections, in this order: `## Problem`, `## Why it matters`, `## How we fix it`,
+`## Benefit`, `## Acceptance criteria` (each a `- [ ]` item), then `## Technical` last. `## Not
+covered` is optional and sits between the acceptance criteria and `Technical`.
+
+One renderer spells them: `scripts/issue_body.py::render`. Every producer that files an issue renders
+through it — `security_issues`, `code_review`, `run_failure_reactor`, `engine_skill_gap`,
+`registry_change_issue`, `architecture_bot`, `queued_run_alarm` — and each keeps its own dedupe marker
+as the body's first line, so a re-run updates the issue instead of filing a duplicate. The
+`issue-triage` and `issue-refiner` legs restate a human-written issue in the same six sections.
+
+`make check-issue-bodies` (`scripts/check_issue_body.py`, in the `ci-unit` job and classified in
+`scripts/issue_bot_gates.py`) is the gate: it fails on a producer that hand-builds a body, on a rendered body
+missing a section / out of order / with `## Technical` anywhere but last, on `## Acceptance criteria`
+with no `- [ ]` item, on an `AGENTS.md` that lost the section, and on an issue skill that no longer
+states the shape. `make issue-bodies-report` prints every producer, whether it renders through the
+seam, and the verdict.
+
 ### A PR's commits are authored by Andy Holst or Asimov Agent — no one else (issue #345)
 
 A commit's author is the attribution every reader trusts — `git log`, `git blame` and `git bisect`
