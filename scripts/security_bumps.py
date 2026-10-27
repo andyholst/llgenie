@@ -359,9 +359,9 @@ def check(root: Path = REPO) -> int:
         for item in problems:
             print(f"  - {item}")
         return 1
+    named = ", ".join(f"{p}>={v}" for p, v in fl.items()) or "none"
     print(f"[security-bumps] OK: {len(fl)} floor line(s) in {FLOORS}, included by both .in files, "
-          f"every compiled pin at or above its floor ({', '.join(f'{p}>={v}' for p, v in fl.items())}"
-          f"{' — ' if fl else ''}{'none' if not fl else ''})")
+          f"every compiled pin at or above its floor ({named})")
     return 0
 
 

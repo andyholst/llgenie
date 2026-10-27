@@ -10,4 +10,4 @@
 - [x] 8. Make targets `security-bumps-plan`, `security-bumps`, `check-security-bumps`; `.PHONY`, gate in `ci-unit`, classified in `scripts/issue_bot_gates.py`
 - [x] 9. `tests/test_security_bumps.py`, `tests/test_renovate_config.py`, and the updated `tests/test_security_scan.py` all green under `make test-unit`
 - [x] 10. `docs/SCANS.md` + `README.md` docs table + `agent-wiki/2026-10-27-security-daily-self-correct.md` + `CHANGES.md` row
-- [ ] 11. `make check-wiring check-docs check-workflows check-security-scan check-security-bumps lint` green and `make openspec-validate NAME=security-daily-self-correct` passes
+- [x] 11. `make check-wiring check-docs check-workflows check-security-scan check-security-bumps lint` green and `make openspec-validate NAME=security-daily-self-correct` passes
