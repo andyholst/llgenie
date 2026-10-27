@@ -11,6 +11,7 @@ NO-SKIP POLICY: a missing prerequisite is a LOUD FAILURE, never a skip.
 from __future__ import annotations
 
 import json
+import stat
 import sys
 from pathlib import Path
 
@@ -175,3 +176,72 @@ def test_the_workflow_uses_the_digests_and_a_manual_form():
     refs = re.findall(r"uses:\s+(\S+)", text)
     assert refs, "the workflow uses no action at all"
     assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs), refs
+
+
+def _docker_stub(tmp_path: Path, monkeypatch, *, pull_ok: bool, build_ok: bool = True,
+                 inspect_ok: bool = False) -> Path:
+    """A real executable standing in for `docker`, so which branch the code takes is observable."""
+    log = tmp_path / "docker.log"
+    stub = tmp_path / "docker"
+    stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "open(os.environ['DOCKER_STUB_LOG'], 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "which = sys.argv[1]\n"
+        "ok = os.environ.get('DOCKER_STUB_' + which.upper(), '0') == '1'\n"
+        "sys.exit(0 if ok else 1)\n",
+        encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("DOCKER_STUB_LOG", str(log))
+    monkeypatch.setenv("DOCKER_STUB_INSPECT", "1" if inspect_ok else "0")
+    monkeypatch.setenv("DOCKER_STUB_PULL", "1" if pull_ok else "0")
+    monkeypatch.setenv("DOCKER_STUB_BUILD", "1" if build_ok else "0")
+    monkeypatch.setattr(ss, "RUNTIME", str(stub))
+    return log
+
+
+def test_a_published_image_is_pulled_and_used(tmp_path, monkeypatch):
+    """The normal path: the ref is inspectable, so nothing is built."""
+
+    # Given a docker whose inspect and pull succeed
+    log = _docker_stub(tmp_path, monkeypatch, pull_ok=True, inspect_ok=True)
+
+    # When  the image is resolved
+    ref = ss.ensure_image("trivy")
+
+    # Then  the ref is the digests file's and no build ran
+    assert ref == ss.image_ref("trivy")
+    assert not [l for l in log.read_text().splitlines() if '"build"' in l]
+
+
+def test_an_unpublished_image_is_built_from_the_same_dockerfile(tmp_path, monkeypatch):
+    """Before the first publish (and on a fork run) the SAME Dockerfile is built, never skipped."""
+
+    # Given a docker whose pull fails but whose build succeeds
+    log = _docker_stub(tmp_path, monkeypatch, pull_ok=False, build_ok=True)
+
+    # When  the image is resolved
+    ref = ss.ensure_image("trivy")
+
+    # Then  it was built from containers/scanners/trivy and tagged with the requested ref
+    builds = [json.loads(l) for l in log.read_text().splitlines() if '"build"' in l]
+    assert len(builds) == 1
+    assert builds[0][-1].endswith("containers/scanners/trivy")
+    assert ref in builds[0]
+    assert ref == ss.image_ref("trivy")
+
+
+def test_a_failed_build_is_loud(tmp_path, monkeypatch):
+    """A scanner that cannot be obtained at all fails the run; it is never a silent skip."""
+
+    # Given a docker whose pull AND build fail
+    _docker_stub(tmp_path, monkeypatch, pull_ok=False, build_ok=False)
+
+    # When  the image is resolved
+    try:
+        ss.ensure_image("trivy")
+    except SystemExit as exc:
+        # Then  the run refuses, naming the scanner
+        assert "cannot build trivy" in str(exc)
+    else:
+        raise AssertionError("a scanner that could not be obtained was accepted")

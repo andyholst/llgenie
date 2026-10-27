@@ -14,6 +14,12 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
 - `make check-wiring` → OK, 239 targets, CI reaches 93; `check-workflows` green (every `${{ }}` in
   the new file parses); `check-docs` green after `docs/SCANS.md` was linked from `README.md`.
 
+- **CI caught a real defect the local run could not**: the first `pull_request` run of the scan job
+  died on `denied` pulling `llgenie/trivy:<hash>` — the image is published on a push to `main` only,
+  so a PR run has no tag to pull. `ensure_image()` now pulls when published and otherwise builds the
+  SAME Dockerfile and tags it with the same ref (three tests cover pull / build / loud failure), and
+  the SARIF step no longer fails the job when no file was produced.
+
 ## Decisions
 
 - **One seam.** `scripts/security_scan.py` is the only place a scanner is invoked; the workflow,

@@ -34,6 +34,14 @@ sets live in `data/security-policy.json`, never in a workflow literal.
 `require_fix: true` means an advisory with no fixed version is **recorded, never blocking** — it is
 work nobody can do today, and #716 decides which recorded findings become issues.
 
+## Where the scanner image comes from
+
+The run uses the ref `containers/scanners/digests.json` names. It is **pulled** when it is published.
+A `pull_request` run before the first publish — and any run whose token cannot read the packages —
+does not skip the scan: the **same Dockerfile** the publish job builds (digest-pinned base, exact
+versions) is built locally and tagged with the ref the run asked for, and the log says which path was
+taken. A build that fails fails the run, loudly; there is no third path and no silent skip.
+
 ## Outputs
 
 - **CycloneDX SBOM** — `security-reports/sbom.cdx.json`, written by Syft from the Grype image;
