@@ -86,7 +86,8 @@ def component_of(package: str, source: str) -> str:
     SAST findings are code by definition. A package named in the container images is a container
     one; anything else the Python scanners report is a Python dependency.
     """
-    if source == "semgrep":
+    if source not in ("trivy", "grype"):
+        # anything that is not a CVE scanner over packages is a rule over source
         return "component:code"
     container_markers = ("openssl", "libc", "wolfi", "debian", "ubuntu", "libssl", "zlib", "glibc")
     if any(marker in package.lower() for marker in container_markers):
@@ -147,8 +148,8 @@ def body_for(finding: Finding, run_url: str = "") -> str:
         "",
         "- Transitive dependencies this advisory pulls in are separate findings: each gets its own "
         "issue with its own advisory id.",
-        "- A scanner that is not configured in this run (Snyk without `SNYK_TOKEN`) reports the "
-        "reason in `security-reports/snyk.json`; it is not a clean result for this package.",
+        "- A scanner that could not run (its report is absent) is not a clean result for this "
+        "package: `make security-verdict` refuses instead of passing.",
     ])
 
 
@@ -244,7 +245,7 @@ def check() -> int:
     if "auto-fixable" not in LABELS:
         problems.append("LABELS has no `auto-fixable`: the remediation bot has nothing to select")
     # The marker is the idempotency key: it must round-trip through MARKER_RE.
-    for source, advisory, package in (("trivy", "CVE-1", "numpy"), ("semgrep", "rules.x", "a/b.py")):
+    for source, advisory, package in (("trivy", "CVE-1", "numpy"), ("grype", "GHSA-1", "openssl")):
         text = MARKER.format(source=source, advisory=advisory, package=package)
         m = MARKER_RE.search(text)
         if not m or (m.group(1), m.group(2), m.group(3)) != (source, advisory, package):

@@ -24,29 +24,27 @@ Then   it is `<registry>/llgenie/<tool>:<content hash>` from that file's recorde
 - **Test:** `tests/test_security_scan.py::test_the_policy_and_digests_are_sane` (plus
   `make scanner-ref TOOL=trivy`)
 
-### Requirement: A default scan needs no account, and Snyk is opt-in
+### Requirement: No scanner needs an account or a secret
 
-The default sweep MUST be the scanners that need no token and no third-party service — Trivy,
-Syft/Grype and Semgrep. Snyk MUST NOT be part of it: it is a SaaS product, so it runs only when
-asked for explicitly, and without `SNYK_TOKEN` it records `skipped` with the reason and says so in the
-log rather than passing silently.
+The stack SHALL be local and token-free: Trivy, Syft, Grype and Semgrep, each from its pinned
+image. No scan may depend on a repository secret, and no finding may be skipped because a
+credential was absent.
 
-#### Scenario: the default sweep is local-only
+WHEN a scan runs on any branch of any fork,
+THEN every scanner runs — none is skipped for a missing token.
 
-Given `scripts/security_scan.py`,
-When   its tool sets are read,
-Then   the default is `trivy, grype, semgrep` and `snyk` is only in the opt-in set.
+#### Scenario: the tool set is local and complete
+Given the shipped tool set,
+When   the scan targets are listed,
+Then   they are `syft`, `trivy`, `grype` and `semgrep`, and none needs a token — Syft runs
+       through the Grype image, so only the three CVE/SAST scanners carry an image of their own.
+- **Test:** `tests/test_security_scan.py::test_the_stack_needs_no_account_and_no_secret`
 
-- **Test:** `tests/test_security_scan.py::test_the_default_sweep_needs_no_account`
-
-#### Scenario: Snyk without a token is a recorded skip
-
-Given no `SNYK_TOKEN` in the environment,
-When   `make security-scan TOOL=snyk` runs,
-Then   it exits 0, writes `{"skipped": true, "reason": …}` into `security-reports/snyk.json`, and
-       prints that the tool did not run.
-
-- **Test:** `tests/test_security_scan.py::test_snyk_is_opt_in_and_loud_without_a_token`
+#### Scenario: an unknown tool is refused
+Given a tool id that is not in the set,
+When   `make security-scan TOOL=<id>` runs,
+Then   it exits non-zero naming the known ids, instead of silently scanning nothing.
+- **Test:** `tests/test_security_scan.py::test_an_unknown_tool_is_refused`
 
 ### Requirement: The pinned image is obtained, never skipped
 

@@ -1,4 +1,4 @@
-# Scans — Trivy, Grype, Semgrep and Snyk from their pinned images
+# Scans — Trivy, Syft, Grype and Semgrep from their pinned images
 
 The scan pipeline is `.github/workflows/security-scan.yml`; every scanner it runs comes from
 [`docs/SCANNERS.md`](SCANNERS.md)'s immutable image, and the one place a scanner is invoked is
@@ -58,9 +58,9 @@ would leave root-owned files in the tree (issue #433).
   uploaded as the `security-reports` artifact (30-day retention) together with every scanner report.
 - **SARIF** — `security-reports/trivy.sarif`, uploaded to the Security tab with
   `github/codeql-action/upload-sarif` (pinned by SHA), category `trivy`.
-- **Reports** — `security-reports/trivy.json`, `grype.json`, `semgrep.json`, `snyk.json`.
-- **Snyk without a token is LOUD**: the step prints `SKIP snyk: SNYK_TOKEN is not set`, writes the
-  reason into `snyk.json`, and never treats it as a pass.
+- **Reports** — `security-reports/sbom.cdx.json`, `trivy.json`, `grype.json`, `semgrep.json`.
+- **No scanner takes a secret.** Trivy, Syft, Grype and Semgrep run from their pinned images, so
+  no scan is ever skipped for a missing credential (Snyk, removed, was the exception).
 
 ## Targets
 
@@ -68,7 +68,7 @@ would leave root-owned files in the tree (issue #433).
 |---|---|
 | `make sbom` | Syft → `security-reports/sbom.cdx.json` |
 | `make security-scan TOOL=<id>` | one scanner from its pinned image (Grype needs `make sbom` first) |
-| `make security-scan-all` | SBOM, then Trivy, Grype, Semgrep, Snyk in that order |
+| `make security-scan-all` | Syft SBOM, then Trivy, Grype, Semgrep |
 | `make security-verdict MODE=full\|pr` | apply the policy to the reports; the run's exit code |
 | `make check-security-scan` | **The gate** (inside `make ci-unit`): empty/unknown policy severities, `pr_fail_on ⊄ fail_on`, or a scanner missing from `digests.json` fails |
 

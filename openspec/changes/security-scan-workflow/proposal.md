@@ -14,9 +14,9 @@ of what "green" means.
 ## What Changes
 
 - **`scripts/security_scan.py`** — the one place a scanner is invoked: `sbom` (Syft → CycloneDX),
-  `scan <tool>` (trivy / grype / semgrep / snyk, each from the ref `containers/scanners/digests.json`
-  names), `all`, `verdict [--mode full|pr]`, `check`. A missing `SNYK_TOKEN` is a LOUD recorded skip,
-  never a pass; an unparseable report fails instead of reading as zero findings.
+  `scan <tool>` (syft / trivy / grype / semgrep, each from the ref `containers/scanners/digests.json`
+  names), `all`, `verdict [--mode full|pr]`, `check`. No scanner takes a secret, an unknown tool id
+  is refused by name, and an unparseable report fails instead of reading as zero findings.
 - **`data/security-policy.json`** — the policy as data: `fail_on` (critical+high), `pr_fail_on`
   (critical), `require_fix`, `issue_severities`. A pull-request run enforces the narrower set so a
   pre-existing High cannot red every PR; the daily and manual runs enforce the full set.

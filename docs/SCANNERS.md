@@ -20,8 +20,9 @@ a scan is a mutable tool on a mutable base, with network access while it is judg
 - **The published tag is a content hash** — `ghcr.io/<owner>/llgenie/trivy:<12-hex>` where the hash
   is the Dockerfile's sha256, the same convention `llgenie/test` uses. A changed Dockerfile is a
   different tag, so a published tag can never mean two builds.
-- **No scanner needs a secret** — every scanner is an apk package, so a scan is reproducible from
-  its Dockerfile alone: there is no credential to provision and none to leak into a scan run.
+- **Snyk was removed** — the only scanner that needed a repository secret, and a duplicate of what
+  Trivy and Grype already report over the same tree and the same SBOM.
+  fetches the version-named release asset and fails the build when its sha256 does not match.
 
 `containers/scanners/digests.json` is the file the scan workflow reads: one entry per scanner with
 the pinned version and the content-hash ref. It is generated — `make scanner-digests` — and

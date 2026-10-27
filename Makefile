@@ -904,9 +904,9 @@ workflows-report: ## Show every YAML file the workflow gate reads, how many expr
 	python3 scripts/check_workflows.py report
 sbom: ## Generate the CycloneDX SBOM with the pinned Syft image into security-reports/sbom.cdx.json (issue #715)
 	python3 scripts/security_scan.py sbom
-security-scan: ## Run ONE scanner from its immutable image (TOOL=trivy|grype|semgrep|snyk); grype needs make sbom first (issue #715)
+security-scan: ## Run ONE scanner from its immutable image (TOOL=syft|trivy|grype|semgrep); grype needs the Syft SBOM first (issue #715)
 	python3 scripts/security_scan.py scan "$(TOOL)"
-security-scan-all: ## Run every scanner from its pinned image in dependency order (Syft SBOM, then Trivy, Grype, Semgrep, Snyk)
+security-scan-all: ## Run every scanner from its pinned image in dependency order (Syft SBOM, then Trivy, Grype, Semgrep)
 	python3 scripts/security_scan.py all
 security-verdict: ## Apply data/security-policy.json to the reports (MODE=full|pr; full is critical+high with a fix, pr is critical only)
 	python3 scripts/security_scan.py verdict --mode "$(MODE)"
@@ -924,7 +924,7 @@ security-bot: ## Apply the advisory's pin, run the fast gates, and open ONE PR t
 	python3 scripts/security_bot.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" $(if $(DRY),--dry,)
 check-security-bot: ## CI: fail when the bot's select labels/pin sources disagree with the issue roster or a compiled requirements file became an edit target (issue #717)
 	python3 scripts/security_bot.py check
-scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep|snyk, issue #714)
+scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep, issue #714)
 	python3 scripts/scanner_image.py build "$(SCANNER)"
 test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
 	python3 scripts/scanner_image.py test "$(SCANNER)"
