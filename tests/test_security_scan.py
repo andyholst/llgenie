@@ -292,3 +292,29 @@ def test_semgrep_uses_an_explicit_pack_not_auto(tmp_path, monkeypatch):
     assert "--config=p/default" in argv
     assert "auto" not in argv
     assert "--metrics" in argv and "off" in argv
+
+
+def test_the_default_sweep_needs_no_account(tmp_path, monkeypatch):
+    """Trivy, Syft/Grype and Semgrep are local; Snyk is opt-in and never in the default run."""
+
+    # Given the shipped tool sets
+    # Then  the default sweep is the three local scanners and Snyk is opt-in only
+    assert ss.TOOLS == ("trivy", "grype", "semgrep")
+    assert ss.OPTIONAL_TOOLS == ("snyk",)
+    assert "snyk" not in ss.TOOLS
+
+
+def test_snyk_is_opt_in_and_loud_without_a_token(tmp_path, monkeypatch):
+    """Asking for Snyk without SNYK_TOKEN records the reason and says so — it is not a pass."""
+
+    # Given no token in the environment
+    monkeypatch.delenv("SNYK_TOKEN", raising=False)
+    monkeypatch.setattr(ss, "REPORTS", tmp_path / "reports")
+
+    # When  Snyk is asked for explicitly
+    rc = ss.scan("snyk")
+
+    # Then  it exits 0 with a recorded reason, and the console says it skipped
+    assert rc == 0
+    body = json.loads((tmp_path / "reports" / "snyk.json").read_text())
+    assert body["skipped"] is True and "SNYK_TOKEN" in body["reason"]

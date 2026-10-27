@@ -35,7 +35,16 @@ RUNTIME = os.environ.get("RUNTIME") or "docker"
 DIGESTS = REPO / "containers" / "scanners" / "digests.json"
 POLICY = REPO / "data" / "security-policy.json"
 REPORTS = Path(os.environ.get("SECURITY_REPORTS") or (REPO / "security-reports"))
-TOOLS = ("trivy", "grype", "semgrep", "snyk")
+#: What a scan runs by DEFAULT: the three scanners that need no account, no token and no telemetry.
+#: Trivy covers OS/language vulnerabilities (and secrets/misconfigs when asked), Syft writes the
+#: CycloneDX SBOM and Grype matches it, Semgrep covers SAST. Between them they answer "is anything in
+#: this tree known-vulnerable" from data shipped/downloaded to the runner.
+TOOLS = ("trivy", "grype", "semgrep")
+#: Opt-in only: Snyk is a SaaS product, so it needs `SNYK_TOKEN` and sends the analysis to Snyk's
+#: service. It is NOT part of the default sweep, and an unset token is a recorded skip — never a
+#: silent pass. `make security-scan TOOL=snyk` runs it deliberately.
+OPTIONAL_TOOLS = ("snyk",)
+ALL_TOOLS = TOOLS + OPTIONAL_TOOLS
 DEFAULT_POLICY = {
     "fail_on": ["critical", "high"],
     "pr_fail_on": ["critical"],
@@ -125,8 +134,8 @@ def sbom() -> int:
 
 
 def scan(tool: str) -> int:
-    if tool not in TOOLS:
-        raise SystemExit(f"[security-scan] unknown tool `{tool}`; known: {', '.join(TOOLS)}")
+    if tool not in ALL_TOOLS:
+        raise SystemExit(f"[security-scan] unknown tool `{tool}`; known: {', '.join(ALL_TOOLS)}")
     if tool == "trivy":
         # One format per invocation (trivy takes one `--format`), so JSON for the verdict and SARIF
         # for the Security tab are two runs over the same tree.
@@ -262,7 +271,7 @@ def check() -> int:
     if set(map(str.lower, pol.get("pr_fail_on") or [])) - set(map(str.lower, pol.get("fail_on") or [])):
         problems.append("security-policy.json: `pr_fail_on` is not a subset of `fail_on`")
     recorded = digests()
-    for tool in TOOLS:
+    for tool in ALL_TOOLS:
         entry = recorded.get(tool) or {}
         for key in ("version", "tag", "ref"):
             if not entry.get(key):
@@ -275,7 +284,8 @@ def check() -> int:
             print(f"  - {item}")
         return 1
     print(f"[security-scan] OK: fail_on={pol['fail_on']} pr_fail_on={pol['pr_fail_on']} "
-          f"require_fix={pol.get('require_fix')}, {len(TOOLS)} pinned scanner refs")
+          f"require_fix={pol.get('require_fix')}, {len(ALL_TOOLS)} pinned scanner refs "
+          f"(default sweep: {', '.join(TOOLS)}; opt-in: {', '.join(OPTIONAL_TOOLS)})")
     return 0
 
 

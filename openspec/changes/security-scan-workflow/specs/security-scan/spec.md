@@ -24,6 +24,30 @@ Then   it is `<registry>/llgenie/<tool>:<content hash>` from that file's recorde
 - **Test:** `tests/test_security_scan.py::test_the_policy_and_digests_are_sane` (plus
   `make scanner-ref TOOL=trivy`)
 
+### Requirement: A default scan needs no account, and Snyk is opt-in
+
+The default sweep MUST be the scanners that need no token and no third-party service — Trivy,
+Syft/Grype and Semgrep. Snyk MUST NOT be part of it: it is a SaaS product, so it runs only when
+asked for explicitly, and without `SNYK_TOKEN` it records `skipped` with the reason and says so in the
+log rather than passing silently.
+
+#### Scenario: the default sweep is local-only
+
+Given `scripts/security_scan.py`,
+When   its tool sets are read,
+Then   the default is `trivy, grype, semgrep` and `snyk` is only in the opt-in set.
+
+- **Test:** `tests/test_security_scan.py::test_the_default_sweep_needs_no_account`
+
+#### Scenario: Snyk without a token is a recorded skip
+
+Given no `SNYK_TOKEN` in the environment,
+When   `make security-scan TOOL=snyk` runs,
+Then   it exits 0, writes `{"skipped": true, "reason": …}` into `security-reports/snyk.json`, and
+       prints that the tool did not run.
+
+- **Test:** `tests/test_security_scan.py::test_snyk_is_opt_in_and_loud_without_a_token`
+
 ### Requirement: The pinned image is obtained, never skipped
 
 The run MUST use the ref `containers/scanners/digests.json` names: pull it when published, and when
