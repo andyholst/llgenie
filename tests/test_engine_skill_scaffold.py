@@ -155,3 +155,23 @@ def test_dry_writes_nothing(tmp_path):
     # Then nothing is on disk
     assert result["written"] is False
     assert not (out / "brandnewserver" / "SKILL.md").exists()
+
+
+def test_the_make_target_hands_engine_id_backends_out_and_dry_to_the_script():
+    """The target is the entry point a bot uses: no flag may be silently dropped."""
+
+    # Given the Makefile and the scaffold script
+    mk = (REPO / "Makefile").read_text()
+    script = (REPO / "scripts" / "engine_skill_scaffold.py").read_text()
+
+    # When the engine-skill-scaffold recipe is read
+    recipe = mk.split("\nengine-skill-scaffold:", 1)[1].split("\n# ----", 1)[0]
+
+    # Then every user-facing knob reaches the CLI, and the target is .PHONY
+    for flag, var in (("--engine", "ENGINE"), ("--id", "ID"), ("--backends", "BACKENDS"),
+                      ("--out", "OUT"), ("--registry", "REGISTRY"), ("--dry", "DRY"),
+                      ("--force", "FORCE")):
+        assert flag in recipe, (flag, recipe)
+        assert var in recipe, (var, recipe)
+        assert flag in script, (flag, script)
+    assert "engine-skill-scaffold" in mk.split(".PHONY:", 1)[1].split("\n\n", 1)[0]

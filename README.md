@@ -331,7 +331,8 @@ make spawn-engine-skill-issues # open one tracking issue per NEW unskilled engin
 make engine-skill-scaffold ENGINE="<registry name>"  # write skills/engines/<id>/SKILL.md from the
                                # registry's own entry (engine, repo, backends); every key it cannot
                                # prove is left EMPTY so `make skills-validate` names it (ID= overrides
-                               # the kebab, BACKENDS= when the registry names none, DRY=1 previews)
+                               # the kebab, BACKENDS= when the registry names none, OUT=/REGISTRY= pick
+                               # another tree/store, DRY=1 previews, FORCE=1 overwrites a skill)
 make check-wiring              # CI: fail when a test/script is wired to no make target, or only to
                                # one CI never runs (tests/fixtures/host-only-wiring.json records the
                                # deliberate ones), a workflow calls a make target that does not exist,

@@ -315,9 +315,10 @@ sync-change-issue: ## Open ONE issue stating what a changed vendored registry ch
 	python3 scripts/registry_change_issue.py open $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry engine (the sync job runs this; DRY=1 previews, REPO= picks the repo)
 	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
-engine-skill-scaffold: ## Write skills/engines/<id>/SKILL.md for a registry engine from its registry entry, with every unprovable key left EMPTY (ENGINE=<registry name>, ID=<kebab>, BACKENDS=, DRY=1 previews, FORCE=1 overwrites)
+engine-skill-scaffold: ## Write skills/engines/<id>/SKILL.md for a registry engine from its registry entry, with every unprovable key left EMPTY (ENGINE=<registry name>, ID=<kebab>, BACKENDS=, OUT=, REGISTRY=, DRY=1 previews, FORCE=1 overwrites)
 	python3 scripts/engine_skill_scaffold.py scaffold --engine "$(ENGINE)" \
 		$(if $(ID),--id "$(ID)",) $(if $(BACKENDS),--backends "$(BACKENDS)",) \
+		$(if $(OUT),--out "$(OUT)",) $(if $(REGISTRY),--registry "$(REGISTRY)",) \
 		$(if $(DRY),--dry,) $(if $(FORCE),--force,)
 # ---- registry-sync review (issue #709): a GREEN sync PR -> ONE agent:implement issue --------
 # sync-change-issue (#704) states what a store CHANGED, even when a gate is red. This bot answers
