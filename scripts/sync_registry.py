@@ -263,12 +263,23 @@ def fetch(src: str) -> bytes:
 #: `formats[].name` is upstream's display text, not a format.
 FORMAT_VOCAB = ("GGUF", "MLX", "safetensors", "mlx-safetensors", "litertlm")
 
+def _format_key(name: str) -> str:
+    """A format name as a comparison key: letters and digits only, lowercased.
+
+    Upstream writes the SAME format in several spellings — `LiteRT-LM` for `litertlm`,
+    `MLX-Safetensors` for `mlx-safetensors` — and a strict equality made the normaliser
+    read a real format as display text, drop it, and restate GGUF for a repo that serves no
+    GGUF at all (measured on the 2026-10-27 store: `gemma-4-e2b` lost its litertlm entry).
+    """
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+_FORMAT_CANON = {_format_key(v): v for v in FORMAT_VOCAB}
+
+
 def _canon_format(name: str) -> str | None:
     """The vocabulary spelling of a format name, or None when it is not a format."""
-    for known in FORMAT_VOCAB:
-        if str(name or "").strip().lower() == known.lower():
-            return known
-    return None
+    return _FORMAT_CANON.get(_format_key(name))
 
 
 def _format_from_repo(*hints: str) -> str | None:
