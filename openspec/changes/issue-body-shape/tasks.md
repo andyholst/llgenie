@@ -11,3 +11,4 @@
 - [x] 9. Tests: `tests/test_issue_body.py`, `tests/test_check_issue_body.py`, and each producer's existing test asserting the rendered body
 - [x] 10. Docs record: `docs/BOTS.md` contract paragraph, `agent-wiki/2026-10-27-issue-body-shape.md`, `CHANGES.md` row
 - [x] 11. Verification: `make lint check-wiring check-docs check-agent-skills check-issue-bodies` green, `make test-unit` green, `make openspec-validate NAME=issue-body-shape` passes
+- [x] 12. Follow-up `daf1e6b`: `_technical()` keeps a multi-line item a block, `queued_run_alarm.file_label_issue` passes its fenced report as that one item (no fence collision), and `tests/test_queued_run_alarm.py` asserts the filed body's headings from the recorded `issue create` argv
