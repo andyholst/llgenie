@@ -265,7 +265,8 @@ llgenie allocates.
 **What the additive-only gate fails on, and what it only reports.** Upstream rewrites its
 rows on every refresh, so the guard compares *identity*, not text. It **fails** the sync when a model row
 is gone, a key is gone from a model row, an engine that had a measurement for a model has none, a
-`backends` / `supported_engines` entry or a `formats` name is gone, an engine-registry entry is gone, a
+`backends` / `supported_engines` entry is gone, a **format** (`GGUF`, `MLX`, …) is gone — a non-format
+display name in `formats` is upstream text, not data, so the normaliser may drop it — an engine-registry entry is gone, a
 stated footprint is lowered, or a **tracked post** (the `/status/<id>` of a `source_post`) is nowhere in
 the new store. It **prints as a `NOTE:`** (and exits 0) when a surviving post's t/s is re-stated lower, an
 engagement counter drops (X re-scrapes move likes/views both ways), or the derived `engagement.seen_posts`
