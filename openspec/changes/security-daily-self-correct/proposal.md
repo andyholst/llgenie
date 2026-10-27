@@ -1,8 +1,9 @@
 # security-daily-self-correct — proposal
 
 Issue: [#738](https://github.com/asimov-agent/llgenie/issues/738)
-Implements: [#718](https://github.com/asimov-agent/llgenie/issues/718) (the Renovate config)
 Parent: [#713](https://github.com/asimov-agent/llgenie/issues/713)
+Related: [#718](https://github.com/asimov-agent/llgenie/issues/718) — the Renovate config, which landed
+separately (#722). This change adds no second `renovate.json` and no second schedule.
 Deferred to: [#739](https://github.com/asimov-agent/llgenie/issues/739) (the agent leg for what the
 floors and Renovate cannot place)
 
@@ -35,18 +36,13 @@ upstream package old today".
   the fast gates, and opens or updates ONE PR that closes the tagged issues it fixes. A compiled
   `.txt` is never an edit target, and no version is invented: each floor is the scanner's own
   `fixed` value.
-- **Renovate keeps the pins fresh (#718).** `renovate.json` with `pip_requirements` on `tools/*.in`,
-  `pip-compile` on the generated `.txt`, `dockerfile` on the scanner and base images, and
-  `github-actions`; grouped by ecosystem; automerge only for `patch`/`pin`/`digest` and only through
-  CI's own `auto-merge` job (`platformAutomerge: false`). `docs/RENOVATE.md` states what it owns and
-  what it must never touch.
 - **Gates and docs.** `make security-bumps-plan` / `security-bumps` (`DRY=1`) /
-  `check-security-bumps` (inside `make ci-unit`); `tests/test_security_bumps.py` and
-  `tests/test_renovate_config.py`; `docs/SCANS.md` + `docs/RENOVATE.md`; an `agent-wiki/` note and
-  its `CHANGES.md` row.
+  `check-security-bumps` (inside `make ci-unit`); `tests/test_security_bumps.py`; `docs/SCANS.md`; an
+  `agent-wiki/` note and its `CHANGES.md` row.
 
 ## Not covered
 
 - The agent leg for what the floors and Renovate cannot place — #739.
 - `make engine-bump` (the engines' own upstream pins) — an existing, different pipeline.
 - Actions SHA pinning itself — #719.
+- Renovate's own config and its low-risk automerge policy — #718, landed as #722.

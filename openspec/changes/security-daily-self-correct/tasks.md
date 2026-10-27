@@ -6,7 +6,7 @@
 - [x] 4. `scripts/security_bumps.py` — `floors` (maximum of the minimums), `plan`, `apply` (floors -> `make -C tools generate-requirements*` -> fast gates -> one PR), `check`
 - [x] 5. `tools/security-floors.in` exists and `-c security-floors.in` is included by `tools/requirements.in` and `tools/requirements-dev.in`
 - [x] 6. One PR on `fix/security-floors` with Issue/Fix/Benefit/Technical and `closes #<n>` per matched issue; an unsatisfied floor opens no PR
-- [x] 7. `renovate.json` (pip_requirements, pip-compile, dockerfile, github-actions, grouped, no top-level automerge) + `docs/RENOVATE.md` (closes #718)
+- [x] 7. the floors stay independent of the Renovate config: it landed separately as #718/#722, this change adds no second `renovate.json` and no second schedule
 - [x] 8. Make targets `security-bumps-plan`, `security-bumps`, `check-security-bumps`; `.PHONY`, gate in `ci-unit`, classified in `scripts/issue_bot_gates.py`
 - [x] 9. `tests/test_security_bumps.py`, `tests/test_renovate_config.py`, and the updated `tests/test_security_scan.py` all green under `make test-unit`
 - [x] 10. `docs/SCANS.md` + `README.md` docs table + `agent-wiki/2026-10-27-security-daily-self-correct.md` + `CHANGES.md` row

@@ -1242,7 +1242,6 @@ from the pipeline that will run.
 | `rebase-bot.yml` | keeps every open PR current with main, every eligible PR per run (never merges) | `max_prs` (optional, default `10`) — Most PRs this run may rebase (the sweep's daily cap still applies on top) |
 | `registry-sync-review.yml` | a GREEN registry-sync PR is reviewed into ONE agent:implement issue | `dry` (optional, default `false`) — Preview the brief and the issue body this run would file, filing nothing |
 | `registry-sync.yml` | syncs the vendored registry and regenerates the derived tables, then opens the PR | none — the sync has no modes: it always fetches the upstream registry, regenerates |
-| `renovate.yml` | bumps every owned pin daily and opens the PR that CI lands (never merges) | none — the run always takes every pin renovate.json owns |
 | `search-smoke.yml` | one real Firecrawl request proves the masked web reach | none — the smoke takes no target: it always proves the same leg with one request. |
 | `security-bot.yml` | turns ONE auto-fixable vulnerability issue into a green PR (never merges) | `dry` (optional, default `false`) — Preview the issue it would take and the edit it would make, pushing nothing |
 | `security-scan.yml` | the daily vulnerability pipeline (Trivy + Syft + Grype + Semgrep), never a PR or push check | `tools` (optional, default `all`) — Which scanners to run: all, or one of syft / trivy / grype / semgrep<br>`enforce` (optional, default `full`) — Failure policy for THIS dispatch: full = the daily policy, report = never gate |

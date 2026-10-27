@@ -16,7 +16,6 @@ on how it works. The references it points at:
 | [`docs/BOTS.md`](docs/BOTS.md) | the automation: which bot does what, its cron slot, the skills its legs run under, where secrets go, and every CI/verification target |
 | [`docs/SCANNERS.md`](docs/SCANNERS.md) | the security scanners: one immutable Wolfi image per scanner (digest-pinned base, exact version, content-hash tag), how to bump one, and the gate that keeps `digests.json` true |
 | [`docs/SCANS.md`](docs/SCANS.md) | the vulnerability scans: which scanner runs from which pinned image, the daily-only triggers, the failure policy, the floor the scan compiles into the pins, and the SBOM/SARIF outputs |
-| [`docs/RENOVATE.md`](docs/RENOVATE.md) | the dependency bumps: which pins Renovate owns, the generated/vendored paths it must never touch, why it never merges, and how to reproduce a bump PR |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | what is pinned and how it is updated: every GitHub Action at a full commit SHA, the gate that enforces it, and the documented update path |
 | [`docs/RENOVATE.md`](docs/RENOVATE.md) | what Renovate owns (Python pins, container base images), what it must never touch, its low-risk-only automerge policy, and why a base-image bump builds images |
 | [`CHANGES.md`](CHANGES.md) | the change index — one line per change, linking its dated `agent-wiki/` note |

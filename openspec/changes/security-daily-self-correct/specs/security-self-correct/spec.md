@@ -136,18 +136,3 @@ When   `make check-security-bumps` runs,
 Then   it exits non-zero naming the package and both versions.
 
 - **Test:** `tests/test_security_bumps.py::test_a_pin_below_its_floor_fails_the_gate`
-
-### Requirement: Renovate owns freshness, and CI keeps the single merge authority
-
-`renovate.json` MUST configure the `pip_requirements`, `pip-compile`, `dockerfile` and
-`github-actions` managers, group updates by ecosystem, ignore the generated engine
-dockerfiles/params and the vendored registry, and MUST NOT set a top-level `automerge: true` or
-`platformAutomerge: true`.
-
-#### Scenario: a config that would bypass CI's merge job is refused
-
-Given a `renovate.json` with `automerge: true` at the top level,
-When   the config test runs,
-Then   it fails naming the key.
-
-- **Test:** `tests/test_renovate_config.py::test_no_top_level_automerge`

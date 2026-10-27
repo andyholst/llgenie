@@ -1,7 +1,7 @@
 # The scan is its own daily pipeline, and it fixes what it reports
 
-Issue: [#738](https://github.com/asimov-agent/llgenie/issues/738) · implements
-[#718](https://github.com/asimov-agent/llgenie/issues/718) · defers
+Issue: [#738](https://github.com/asimov-agent/llgenie/issues/738) · related #718 (landed as
+#722) · defers
 [#739](https://github.com/asimov-agent/llgenie/issues/739) · PR: #740
 
 ## What was wrong
@@ -35,16 +35,11 @@ forever. A gate that cannot go green is not a gate.
 - **Green or nothing, and it closes its issues.** One commit on `fix/security-floors`, one PR whose
   body carries `Issue:/Fix:/Benefit:/Technical:` and `closes #<n>` per matched tagged issue. A
   regeneration that cannot reach the floor, or a red fast gate, reverts and opens no PR.
-- **Renovate owns freshness (#718), CI owns the merge.** `renovate.json` groups by ecosystem and
-  carries **no** automerge key at all: the repository's `auto-merge` job stays the single merge
-  authority. `pip_requirements` bumps re-run the generator through `postUpgradeTasks`, which is why
-  the workflow runs the CLI on the runner (`npx renovate@46.3.10`) instead of inside an action
-  container that has no docker.
 - **Affected images rebuild through the tags they already have.** A base change moves every engine
   tag because the generated Dockerfile embeds `FROM llgenie/base-<backend>:<content hash>`, and a
   Python pin change moves the test image's lockfile hash — so a bump starts the engine-image /
-  ci-images jobs without a second list. That is asserted in `tests/test_renovate_config.py` (the
-  ignored generated paths) rather than re-implemented.
+  ci-images jobs without a second list. That is the mechanism the fork-PR failure proved the hard way
+  (see below): the lockfile really is an input to the published image tag.
 
 ## Verified
 
@@ -54,8 +49,6 @@ forever. A gate that cannot go green is not a gate.
 - `tests/test_security_bumps.py` — the maximum-of-the-minimums, no-fix and stale-fix cases, a real
   checkout with a real bare `origin` for the bump PR (`closes #41`, `closes #42`), and both "no PR"
   paths.
-- `tests/test_renovate_config.py` — schema, managers, grouping, ignored paths, no automerge, the
-  generator task, and a pinned CLI + SHA-pinned actions.
 - `make check-security-scan check-security-bumps check-workflows check-wiring check-docs
   check-dispatch-forms check-pr-authors check-actions` green; `make test-unit` 4849 passed.
 
