@@ -165,3 +165,104 @@ def test_every_registry_model_has_a_catalog_entry_or_a_documented_skip():
 
 
 
+# ----------------------------------------------------------- the drift guard (`--check`)
+# `make check-quant-catalog` regenerates from the LIVE Hub: `mlx_repos()`/`tensorfold_repos()`
+# SEARCH huggingface.co, so upstream publishing a new conversion makes a fresh generation
+# larger than the committed table with no llgenie change at all. Measured 2026-10-27: four new
+# MLX repos turned the gate red on `main` itself, blocking every PR for a reason no PR caused.
+# The rule under test is `compare()`'s: a row the committed table HAS must regenerate
+# identically (failure), a row the Hub ADDS is a note the next sync records.
+import gen_trending_quant_catalog as gen  # noqa: E402
+
+_PLAN_ONE = {"repo": "org/m1-gguf", "revision": "main", "path": "m1-Q4.gguf",
+             "files": ["m1-Q4.gguf"], "size_gb": 4.0,
+             "url": "https://huggingface.co/org/m1-gguf/resolve/main/m1-Q4.gguf"}
+_NEW_PLAN = {"repo": "org/m1-gguf-MLX-4bit", "revision": "main", "path": "",
+             "files": ["config.json", "model.safetensors"], "size_gb": 2.0, "dir": True,
+             "url": "https://huggingface.co/org/m1-gguf-MLX-4bit/resolve/main/config.json"}
+
+
+def _committed() -> dict:
+    return {"meta": {"generated_utc": "2026-10-13T14:31:40Z"},
+            "files": {"m1": {"llama.cpp": {"arch": ["cuda", "cpu"],
+                                           "quants": [dict(_PLAN_ONE)]}}}}
+
+
+def test_an_unchanged_regeneration_is_clean():
+    # Given a committed table and the same table regenerated
+
+    # When  the two are compared
+    failures, notes = gen.compare(_committed(), json.loads(json.dumps(_committed())))
+
+    # Then  nothing fails and nothing is noted
+    assert failures == [] and notes == []
+
+
+def test_a_repo_upstream_publishes_since_the_sync_is_a_note_not_a_failure():
+    # Given a fresh generation that also holds a plan the committed table does not
+    fresh = json.loads(json.dumps(_committed()))
+    fresh["files"]["m1"]["MLX"] = {"arch": ["metal", "cuda"], "quants": [dict(_NEW_PLAN)]}
+
+    # When  it is compared with the committed table
+    failures, notes = gen.compare(_committed(), fresh)
+
+    # Then  the addition is reported and never fails the gate
+    assert failures == [], failures
+    assert any("MLX" in n for n in notes), notes
+
+
+def test_a_plan_the_committed_table_has_and_the_generator_lost_still_fails():
+    # Given a fresh generation that lost the plan the committed table records
+    fresh = json.loads(json.dumps(_committed()))
+    fresh["files"]["m1"]["llama.cpp"]["quants"] = []
+
+    # When  it is compared with the committed table
+    failures, _notes = gen.compare(_committed(), fresh)
+
+    # Then  the missing plan fails, naming it
+    assert any("no longer generated" in f for f in failures), failures
+
+
+def test_a_changed_plan_still_fails():
+    # Given a fresh generation whose plan points at a different file
+    fresh = json.loads(json.dumps(_committed()))
+    fresh["files"]["m1"]["llama.cpp"]["quants"][0]["path"] = "m1-Q8.gguf"
+    fresh["files"]["m1"]["llama.cpp"]["quants"][0]["url"] = \
+        "https://huggingface.co/org/m1-gguf/resolve/main/m1-Q8.gguf"
+
+    # When  it is compared with the committed table
+    failures, _notes = gen.compare(_committed(), fresh)
+
+    # Then  a silent change to what llgenie would download fails
+    assert any("no longer generated" in f for f in failures), failures
+
+
+def test_a_catalog_rendered_for_another_registry_still_fails():
+    # Given a fresh generation under a newer registry
+    fresh = json.loads(json.dumps(_committed()))
+    fresh["meta"]["generated_utc"] = "2026-10-27T00:00:00Z"
+
+    # When  it is compared with the committed table
+    failures, _notes = gen.compare(_committed(), fresh)
+
+    # Then  the registry the catalog was rendered for is asserted
+    assert any("make sync-quant-catalog" in f for f in failures), failures
+
+
+def test_a_reordered_regeneration_is_a_note_not_a_failure():
+    # Given a committed table with two plans, regenerated as the SAME two in another order
+    # (`mlx_repos()` ranks the Hub search by downloads, and those move)
+    second = {"repo": "org/m1-gguf-MLX-8bit", "revision": "main", "path": "",
+              "files": ["config.json", "model.safetensors"], "size_gb": 8.0, "dir": True,
+              "url": "https://huggingface.co/org/m1-gguf-MLX-8bit/resolve/main/config.json"}
+    committed = _committed()
+    committed["files"]["m1"]["llama.cpp"]["quants"] = [dict(_PLAN_ONE), dict(second)]
+    fresh = json.loads(json.dumps(committed))
+    fresh["files"]["m1"]["llama.cpp"]["quants"] = [dict(second), dict(_PLAN_ONE)]
+
+    # When  it is compared with the committed table
+    failures, notes = gen.compare(committed, fresh)
+
+    # Then  the reorder is reported rather than failing the gate on data upstream owns
+    assert failures == [], failures
+    assert any("different order" in n for n in notes), notes

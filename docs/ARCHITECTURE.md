@@ -439,6 +439,15 @@ trend matrix lives under `tests/fixtures/`:
   `FAIL: … is stale` and exiting 0. `tests/test_script_exit_codes.py` holds the whole class
   by parsing every `scripts/*.py`: a `__main__` that calls `main()` bare while `main()`
   returns a value is a finding, and a `main()` that returns nothing is not.
+- **What "differs" means is bounded by what a regeneration can honestly prove** (issue #736).
+  `scripts/gen_trending_quant_catalog.compare()` fails on a row the committed table HAS and
+  the generator no longer produces — a plan gone, a plan whose repo/files/size/link changed,
+  an engine's arch list changed, or a table rendered for another registry — and only NOTES
+  what the live Hub re-reads: `mlx_repos()`/`tensorfold_repos()` query a `sort=downloads`
+  search, so the same 14 plans came back in a different order for
+  `qwen3.8-flash-next-125b`/MLX and the gate went red on `main` itself, blocking every PR for
+  a reason no PR caused. A reorder or a newly published conversion is recorded by the next
+  `make sync-quant-catalog`; the note says so and the exit code stays 0.
 - `data/strata_models.json` is written from Strata's `setup.py` at the skill's pinned
   commit (`make sync-strata-models`, checked by `make check-strata-models`; the pin is
   `v0.2.6@ff91dd77` today). A family is either Hub-hosted — `repo` + `revision` +

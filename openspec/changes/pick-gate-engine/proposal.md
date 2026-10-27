@@ -26,6 +26,12 @@ is a sync that never lands the data the product ranks from (#693).
   found by header name, the README row order is compared to the store's own order, each
   row's own host hardware ranks first, and the TensorFold/MLX/`#1` rows are derived from
   `offer()` and the store — never named, never indexed.
+- `make check-quant-catalog` applies the same rule to the table the gate reads
+  (`specs/quant-catalog/spec.md`, #736): it fails on a plan the committed table has and the
+  generator no longer produces, and only NOTES what the live Hub re-reads (a reorder, a
+  newly published conversion) — the `ci-unit` gate was red on `main` itself because the
+  `sort=downloads` search returned the same 14 plans in a different order, so no PR could
+  reach `test-unit`.
 
 ## Out of scope
 

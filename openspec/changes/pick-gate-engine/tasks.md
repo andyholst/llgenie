@@ -18,3 +18,4 @@
 - [x] The README-column assertions allow EITHER stated figure (`vram_min` or `vram_tier`), because which one upstream prints moves with the sync; the gate's preference for the minimum is proved hermetically in `tests/test_registry_footprint.py::test_the_gate_reads_the_stated_minimum_not_the_display_tier`.
 - [x] `tests/test_trending_quant_catalog.py` 5 passed / 2 failed — the residue is #731 (an engine offered with no downloadable plan), not a pin.
 - [x] The branch carries no file under `data/`: the store lands through the sync PR.
+- [x] `make check-quant-catalog` fails only on a plan the committed table lost, and notes what the live Hub re-reads — measured: exit 2 → **0** on `main`'s committed table with one note (`qwen3.8-flash-next-125b/MLX` reorder); `tests/test_trending_quant_catalog.py` 13 passed (#736).
