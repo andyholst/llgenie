@@ -93,13 +93,14 @@ def ensure_image(tool: str) -> str:
     return ref
 
 
-def _run(argv: list[str], image: str) -> int:
+def _run(argv: list[str], image: str, entrypoint: str | None = None) -> int:
     """Run one scanner from its image, with the checkout mounted so it writes its reports."""
     REPORTS.mkdir(parents=True, exist_ok=True)
     # The image's own USER is a non-root one, but the mounted checkout belongs to the RUNNER user:
     # without `--user` the scanner cannot create its report ("permission denied") and would leave
     # root-owned files in the worktree (issue #433). Running as the invoking user fixes both.
-    cmd = [RUNTIME, "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
+    extra = ["--entrypoint", entrypoint] if entrypoint else []
+    cmd = [RUNTIME, "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", *extra,
            "-v", f"{REPO}:/work:rw", "-w", "/work",
            "-e", "HOME=/tmp", "-e", "SNYK_TOKEN", ensure_image_for(image), *argv]
     print(f"[security-scan] $ {' '.join(cmd)}")
@@ -116,8 +117,11 @@ def ensure_image_for(ref: str) -> str:
 
 def sbom() -> int:
     """Syft writes the CycloneDX SBOM; Grype matches against exactly this file."""
-    return _run(["syft", "dir:.", "-o", "cyclonedx-json=/work/security-reports/sbom.cdx.json"],
-                image_ref("grype"))
+    # The Grype image's ENTRYPOINT is `grype`, so Syft is reached with `--entrypoint syft`; passing
+    # `syft` as an argument makes grype read it as a second positional and refuse ("accepts at most
+    # 1 arg(s), received 2") — measured on the first real CI run.
+    return _run(["-o", "cyclonedx-json=/work/security-reports/sbom.cdx.json", "dir:."],
+                image_ref("grype"), entrypoint="syft")
 
 
 def scan(tool: str) -> int:
