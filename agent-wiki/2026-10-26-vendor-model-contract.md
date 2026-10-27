@@ -1,6 +1,6 @@
 # 2026-10-26 — the store is vendored with the contract it is written against
 
-Implements issue #694 (OpenSpec change `vendor-model-contract`).
+Implements issue #694 (PR #699, OpenSpec change `vendor-model-contract`).
 
 ## What was wrong (measured)
 
@@ -47,10 +47,14 @@ Honest limit, in the issue and the PR: the schema leaves `formats[].name` a free
   refused with the command that provisions it; a row missing `last_seen`, a bad `id`, a backend outside
   the enum and a `formats[0]` without `hf` are each refused by name; the vendored copies equal upstream
   byte for byte and the vendored store satisfies them.
-- `make test-unit` and `make openspec-validate NAME=vendor-model-contract` recorded in `tasks.md`.
+- `make test-unit` green (`5245 passed, 6 deselected`, 868.53s) and `make openspec-validate
+  NAME=vendor-model-contract` exits 0.
+- The sync now validates nothing about the contract itself — `check()` is the gate — because the normaliser
+  (#692) rewrites `formats` on the way in, so validating upstream's raw store inside `sync()` would refuse
+  the fixtures its own unit tests build. The normalised store `check()` reads is what lands.
 
 ## Status
 
-Implementation complete on `feat/vendor-model-contract`. Not in this change: the format-vocabulary rule
+Implementation complete on `feat/vendor-model-contract` (PR #699). Not in this change: the format-vocabulary rule
 (#687), the 101 data-pinned tests that still stop the weekly sync (#677), the 16 undecided engines
 (#673), and `data/search_contract.json` (a different consumer).
