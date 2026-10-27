@@ -16,16 +16,18 @@ Commands (driven by make, never by hand):
     check             policy + digests are sane                     make check-security-scan
 
 **Failure policy** (`data/security-policy.json`): a finding fails the run when its severity is in
-`fail_on` AND (when `require_fix` is true) the report carries a fixed version. A pull-request run
-enforces the narrower `pr_fail_on` (critical only by default), because a pre-existing High without
-a fix must not red every PR in the repository — the daily and manual runs enforce `fail_on` in
-full. Both sets are data, not literals in a workflow step.
+`fail_on` AND (when `require_fix` is true) the report carries a fixed version. WHICH events may fail
+is data too: `enforce_events` names them (`schedule`, `workflow_dispatch`), and every other event is
+report-only. That is why this workflow carries no `pull_request:` and no `push:` trigger at all
+(issue #738): a pre-existing advisory must never red a pull request or a push to `main`, and `check`
+refuses both the trigger and a policy that would gate such an event.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +36,12 @@ REPO = Path(__file__).resolve().parent.parent
 RUNTIME = os.environ.get("RUNTIME") or "docker"
 DIGESTS = REPO / "containers" / "scanners" / "digests.json"
 POLICY = REPO / "data" / "security-policy.json"
+#: The workflow this module's policy protects. `check` reads its `on:` block: a scan that a pull
+#: request or a push to `main` gates is the defect issue #738 removed, and it must not come back.
+WORKFLOW = REPO / ".github" / "workflows" / "security-scan.yml"
+#: The events that must NEVER gate. A policy that names one of them is refused by `check`.
+NEVER_GATING = ("push", "pull_request")
+KNOWN_EVENTS = ("schedule", "workflow_dispatch", "push", "pull_request", "issues", "release")
 REPORTS = Path(os.environ.get("SECURITY_REPORTS") or (REPO / "security-reports"))
 #: What a scan runs by DEFAULT: the three scanners that need no account, no token and no telemetry.
 #: Trivy covers OS/language vulnerabilities (and secrets/misconfigs when asked), Syft writes the
@@ -52,9 +60,11 @@ SBOM_TOOL = "syft"
 ALL_TOOLS = (SBOM_TOOL,) + TOOLS
 DEFAULT_POLICY = {
     "fail_on": ["critical", "high"],
-    "pr_fail_on": ["critical"],
+    "pr_fail_on": [],
     "require_fix": True,
     "issue_severities": ["critical", "high"],
+    #: Only these events may fail the run. Everything else — a pull request, a push — reports.
+    "enforce_events": ["schedule", "workflow_dispatch"],
 }
 
 
@@ -217,7 +227,7 @@ def blocking(items: list[dict], pol: dict, mode: str = "full") -> list[dict]:
     """The findings that must fail the run, for the mode's severity set."""
     severities = pol.get("pr_fail_on") if mode == "pr" else pol.get("fail_on")
     fail_on = {str(s).lower() for s in severities or []}
-    if not fail_on:  # report-only mode: the PR run writes SARIF + the artifact and never gates
+    if not fail_on:  # report-only mode: the run writes SARIF + the artifact and never gates
         return []
     out = []
     for item in items:
@@ -229,32 +239,98 @@ def blocking(items: list[dict], pol: dict, mode: str = "full") -> list[dict]:
     return out
 
 
-def verdict(mode: str = "full") -> int:
+def mode_for(event: str, pol: dict | None = None) -> str:
+    """`full` (gate) when the event may fail the run, `pr` (report-only) for every other event.
+
+    The set of events that may gate is data (`enforce_events`), never a literal in a workflow step,
+    and `push` / `pull_request` are never in it — `check` refuses a policy that puts them there.
+    """
+    pol = pol or policy()
+    enforce = {str(e).lower() for e in pol.get("enforce_events") or []}
+    return "full" if str(event).lower() in enforce else "pr"
+
+
+def triggers(text: str) -> set[str]:
+    """The event names in a workflow's `on:` block (top-level keys only)."""
+    lines = text.splitlines()
+    out: set[str] = set()
+    inside = False
+    for raw in lines:
+        if raw.startswith("on:"):
+            inside = True
+            inline = raw.split(":", 1)[1].strip()
+            for name in re.findall(r"[A-Za-z_]+", inline):
+                out.add(name.lower())
+            continue
+        if inside:
+            if raw and not raw.startswith((" ", "\t", "#")):
+                break                      # the next top-level key ends the block
+            m = re.match(r"^\s{2}([A-Za-z_]+):", raw)
+            if m:
+                out.add(m.group(1).lower())
+    return out
+
+
+def verdict(mode: str = "", event: str = "") -> int:
     pol = policy()
+    if not mode:
+        mode = mode_for(event, pol) if event else "full"
     items = findings()
     bad = blocking(items, pol, mode)
     severities = pol.get("pr_fail_on") if mode == "pr" else pol.get("fail_on")
+    where = f"event={event or 'local'}, mode={mode}"
     if not severities:
-        print(f"[security-scan] REPORT-ONLY ({mode}): {len(items)} finding(s) recorded; this run "
-              "does not fail a pull request — the daily and manual runs enforce the policy")
+        print(f"[security-scan] REPORT-ONLY ({where}): {len(items)} finding(s) recorded; this run "
+              "does not gate — only an event in `enforce_events` may fail the pipeline")
+        for item in items:
+            print(f"  {item['source']}: {item['id']} {item['package']} "
+                  f"{item['current']} -> {item['fixed'] or '(no fix named)'} ({item['severity']})")
         return 0
     if bad:
-        print(f"[security-scan] FAIL ({mode}): {len(bad)} finding(s) at {severities}"
+        print(f"[security-scan] FAIL ({where}): {len(bad)} finding(s) at {severities}"
               f"{' with a fix available' if pol.get('require_fix') else ''}")
         for item in bad[:40]:
             print(f"  {item['source']}: {item['id']} {item['package']} "
                   f"{item['current']} -> {item['fixed']} ({item['severity']})")
         return 1
-    print(f"[security-scan] OK ({mode}): {len(items)} finding(s) recorded, none blocking "
+    print(f"[security-scan] OK ({where}): {len(items)} finding(s) recorded, none blocking "
           f"(fail_on={severities}, require_fix={pol.get('require_fix')})")
     return 0
 
 
+def _display(path: Path) -> str:
+    """A path as the log should name it: repo-relative when it can be, absolute otherwise."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
 def check() -> int:
-    """The policy and the digests must be sane before a scan is trusted."""
+    """The policy, the digests and the workflow's triggers must be sane before a scan is trusted."""
     problems: list[str] = []
     pol = policy()
     known = {"critical", "high", "medium", "low", "negligible", "unknown"}
+    # Which events may gate is data with a hard floor: the scan is its own daily pipeline (#738).
+    enforce = {str(e).lower() for e in pol.get("enforce_events") or []}
+    if not enforce:
+        problems.append("security-policy.json: `enforce_events` is empty — no event could ever gate")
+    for event in sorted(enforce):
+        if event not in KNOWN_EVENTS:
+            problems.append(f"security-policy.json: `{event}` in `enforce_events` is not a known event")
+        if event in NEVER_GATING:
+            problems.append(f"security-policy.json: `{event}` in `enforce_events` — a scan must "
+                            "never gate a push or a pull request (issue #738)")
+    workflow = WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.is_file() else ""
+    if not workflow:
+        problems.append(f"{_display(WORKFLOW)} is missing: the pipeline this policy protects "
+                        "cannot be checked")
+    else:
+        fired = triggers(workflow)
+        for event in NEVER_GATING:
+            if event in fired:
+                problems.append(f"{_display(WORKFLOW)}: `{event}:` trigger must not exist — "
+                                "the scan is its own daily pipeline (issue #738)")
     for key in ("fail_on", "issue_severities"):
         values = pol.get(key)
         if not values:
@@ -287,8 +363,10 @@ def check() -> int:
             print(f"  - {item}")
         return 1
     print(f"[security-scan] OK: fail_on={pol['fail_on']} pr_fail_on={pol['pr_fail_on']} "
-          f"require_fix={pol.get('require_fix')}, {len(TOOLS)} pinned scanner refs "
-          f"(sweep: {', '.join(ALL_TOOLS)}; the SBOM tool rides the grype image; no secret needed)")
+          f"enforce_events={sorted(enforce)} require_fix={pol.get('require_fix')}, "
+          f"{len(TOOLS)} pinned scanner refs "
+          f"(sweep: {', '.join(ALL_TOOLS)}; the SBOM tool rides the grype image; no secret needed; "
+          f"the workflow triggers only on {', '.join(sorted(triggers(workflow))) or 'nothing'})")
     return 0
 
 
@@ -297,7 +375,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("command",
                     choices=("ref", "sbom", "scan", "all", "verdict", "findings", "check"))
     ap.add_argument("tool", nargs="?", default="")
-    ap.add_argument("--mode", default="full", choices=("full", "pr"))
+    ap.add_argument("--mode", default="", choices=("", "full", "pr"),
+                    help="force a mode; empty resolves it from --event via `enforce_events`")
+    ap.add_argument("--event", default="", help="the event the run is for (schedule|pull_request|push|…)")
     args = ap.parse_args(argv)
     if args.command == "ref":
         print(image_ref(args.tool))
@@ -308,7 +388,7 @@ def main(argv: list[str]) -> int:
         print(json.dumps(findings(), indent=2))
         return 0
     if args.command == "verdict":
-        return verdict(args.mode)
+        return verdict(args.mode, args.event)
     return {"sbom": sbom, "all": all_scans, "check": check}[args.command]()
 
 

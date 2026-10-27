@@ -67,7 +67,8 @@ FAST_GATES: tuple[str, ...] = (
 DEFERRED: dict[str, str] = {
     "check-security-bot": "reads the bot's select labels and pin sources against the issue roster: a security-tracker change moves it, not the issue-bot's own PR",
     "check-security-issues": "reads the issue label roster and the scan policy: a security-tracker change moves it, not the issue-bot's own PR",
-    "check-security-scan": "reads data/security-policy.json and the scanner digests: a security-pipeline change moves it, not the issue-bot's own PR",
+    "check-security-scan": "reads data/security-policy.json and the scan digests: a security-pipeline change moves it, not the issue-bot's own PR",
+    "check-security-bumps": "reads tools/security-floors.in against the compiled pins: a security-pipeline change moves it, and a stale floor fails here rather than in the bot's PR",
     "check-scanner-images": "reads the scanner Dockerfiles and digests.json: a static gate a scan-pipeline change moves, not the issue-bot's own PR",
     "check-actions": "a static read of the workflow files: the change that would float an Action is a workflow edit, and the PR the bot opens is re-checked by the pin gate in ci-unit",
     "check-renovate": "a static read of renovate.json and ci.yml's trigger: a dependency-bot config change is not something the issue-bot's own PR can introduce",

@@ -76,6 +76,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-actions actions-report update-actions \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-renovate renovate-report \
+	security-bumps security-bumps-plan check-security-bumps \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -911,8 +912,8 @@ security-scan: ## Run ONE scanner from its immutable image (TOOL=syft|trivy|gryp
 	python3 scripts/security_scan.py scan "$(TOOL)"
 security-scan-all: ## Run every scanner from its pinned image in dependency order (Syft SBOM, then Trivy, Grype, Semgrep)
 	python3 scripts/security_scan.py all
-security-verdict: ## Apply data/security-policy.json to the reports (MODE=full|pr; full is critical+high with a fix, pr is critical only)
-	python3 scripts/security_scan.py verdict --mode "$(MODE)"
+security-verdict: ## Apply data/security-policy.json to the reports (EVENT=<github event> decides whether that event may gate; ENFORCE=pr forces report-only; issue #715, #738)
+	python3 scripts/security_scan.py verdict --event "$(EVENT)" $(if $(ENFORCE),--mode "$(ENFORCE)",)
 check-security-scan: ## CI: fail when the scan policy is empty/unknown or a scanner ref is missing from digests.json (issue #715)
 	python3 scripts/security_scan.py check
 security-issues-plan: ## Print the tagged issues the current reports would create/update/clear and mutate nothing (issue #716)
@@ -927,6 +928,12 @@ security-bot: ## Apply the advisory's pin, run the fast gates, and open ONE PR t
 	python3 scripts/security_bot.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" $(if $(DRY),--dry,)
 check-security-bot: ## CI: fail when the bot's select labels/pin sources disagree with the issue roster or a compiled requirements file became an edit target (issue #717)
 	python3 scripts/security_bot.py check
+security-bumps-plan: ## Print the minimum version the scan's findings demand per package, the pins it would move, and the issues the bump PR would close (issue #738)
+	python3 scripts/security_bumps.py plan
+security-bumps: ## Write tools/security-floors.in, regenerate the compiled pins through the one generator, and open ONE PR that closes the issues it fixes (DRY=1 prints and pushes nothing; issue #738)
+	python3 scripts/security_bumps.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" $(if $(DRY),--dry,)
+check-security-bumps: ## CI: fail when a floor line states no advisory, a compiled pin is below its floor, or the `-c security-floors.in` include is gone (issue #738)
+	python3 scripts/security_bumps.py check
 scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep, issue #714)
 	python3 scripts/scanner_image.py build "$(SCANNER)"
 test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
@@ -1480,6 +1487,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-scanner-images
 	$(MAKE) check-security-scan
 	$(MAKE) check-security-issues
+	$(MAKE) check-security-bumps
 	$(MAKE) check-security-bot
 	$(MAKE) check-actions
 	$(MAKE) check-renovate

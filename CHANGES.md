@@ -13,6 +13,7 @@ index, or when a row here names a note that does not exist.
 |---|---|---|---|
 | 2026-10-27 | Renovate owns the low-risk pins, and nothing generated | [2026-10-27-renovate-dependencies.md](agent-wiki/2026-10-27-renovate-dependencies.md) | #718 |
 | 2026-10-27 | every GitHub Action runs at a commit, not at a tag | [2026-10-27-pin-github-actions.md](agent-wiki/2026-10-27-pin-github-actions.md) | #719 |
+| 2026-10-27 | the scan is its own daily pipeline (never on PR/push), and the pins it names are compiled into the requirements by the run that reports them | [2026-10-27-security-daily-self-correct.md](agent-wiki/2026-10-27-security-daily-self-correct.md) | #738, #718, #739 |
 | 2026-10-27 | the bot turns one auto-fixable issue into one green PR, or nothing | [2026-10-27-security-bot.md](agent-wiki/2026-10-27-security-bot.md) | #717 |
 | 2026-10-27 | a finding becomes exactly one tagged issue, and never a duplicate | [2026-10-27-security-issues.md](agent-wiki/2026-10-27-security-issues.md) | #716 |
 | 2026-10-27 | the scans run from pinned images; a PR run is narrower than the daily run | [2026-10-27-security-scan-workflow.md](agent-wiki/2026-10-27-security-scan-workflow.md) | #715 |

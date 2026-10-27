@@ -1,7 +1,8 @@
 {
-  "$comment": "The scan failure + issue policy (issue #715). `fail_on` is what a scheduled or manually dispatched run fails the pipeline on; `pr_fail_on` is what a pull_request run enforces — empty means REPORT-ONLY (SARIF + artifact + issues come from the daily run), because a pre-existing advisory with a fix must not red every PR in the repository; `issue_severities` is what `make security-issues` (#716) turns into a tagged issue. `require_fix` restricts all three to findings the scanner says have a fixed version.",
+  "$comment": "The scan failure + issue policy (issue #715, event scoping #738). `fail_on` is what a run fails on; `pr_fail_on` is the narrower set a report-only run would use (empty means REPORT-ONLY: findings are counted, printed, uploaded as SARIF and filed as issues); `enforce_events` names the ONLY events that may fail the run — the scan is its own daily pipeline and can never gate a push or a pull request (make check-security-scan refuses it); `issue_severities` is what `make security-issues` (#716) turns into a tagged issue. `require_fix` restricts all of them to findings the scanner says have a fixed version.",
   "fail_on": ["critical", "high"],
   "pr_fail_on": [],
+  "enforce_events": ["schedule", "workflow_dispatch"],
   "require_fix": true,
   "issue_severities": ["critical", "high"]
 }
