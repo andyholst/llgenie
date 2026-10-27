@@ -109,6 +109,10 @@ make install
    the 300 t/s one from a `2x RTX 4090` box. A card size that cannot be detected (an Apple-Silicon
    or CPU host) leaves the backend rule alone. The t/s text comes from ONE rule
    (`model_engine_pick.tps_label`), so the printed list and its tests cannot disagree.
+   An engine is offered only when the model has a **downloadable plan** for it: a t/s figure says
+   somebody ran the model, not that you can fetch it. The committed quant table
+   (`data/trending-quant-catalog.json`) is what answers that, so a model the table does not cover
+   yet is still served (it falls back to a live Hub lookup).
 3. **Download** when missing, in the engine's format:
    - `gguf`: the registry's GGUF repo, else the most-downloaded `<name>-GGUF` repo; the largest GGUF
      within 80% of the card minus 1 GiB (16 GB -> 11.8 GB). MoE models add system RAM minus 4 GiB
