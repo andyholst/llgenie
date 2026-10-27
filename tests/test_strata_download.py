@@ -129,9 +129,28 @@ def test_the_not_hub_set_is_whatever_the_pinned_setup_py_declares(setup_py):
 # model name -> Strata's choice -> exact files
 # ---------------------------------------------------------------------------
 def test_the_registry_model_is_the_one_strata_serves():
+    """Strata serves ONE family's checkpoints: every store row of that base model, and no other.
+
+    The vendored store now carries per-box rows of the same base model (`Qwen3.8-Flash-Next` on a
+    Strix Halo, an iPad eGPU, an MTPLX Mac), so "exactly one row" is a store-shape pin rather than
+    the rule — the rule is that what Strata serves is that base model and nothing else (#750).
+    """
+    # Given the family repo Strata's setup.py installs from
+    base = next(iter(mp.strata_map()["families"].values()))["repo"].rsplit("/", 1)[-1].lower()
+
+    # When every vendored row is asked whether Strata serves it
+    served = [m for m in mp.load_registry()["models"] if mp.strata_serves(m)]
+
+    # Then the fixture model is one, every served row names that base model, and another
+    # model never is
     assert mp.strata_serves(_model())
-    others = [m for m in mp.load_registry()["models"] if m["id"] != "qwen3.8-flash-next-125b"]
-    assert not any(mp.strata_serves(m) for m in others)
+    assert served, "no store row is the model Strata serves"
+    # Each row's OWN base name (the part after the owner) sits inside the family repo's name:
+    # `org/Qwen3.8-Flash-Next` -> "qwen3.8-flash-next" in "qwen3.8-flash-next-gsq-rco-gguf".
+    assert all(
+        str(m.get("hf") or "").rsplit("/", 1)[-1].lower() in base for m in served
+    ), [m.get("hf") for m in served]
+    assert not mp.strata_serves({"id": "not-it", "hf": "org/definitely-not-the-family"})
 
 
 @pytest.mark.parametrize("ram,want", sorted(EXPECTED.items()))

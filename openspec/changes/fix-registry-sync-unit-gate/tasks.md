@@ -12,7 +12,8 @@
 - [x] 10. `data/unsupported-engines.json`: 18 engines dated and decided from their own upstream READMEs (26 entries total); `make check-engine-skill-gap` reports `unresolved 0`.
 - [x] 11. Re-render the synced artifacts in the job's order and commit them together (`data/models.json`, `data/trending-README.md`, `data/trending-quant-catalog.json` + fixture, `tests/fixtures/trend-list-matrix.json`, `data/engine-skill-gap.json`).
 - [x] 12. `make check-registry check-quant-catalog check-trend-list-matrix check-engine-skill-gap` and `make skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json` are green on the synced files.
-- [ ] 13. `make test-unit` green on the synced store (the gate the sync job's own step 9 runs).
+- [x] 13. `make test-unit` green on the synced store — `14527 passed, 6 deselected in 1419.57s` (the gate the sync job's own step 9 runs).
 - [x] 14. `make openspec-validate NAME=fix-registry-sync-unit-gate` exits 0.
 - [x] 15. Docs: README's registry-sync section states what the gate now guarantees; `agent-wiki/2026-10-27-registry-sync-unit-gate.md` records the change; `CHANGES.md` carries its row; `make check-docs` green.
-- [ ] 16. OpenSpec validation green and the change recorded in `CHANGES.md` / `agent-wiki/` in the same commit batch.
+- [x] 16. OpenSpec validation green and the change recorded in `CHANGES.md` / `agent-wiki/` in the same commit batch.
+- [x] 17. The live-only `make test-strata-live` file states its rule instead of a store shape: `test_the_registry_model_is_the_one_strata_serves` asserts every served row IS Strata's family, not that exactly one row exists (the new store carries six per-box rows of that base model) — `31 passed`.

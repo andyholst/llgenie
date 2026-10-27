@@ -45,7 +45,14 @@ families, and only one of them is really "the data changed":
 
 ## Verified
 
-- The 5 failing families in the job's order, in the test image: 36 failed → 0.
+- `make test-unit` on the synced store: **14527 passed, 6 deselected in 1419.57s** (the step the sync
+  job reds on; it was `36 failed, 14486 passed` before this change).
+- The families separately, in the test image: the pick suite, the catalog file, the trend-list matrix
+  and the hub probe all green.
+- `make test-strata-live` (kept out of the hermetic gate): `31 passed`. Its
+  `test_the_registry_model_is_the_one_strata_serves` pinned "exactly one store row is Strata's model";
+  the new store carries six per-box rows of that same base model, so the test now asserts the rule —
+  every row `strata_serves()` accepts IS that family's base model — instead of a row count.
 - `make check-engine-skill-gap`: `42 engines, 16 skills; shipped 16 (4 with no image),
   known-unsupported 26, unresolved 0`.
 - The regenerated artifacts carry the same stamp (`generated_utc` `2026-10-27T12:53:42Z`).
