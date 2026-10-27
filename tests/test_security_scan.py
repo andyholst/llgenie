@@ -294,27 +294,37 @@ def test_semgrep_uses_an_explicit_pack_not_auto(tmp_path, monkeypatch):
     assert "--metrics" in argv and "off" in argv
 
 
-def test_the_default_sweep_needs_no_account(tmp_path, monkeypatch):
-    """Trivy, Syft/Grype and Semgrep are local; Snyk is opt-in and never in the default run."""
+def test_the_stack_needs_no_account_and_no_secret(tmp_path, monkeypatch):
+    """The whole stack is local: Trivy, Syft, Grype and Semgrep run from pinned images, and no
+    scanner is behind a token — so no run is ever skipped for a missing credential."""
 
-    # Given the shipped tool sets
-    # Then  the default sweep is the three local scanners and Snyk is opt-in only
-    assert ss.TOOLS == ("trivy", "grype", "semgrep")
-    assert ss.OPTIONAL_TOOLS == ("snyk",)
-    assert "snyk" not in ss.TOOLS
+    # Given the shipped tool set
+    # Then  every tool is one of the local scanners, and there is no opt-in SaaS set
+    assert ss.TOOLS == ("trivy", "grype", "semgrep"), ss.TOOLS
+    assert ss.ALL_TOOLS == ("syft",) + ss.TOOLS
+    assert not hasattr(ss, "OPTIONAL_TOOLS")
+
+    # And   only the image-backed scanners carry a digest entry
+    assert set(ss.digests()) == {"trivy", "grype", "semgrep"}
+
+    # And   Syft is reachable as a tool id (it writes the SBOM the Grype match reads)
+    monkeypatch.setattr(ss, "ensure_image_for", lambda ref: ref)
+    calls = []
+    monkeypatch.setattr(ss.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0})())
+    assert ss.scan("syft") == 0
+    assert "--entrypoint" in calls[-1] and calls[-1][calls[-1].index("--entrypoint") + 1] == "syft"
 
 
-def test_snyk_is_opt_in_and_loud_without_a_token(tmp_path, monkeypatch):
-    """Asking for Snyk without SNYK_TOKEN records the reason and says so — it is not a pass."""
+def test_an_unknown_tool_is_refused():
+    """An unknown tool id fails by name instead of silently scanning nothing."""
 
-    # Given no token in the environment
-    monkeypatch.delenv("SNYK_TOKEN", raising=False)
-    monkeypatch.setattr(ss, "REPORTS", tmp_path / "reports")
-
-    # When  Snyk is asked for explicitly
-    rc = ss.scan("snyk")
-
-    # Then  it exits 0 with a recorded reason, and the console says it skipped
-    assert rc == 0
-    body = json.loads((tmp_path / "reports" / "snyk.json").read_text())
-    assert body["skipped"] is True and "SNYK_TOKEN" in body["reason"]
+    # Given an id that is not in the stack
+    # When  a scan is asked for it
+    try:
+        ss.scan("snyk")
+    except SystemExit as exc:
+        # Then  it exits non-zero naming what IS known, and never runs a scanner
+        assert "unknown tool" in str(exc) and "grype" in str(exc), str(exc)
+    else:
+        raise AssertionError("an unknown tool was accepted")

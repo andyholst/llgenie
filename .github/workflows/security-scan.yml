@@ -1,4 +1,4 @@
-name: security-scan — Trivy/Grype/Snyk/Semgrep + CycloneDX SBOM on PR, push, schedule and manual dispatch
+name: security-scan — Trivy + Syft + Grype + Semgrep on PR, push, schedule and manual dispatch
 
 # Issue #715 (parent #713). Every scanner runs from ITS OWN immutable image, named by
 # containers/scanners/digests.json (a content hash of the Dockerfile, built by this repository —
@@ -9,10 +9,10 @@ name: security-scan — Trivy/Grype/Snyk/Semgrep + CycloneDX SBOM on PR, push, s
 #                  the repository bot and any collaborator with write access (the `guard` job).
 # Flow: guard (owner / repository bot on a same-repo head / collaborator with write, BEFORE any
 #       scanner runs) -> make check-security-scan (policy + digests sane) -> make security-scan-all
-#       (Syft SBOM, then Trivy, Grype, Semgrep, Snyk from their pinned images) -> make
+#       (Syft SBOM, then Trivy, Grype and Semgrep from their pinned images) -> make
 #       security-verdict MODE=<pr|full> -> upload SARIF + the CycloneDX SBOM artifact.
 # Never: never merges, never pushes, never installs a scanner, never runs a scanner from a floating
-#        tag, never treats a skipped Snyk (no SNYK_TOKEN) as a pass.
+#        tag, and never needs a scanner secret: no scanner takes one.
 on:
   pull_request:
     branches: ["main"]
@@ -23,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Which scanners to run: all, or one of trivy / grype / semgrep / snyk"
+        description: "Which scanners to run: all, or one of syft / trivy / grype / semgrep"
         type: choice
-        options: [all, trivy, grype, semgrep, snyk]
+        options: [all, syft, trivy, grype, semgrep]
         default: all
       enforce:
         description: "Failure policy: full (fail on critical+high with a fix) or pr (critical only)"
@@ -86,9 +86,6 @@ jobs:
       packages: read
       issues: write            # tagged vulnerability issues (#716)
       security-events: write   # SARIF upload, scoped to this job only
-    env:
-      # A registry-owned Snyk token: the step is LOUD when it is absent, never a silent pass.
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

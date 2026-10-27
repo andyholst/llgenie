@@ -147,8 +147,8 @@ def body_for(finding: Finding, run_url: str = "") -> str:
         "",
         "- Transitive dependencies this advisory pulls in are separate findings: each gets its own "
         "issue with its own advisory id.",
-        "- A scanner that is not configured in this run (Snyk without `SNYK_TOKEN`) reports the "
-        "reason in `security-reports/snyk.json`; it is not a clean result for this package.",
+        "- A scanner that could not run (its report is absent) is not a clean result for this "
+        "package: `make security-verdict` refuses instead of passing.",
     ])
 
 
