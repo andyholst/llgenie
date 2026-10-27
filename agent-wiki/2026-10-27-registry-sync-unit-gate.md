@@ -1,7 +1,7 @@
 # The weekly sync's own `test-unit` gate passes on the store it just downloaded
 
 Issue #750 (the run-failure reactor's filing for the `registry-sync` run at `d190aed`), which is the
-same work as the store review #749. Delivered in the branch's PR.
+same work as the store review #749. Delivered in PR #753.
 
 ## What was wrong
 

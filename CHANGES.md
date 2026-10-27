@@ -11,7 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
-| 2026-10-27 | the weekly sync's own gate passes on the store it downloaded: the quant table stops inventing plans, an engine without a plan is not offered, a gated link is not a dead one, and the 18 new engines are dated and decided | [2026-10-27-registry-sync-unit-gate.md](agent-wiki/2026-10-27-registry-sync-unit-gate.md) | #750, #749 |
+| 2026-10-27 | the weekly sync's own gate passes on the store it downloaded: the quant table stops inventing plans, an engine without a plan is not offered, a gated link is not a dead one, and the 18 new engines are dated and decided | [2026-10-27-registry-sync-unit-gate.md](agent-wiki/2026-10-27-registry-sync-unit-gate.md) | #750, #749, PR #753 |
 | 2026-10-27 | the security stack names no scanner this repository does not ship (Trivy + Grype/Syft + Semgrep) | [2026-10-27-security-stack-roster.md](agent-wiki/2026-10-27-security-stack-roster.md) | #714, #715, #725, #729 |
 | 2026-10-27 | Every issue states the problem, why, how, the benefit and its acceptance criteria, then one technical section — rendered by `scripts/issue_body.py` and gated by `make check-issue-bodies` | [2026-10-27-issue-body-shape.md](agent-wiki/2026-10-27-issue-body-shape.md) | #745 |
 | 2026-10-27 | Renovate owns the low-risk pins, and nothing generated | [2026-10-27-renovate-dependencies.md](agent-wiki/2026-10-27-renovate-dependencies.md) | #718 |
