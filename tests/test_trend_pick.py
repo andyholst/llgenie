@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -295,6 +296,112 @@ def test_authorize_never_sends_the_token_to_a_hub_web_page(monkeypatch):
     # Then only the API and the resolve endpoint carry it
     assert [dict(h).get("Authorization") for h in headers] == [
         None, "Bearer hf_testtoken", "Bearer hf_testtoken", None]
+
+
+def test_sync_vendors_the_contract_next_to_the_store(tmp_path):
+    """The sync writes the contract and its prose twin beside the store, so a contract edit
+    is a diff of the contract and not a shape change buried in the data (issue #694)."""
+    OUT = tmp_path / "out"
+    OUT.mkdir()
+
+    # Given the vendored store, README and contract as the source, and an empty destination
+    kw = dict(readme_src=str(sr.VENDORED_README), contract_src=str(sr.VENDORED_CONTRACT),
+              contract_doc_src=str(sr.VENDORED_CONTRACT_DOC))
+
+    # When the sync runs
+    assert sr.sync(str(VENDORED), OUT / "models.json", **kw) == 0
+
+    # Then all four files exist: the store the sync vendors (normalised, #687), the README
+    # upstream published, and both contract files byte-identical to the source
+    expected_store, _ = sr.normalise(sr.validate(VENDORED.read_bytes()))
+    assert json.loads((OUT / "models.json").read_text()) == expected_store
+    assert (OUT / "trending-README.md").read_bytes() == sr.VENDORED_README.read_bytes()
+    assert (OUT / "model_contract.json").read_bytes() == sr.VENDORED_CONTRACT.read_bytes()
+    assert (OUT / "MODEL_CONTRACT.md").read_bytes() == sr.VENDORED_CONTRACT_DOC.read_bytes()
+
+    # And a second run with the same source changes nothing
+    before = {p.name: p.read_bytes() for p in OUT.iterdir()}
+    assert sr.sync(str(VENDORED), OUT / "models.json", **kw) == 0
+    assert {p.name: p.read_bytes() for p in OUT.iterdir()} == before
+
+
+def test_check_refuses_a_store_with_no_vendored_contract(tmp_path, capsys):
+    """A store with no contract beside it cannot be validated: the check fails and says how
+    to fix it, rather than silently keeping the four-key hand check (issue #694)."""
+    OUT = tmp_path / "out"
+    OUT.mkdir()
+
+    # Given a store and README copied without the contract
+    (OUT / "models.json").write_bytes(VENDORED.read_bytes())
+    (OUT / "trending-README.md").write_bytes(sr.VENDORED_README.read_bytes())
+
+    # When the check runs
+    rc = sr.check(OUT / "models.json")
+
+    # Then it fails, naming the missing contract and how to provision it
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "missing" in err and "model_contract.json" in err and "make sync-registry" in err
+
+
+def test_check_contract_refuses_a_row_missing_a_contract_key():
+    """A row that lacks a key the vendored contract requires is refused by name, so a store
+    that would break the picker later fails at the gate (issue #694)."""
+    # Given the contract and a copy of the store whose first row has no last_seen
+    schema = json.loads(sr.VENDORED_CONTRACT.read_bytes())
+    data = json.loads(VENDORED.read_bytes())
+    data["models"][0].pop("last_seen")
+
+    # When the copy is validated against the contract
+    # Then it is refused, naming the row and the field
+    with pytest.raises(ValueError, match="last_seen"):
+        sr.check_contract(data, schema)
+
+
+def test_check_contract_refuses_a_bad_id_a_bad_backend_and_a_format_without_hf():
+    """The contract's pattern, enum and formats rules are enforced as the schema states them."""
+    schema = json.loads(sr.VENDORED_CONTRACT.read_bytes())
+    good = json.loads(VENDORED.read_bytes())
+
+    # Given a row whose id breaks the contract's pattern
+    bad_id = json.loads(json.dumps(good))
+    bad_id["models"][0]["id"] = "Not An Id"
+
+    # When/Then it is refused, naming the id
+    with pytest.raises(ValueError, match="id does not match"):
+        sr.check_contract(bad_id, schema)
+
+    # Given an engine whose backend is outside the contract's enum
+    bad_backend = json.loads(json.dumps(good))
+    first_engine = next(iter(bad_backend["engines"]))
+    bad_backend["engines"][first_engine]["backend"] = "TPU"
+
+    # When/Then it is refused, naming the engine and its backend
+    with pytest.raises(ValueError, match=f"engine .*{re.escape(first_engine)}.*backend"):
+        sr.check_contract(bad_backend, schema)
+
+    # Given a format entry with no hf repo id
+    bad_format = json.loads(json.dumps(good))
+    bad_format["models"][0]["formats"][0].pop("hf")
+
+    # When/Then it is refused, naming the row and the format index
+    with pytest.raises(ValueError, match="formats\\[0\\] lacks 'hf'"):
+        sr.check_contract(bad_format, schema)
+
+
+def test_the_vendored_contract_is_upstreams_and_the_store_satisfies_it():
+    """Live GitHub: the vendored contract is upstream's byte for byte, and the vendored store
+    satisfies it — the guard is upstream's definition of valid, not a guess (issue #694)."""
+    # Given the vendored copies and the live upstream ones
+    upstream_schema = sr.fetch(sr.UPSTREAM_CONTRACT)
+    upstream_doc = sr.fetch(sr.UPSTREAM_CONTRACT_DOC)
+
+    # Then each pair is byte-identical
+    assert sr.VENDORED_CONTRACT.read_bytes() == upstream_schema
+    assert sr.VENDORED_CONTRACT_DOC.read_bytes() == upstream_doc
+
+    # And the vendored store satisfies the contract it is committed with
+    sr.check_contract(json.loads(VENDORED.read_bytes()), json.loads(upstream_schema))
 
 
 def test_live_upstream_registry_is_the_live_readme_list():
