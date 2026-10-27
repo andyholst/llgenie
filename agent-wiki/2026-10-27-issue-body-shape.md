@@ -73,3 +73,12 @@ gated on nothing, so the artifact an implementer starts from was the one nobody 
 
 Implemented on `feat/issue-body-shape`; the issues already open are not rewritten by this change —
 the refiner restates one at a time, when it touches them.
+
+## Follow-up (`daf1e6b`)
+
+The queued-run alarm was the one producer whose evidence is a pasted log rather than a field list, and
+the first version handed that already-fenced report to the renderer as three separate technical items,
+so the filed body showed a fence colliding with its own fence. `_technical()` now emits a multi-line
+item verbatim (one bullet per fact, a block kept as a block), `queued_run_alarm` passes the caller's
+report as that one item, and `tests/test_queued_run_alarm.py` asserts the filed body's headings out of
+the recorded `issue create` argv instead of trusting the call.
