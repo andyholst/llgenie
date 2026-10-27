@@ -70,6 +70,7 @@ DEFERRED: dict[str, str] = {
     "check-security-scan": "reads data/security-policy.json and the scanner digests: a security-pipeline change moves it, not the issue-bot's own PR",
     "check-scanner-images": "reads the scanner Dockerfiles and digests.json: a static gate a scan-pipeline change moves, not the issue-bot's own PR",
     "check-actions": "a static read of the workflow files: the change that would float an Action is a workflow edit, and the PR the bot opens is re-checked by the pin gate in ci-unit",
+    "check-renovate": "a static read of renovate.json and ci.yml's trigger: a dependency-bot config change is not something the issue-bot's own PR can introduce",
     "test-unit": "the agent already ran the whole hermetic suite while writing the change (11-20 minutes); a second run would not fit the leg's budget",
     "skills-validate": "reads every engine skill against the registry; minutes, and the agent's test-unit run reads the same files",
     "check-registry": "re-validates the vendored registry shape; the agent's test-unit run covers the registry tests it drives",

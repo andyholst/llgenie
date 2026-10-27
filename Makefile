@@ -75,6 +75,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-actions actions-report update-actions \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-renovate renovate-report \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -946,6 +947,10 @@ actions-report: ## Show every `uses:` ref the action-pin gate reads, its pin sta
 	python3 scripts/pin_actions.py report
 update-actions: ## Re-resolve every pinned action's tag to its current commit SHA and rewrite the workflows (needs gh + network)
 	python3 scripts/pin_actions.py update
+check-renovate: ## CI: fail when renovate.json automerges more than low-risk updates, opens a second merge path, or may edit a generated/vendored file (issue #718)
+	python3 scripts/check_renovate.py check
+renovate-report: ## Show every Renovate package rule, its managers, its automerge state and the ignored paths
+	python3 scripts/check_renovate.py report
 # UNSUPPORTED=<file>: upstream engines with no skill are omitted from the trend
 # offer (no image). Passing the decisions file tolerates ONLY the engines recorded
 # there with a dated decision (issue #229); an engine with no skill and no decision
@@ -1477,6 +1482,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-security-issues
 	$(MAKE) check-security-bot
 	$(MAKE) check-actions
+	$(MAKE) check-renovate
 	$(MAKE) check-agent-skills
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates
