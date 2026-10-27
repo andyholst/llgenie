@@ -9,7 +9,7 @@ Commands (driven by make, never by hand):
 
     ref <tool>        print the immutable image ref for a scanner   make scanner-ref
     sbom              Syft -> security-reports/sbom.cdx.json        make sbom
-    scan <tool>       trivy | grype | semgrep | snyk                make security-scan TOOL=<id>
+    scan <tool>       syft | trivy | grype | semgrep                make security-scan TOOL=<id>
     all               sbom + every scanner, in dependency order     make security-scan-all
     verdict [--mode]  apply data/security-policy.json               make security-verdict [MODE=pr]
     findings          print every finding in one normalised shape   (diagnostics)
@@ -40,11 +40,15 @@ REPORTS = Path(os.environ.get("SECURITY_REPORTS") or (REPO / "security-reports")
 #: CycloneDX SBOM and Grype matches it, Semgrep covers SAST. Between them they answer "is anything in
 #: this tree known-vulnerable" from data shipped/downloaded to the runner.
 TOOLS = ("trivy", "grype", "semgrep")
-#: Opt-in only: Snyk is a SaaS product, so it needs `SNYK_TOKEN` and sends the analysis to Snyk's
-#: service. It is NOT part of the default sweep, and an unset token is a recorded skip — never a
-#: silent pass. `make security-scan TOOL=snyk` runs it deliberately.
-OPTIONAL_TOOLS = ("snyk",)
-ALL_TOOLS = TOOLS + OPTIONAL_TOOLS
+#: Syft is a tool id without an image of its own: it writes the SBOM through the Grype image
+#: (`--entrypoint syft`), so a caller may ask for it but `digests.json` carries no entry for it.
+SBOM_TOOL = "syft"
+#: Syft is a first-class tool id: `make security-scan TOOL=syft` writes the SBOM, and the default
+#: sweep runs it first because Grype matches exactly that file. It is reached through the Grype
+#: image (`--entrypoint syft`), so the stack builds one image per CVE scanner and none per SBOM.
+#: Snyk was REMOVED: it was the one scanner behind `SNYK_TOKEN`, and it re-reported the CVEs Trivy
+#: and Grype already report from the same tree and the same SBOM. No scanner needs a secret now.
+ALL_TOOLS = (SBOM_TOOL,) + TOOLS
 DEFAULT_POLICY = {
     "fail_on": ["critical", "high"],
     "pr_fail_on": ["critical"],
@@ -136,6 +140,8 @@ def sbom() -> int:
 def scan(tool: str) -> int:
     if tool not in ALL_TOOLS:
         raise SystemExit(f"[security-scan] unknown tool `{tool}`; known: {', '.join(ALL_TOOLS)}")
+    if tool == "syft":       # the SBOM step, addressable as a tool id
+        return sbom()
     if tool == "trivy":
         # One format per invocation (trivy takes one `--format`), so JSON for the verdict and SARIF
         # for the Security tab are two runs over the same tree.
@@ -157,20 +163,11 @@ def scan(tool: str) -> int:
         # per-run decision (measured on the 4th CI run of this job).
         return _run(["scan", "--config=p/default", "--json", "--output",
                      "/work/security-reports/semgrep.json", "--metrics", "off", "."], image_ref(tool))
-    # snyk
-    if not os.environ.get("SNYK_TOKEN"):
-        # LOUD, never silent: the reason is recorded in the report and printed, and it is not a pass.
-        REPORTS.mkdir(parents=True, exist_ok=True)
-        (REPORTS / "snyk.json").write_text(json.dumps({
-            "skipped": True, "reason": "SNYK_TOKEN is not set in this run"}, indent=2) + "\n")
-        print("[security-scan] SKIP snyk: SNYK_TOKEN is not set — recorded in "
-              "security-reports/snyk.json, not treated as a pass")
-        return 0
-    return _run(["test", "--all-projects",
-                 "--json-file-output=/work/security-reports/snyk.json"], image_ref(tool))
+    raise SystemExit(f"[security-scan] unknown tool `{tool}`; known: {', '.join(ALL_TOOLS)}")
 
 
 def all_scans() -> int:
+    """Syft first (Grype matches exactly that SBOM), then the CVE scanners."""
     rc = sbom()
     for tool in TOOLS:
         rc = scan(tool) or rc
@@ -271,7 +268,10 @@ def check() -> int:
     if set(map(str.lower, pol.get("pr_fail_on") or [])) - set(map(str.lower, pol.get("fail_on") or [])):
         problems.append("security-policy.json: `pr_fail_on` is not a subset of `fail_on`")
     recorded = digests()
-    for tool in ALL_TOOLS:
+    # Only the image-backed scanners carry a digest entry: the SBOM tool runs through the Grype
+    # image (`--entrypoint syft`), so requiring an entry for it would demand an image that does
+    # not exist — and a gate that cannot pass is not a gate.
+    for tool in TOOLS:
         entry = recorded.get(tool) or {}
         for key in ("version", "tag", "ref"):
             if not entry.get(key):
@@ -284,8 +284,8 @@ def check() -> int:
             print(f"  - {item}")
         return 1
     print(f"[security-scan] OK: fail_on={pol['fail_on']} pr_fail_on={pol['pr_fail_on']} "
-          f"require_fix={pol.get('require_fix')}, {len(ALL_TOOLS)} pinned scanner refs "
-          f"(default sweep: {', '.join(TOOLS)}; opt-in: {', '.join(OPTIONAL_TOOLS)})")
+          f"require_fix={pol.get('require_fix')}, {len(TOOLS)} pinned scanner refs "
+          f"(sweep: {', '.join(ALL_TOOLS)}; the SBOM tool rides the grype image; no secret needed)")
     return 0
 
 

@@ -30,10 +30,12 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
   verdict `REPORT-ONLY (pr)` exit 0, while `MODE=full` exits 1 listing the critical/high findings that
   have a fix.
 
-- **Snyk is opt-in, not part of a scan.** It is the one scanner here that needs a paid account, a
+- **Snyk was REMOVED, not made opt-in.** It was the one scanner needing a paid account, a
   token and a third-party service to receive the analysis; Trivy + Syft/Grype + Semgrep cover the
   same question with data the runner downloads itself. So `TOOLS` is the local three,
-  `OPTIONAL_TOOLS` is `snyk`, and `make security-scan TOOL=snyk` is the deliberate way to run it.
+  so the stack is Trivy + Syft + Grype + Semgrep and takes no secret at all. An earlier revision of
+  this note made Snyk opt-in; that was a half-measure — a scanner nobody should need is a scanner
+  the repository should not ship.
 
 ## Decisions
 
@@ -45,8 +47,7 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
   full policy. Both are data in `data/security-policy.json`, not literals in a workflow step.
 - **`require_fix: true`.** An advisory with no fixed version is recorded and never blocks: it is
   work nobody can do today, and #716 decides which recorded findings become issues.
-- **A skipped scanner is loud.** Without `SNYK_TOKEN` the Snyk step prints `SKIP … not treated as a
-  pass` and writes the reason into `security-reports/snyk.json`.
+- **No scanner is skipped for a credential**, because none takes one.
 - **A corrupt report fails.** `findings()` raises instead of answering zero — a green run that read
   nothing is the failure mode this avoids.
 - **Trivy is invoked twice** (JSON for the verdict, SARIF for the Security tab) because it takes one

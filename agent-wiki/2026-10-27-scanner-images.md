@@ -13,8 +13,9 @@ Issue #714 (parent #713). Branch `feat/scanner-images`.
   | grype (+syft) | same base | `grype 0.121.0-r0`, `syft 1.55.0-r1` | 290 MB |
   | semgrep | same base | `1.165.0-r0` | built |
 
-- Every scanner is a **Wolfi apk package** — an apk name and an exact apk version, so the build reads
-  nothing from a tool vendor's release page and the only mutable input is the digest-pinned base.
+- Every scanner is a **Wolfi apk package**. (Snyk, since removed, was the exception: its CLI came from the
+  version-named GitHub release and checked against the release's published sha256 — Wolfi does not
+  package it, and an unverified download would be the mutable tool this image exists to prevent.
 - `make check-scanner-images` → 0 (`4 scanner image(s) pinned by digest, exact version, and
   matching digests.json`), and 1 when a fixture floats its base or its `digests.json` is stale.
 - `tests/test_scanner_images.py`: 7 passed.

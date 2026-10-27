@@ -1243,7 +1243,7 @@ from the pipeline that will run.
 | `registry-sync-review.yml` | a GREEN registry-sync PR is reviewed into ONE agent:implement issue | `dry` (optional, default `false`) — Preview the brief and the issue body this run would file, filing nothing |
 | `registry-sync.yml` | syncs the vendored registry and regenerates the derived tables, then opens the PR | none — the sync has no modes: it always fetches the upstream registry, regenerates |
 | `search-smoke.yml` | one real Firecrawl request proves the masked web reach | none — the smoke takes no target: it always proves the same leg with one request. |
-| `security-scan.yml` | Trivy/Grype/Snyk/Semgrep + CycloneDX SBOM on PR, push, schedule and manual dispatch | `tools` (optional, default `all`) — Which scanners to run: all, or one of trivy / grype / semgrep / snyk<br>`enforce` (optional, default `full`) — Failure policy: full (fail on critical+high with a fix) or pr (critical only) |
+| `security-scan.yml` | Trivy + Syft + Grype + Semgrep on PR, push, schedule and manual dispatch | `tools` (optional, default `all`) — Which scanners to run: all, or one of syft / trivy / grype / semgrep<br>`enforce` (optional, default `full`) — Failure policy: full (fail on critical+high with a fix) or pr (critical only) |
 <!-- dispatch-forms:end -->
 
 ## Verification, loop & CI (containerized — same everywhere)
