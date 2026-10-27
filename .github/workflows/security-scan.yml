@@ -84,6 +84,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      issues: write            # tagged vulnerability issues (#716)
       security-events: write   # SARIF upload, scoped to this job only
     env:
       # A registry-owned Snyk token: the step is LOUD when it is absent, never a silent pass.
@@ -113,6 +114,13 @@ jobs:
             if [ "${{ github.event_name }}" = "pull_request" ]; then MODE=pr; else MODE=full; fi
           fi
           make security-verdict MODE="$MODE"
+
+      - name: make security-issues (file or update the tagged issues; never on a pull_request)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SECURITY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: make security-issues SLUG="${{ github.repository }}" RUN_URL="$SECURITY_RUN_URL"
 
       - name: Upload SARIF to the Security tab
         if: always() && hashFiles('security-reports/trivy.sarif') != ''

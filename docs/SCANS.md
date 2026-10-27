@@ -72,6 +72,31 @@ would leave root-owned files in the tree (issue #433).
 | `make security-verdict MODE=full\|pr` | apply the policy to the reports; the run's exit code |
 | `make check-security-scan` | **The gate** (inside `make ci-unit`): empty/unknown policy severities, `pr_fail_on ⊄ fail_on`, or a scanner missing from `digests.json` fails |
 
+## Findings become tagged issues
+
+`make security-issues` (after the verdict, on a `push`, a `schedule` run and a manual dispatch —
+never on a `pull_request`, whose findings belong to the PR) turns the reports into GitHub issues:
+
+- **one issue per (advisory, package)**, keyed by an HTML marker in the body
+  (`<!-- security-finding: trivy:CVE-…:numpy -->`), so a re-scan **updates** the same issue and
+  never opens a duplicate;
+- **labels**: `security`, `vulnerability`, `severity:critical` / `severity:high`,
+  `component:python` / `component:container` / `component:code`, and `auto-fixable` when the
+  scanner names a fixed version — every label is created (with colour and description) on first use;
+- **body**: advisory id and scanner, affected package, current → fixed, severity, the run link,
+  the suggested action, and a `Not covered` section;
+- **clearing**: an advisory the scanner no longer reports is commented with the run that cleared it
+  and closed; a closure that `gh` refuses (a remediation PR still references it) is a warning, never
+  a crash.
+
+`make security-issues-plan` prints the same create/update/clear plan and mutates nothing.
+
+| Target | What it does |
+|---|---|
+| `make security-issues-plan` | print the plan (no GitHub write) |
+| `make security-issues SLUG=owner/name RUN_URL=<link>` | create/update/close through `gh` |
+| `make check-security-issues` | **The gate** (inside `make ci-unit`): `issue_severities` empty or not a subset of `fail_on`, a missing label, or a marker that does not round-trip fails |
+
 ## Reading a failure
 
 `make security-verdict` prints every blocking finding as
