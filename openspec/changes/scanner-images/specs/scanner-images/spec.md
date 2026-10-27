@@ -2,7 +2,7 @@
 
 ### Requirement: One immutable image per scanner
 
-Each scanner (`trivy`, `grype`+`syft`, `semgrep`, `snyk`) MUST have its own
+Each scanner (`trivy`, `grype`+`syft`, `semgrep`) MUST have its own
 `containers/scanners/<id>/Dockerfile` whose base image is pinned by digest
 (`FROM image@sha256:<64 hex>`) and whose scanner is pinned to an explicit exact version
 (`ARG <SCANNER>_VERSION=<version>`). A `FROM` that names a tag without a digest, a version range,

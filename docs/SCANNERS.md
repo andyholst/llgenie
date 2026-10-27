@@ -9,7 +9,6 @@ a scan is a mutable tool on a mutable base, with network access while it is judg
 | Trivy | `containers/scanners/trivy/` | filesystem/repo and image vulnerabilities, secrets, misconfigurations |
 | Grype + Syft | `containers/scanners/grype/` | Syft writes the CycloneDX SBOM, Grype matches it |
 | Semgrep | `containers/scanners/semgrep/` | SAST over the application code |
-| Snyk | `containers/scanners/snyk/` | the pinned upstream CLI, verified against its release sha256 |
 
 ## The immutability rules (enforced, not conventions)
 
@@ -21,7 +20,8 @@ a scan is a mutable tool on a mutable base, with network access while it is judg
 - **The published tag is a content hash** — `ghcr.io/<owner>/llgenie/trivy:<12-hex>` where the hash
   is the Dockerfile's sha256, the same convention `llgenie/test` uses. A changed Dockerfile is a
   different tag, so a published tag can never mean two builds.
-- **Snyk's download is checksum-verified** — Wolfi does not package the Snyk CLI, so the Dockerfile
+- **Snyk was removed** — the only scanner that needed a repository secret, and a duplicate of what
+  Trivy and Grype already report over the same tree and the same SBOM.
   fetches the version-named release asset and fails the build when its sha256 does not match.
 
 `containers/scanners/digests.json` is the file the scan workflow reads: one entry per scanner with
@@ -43,7 +43,7 @@ at a build that no longer matches the tree).
 
 ## Bumping a scanner
 
-1. Change the exact version in the scanner's Dockerfile (and, for Snyk, the release's sha256).
+1. Change the exact version in the scanner's Dockerfile.
 2. `make scanner-digests && make check-scanner-images`.
 3. `make test-scanner-image SCANNER=<id>` — the version the binary prints must be the pin.
 4. Commit the Dockerfile **and** `digests.json` together: a Dockerfile alone leaves the scan

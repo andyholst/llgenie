@@ -12,16 +12,15 @@ Issue #714 (parent #713). Branch `feat/scanner-images`.
   | trivy | `cgr.dev/chainguard/wolfi-base@sha256:0feab531…` | `0.70.0-r5` | 402 MB |
   | grype (+syft) | same base | `grype 0.121.0-r0`, `syft 1.55.0-r1` | 290 MB |
   | semgrep | same base | `1.165.0-r0` | built |
-  | snyk | same base | `1.1308.3` + sha256-verified release asset | built |
 
-- Every scanner is a **Wolfi apk package** except Snyk, whose CLI is fetched from the
+- Every scanner is a **Wolfi apk package**. (Snyk, since removed, was the exception: its CLI came from the
   version-named GitHub release and checked against the release's published sha256 — Wolfi does not
   package it, and an unverified download would be the mutable tool this image exists to prevent.
 - `make check-scanner-images` → 0 (`4 scanner image(s) pinned by digest, exact version, and
   matching digests.json`), and 1 when a fixture floats its base or its `digests.json` is stale.
 - `tests/test_scanner_images.py`: 7 passed.
 - Two defects the real builds exposed, both fixed in this change: wolfi-base has no
-  `/usr/local/bin`, so the Snyk image now creates it before `curl -o` (without it the download
+  `/usr/local/bin`, so its image created it before `curl -o` (without it the download
   fails with `curl: (23) client returned ERROR on write`), and the gate's floating-`FROM` rule
   initially matched the digest form itself (a negative lookahead keeps `image@sha256:<hex>` out).
 

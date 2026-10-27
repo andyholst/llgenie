@@ -41,7 +41,6 @@ SCANNERS: dict[str, dict[str, str]] = {
     "trivy": {"arg": "TRIVY_VERSION", "cmd": "version"},
     "grype": {"arg": "GRYPE_VERSION", "cmd": "version"},
     "semgrep": {"arg": "SEMGREP_VERSION", "cmd": "--version"},
-    "snyk": {"arg": "SNYK_VERSION", "cmd": "--version"},
 }
 #: A base image must be pinned by digest: `FROM image@sha256:<64 hex>`.
 FROM_DIGEST = re.compile(r"^FROM\s+(\S+)@sha256:([0-9a-f]{64})\s*$", re.M)

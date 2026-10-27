@@ -11,12 +11,6 @@
     "tag": "69170b46efd8",
     "version": "1.165.0-r0"
   },
-  "snyk": {
-    "dockerfile": "containers/scanners/snyk/Dockerfile",
-    "ref": "ghcr.io/asimov-agent/llgenie/snyk:d9b2923f998c",
-    "tag": "d9b2923f998c",
-    "version": "1.1308.3"
-  },
   "trivy": {
     "dockerfile": "containers/scanners/trivy/Dockerfile",
     "ref": "ghcr.io/asimov-agent/llgenie/trivy:0abec50ba0db",

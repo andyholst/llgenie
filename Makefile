@@ -901,7 +901,7 @@ check-workflows: ## CI: fail when a YAML file's GitHub expression does not parse
 	python3 scripts/check_workflows.py check
 workflows-report: ## Show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
 	python3 scripts/check_workflows.py report
-scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep|snyk, issue #714)
+scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep, issue #714)
 	python3 scripts/scanner_image.py build "$(SCANNER)"
 test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
 	python3 scripts/scanner_image.py test "$(SCANNER)"
