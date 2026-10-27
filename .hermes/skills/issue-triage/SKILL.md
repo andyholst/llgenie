@@ -35,7 +35,18 @@ TRIAGE: implement
 ```
 TRIAGE: refine
 REFINED:
-<the issue restated so a reviewer could act on it: acceptance criteria that can be ticked off>
+## Problem
+<what is wrong, observed — the measured symptom, not the ticket title>
+## Why it matters
+<the consequence of leaving it: what breaks, what it costs, what it blocks>
+## How we fix it
+<numbered, plain language — what changes, and why that addresses the cause>
+## Benefit
+<what the reader gets once it is fixed; what stops happening>
+## Acceptance criteria
+- [ ] <one provable outcome per line, tickable by a reviewer>
+## Technical
+<LAST: files, make targets, tests, gates, measured numbers>
 REASON: <one line: which decision was open and how the restatement settles it>
 ```
 
@@ -55,5 +66,10 @@ REASON: <one line>
   artifact you checked.
 - **Do not implement anything.** No code, no branch, no PR, no comment on the issue. The host reads
   `triage.md` and acts; a comment you post yourself will appear twice.
-- `implement` means the acceptance criteria are concrete enough that the implementer can start
+- **A refine restates the issue in the repository's shape** — `## Problem`, `## Why it matters`,
+  `## How we fix it`, `## Benefit`, `## Acceptance criteria` (one `- [ ]` item each), then
+  `## Technical` last. A restatement that does not carry all six, in that order, is not a
+  restatement: the implementer starts from it, and `make check-issue-bodies` holds the producers to
+  exactly this shape.
+- **`implement` means the acceptance criteria are concrete enough** that the implementer can start
   without asking anything — if they are not, that is a `refine`.

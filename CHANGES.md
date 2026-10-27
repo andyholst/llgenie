@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-27 | Every issue states the problem, why, how, the benefit and its acceptance criteria, then one technical section — rendered by `scripts/issue_body.py` and gated by `make check-issue-bodies` | [2026-10-27-issue-body-shape.md](agent-wiki/2026-10-27-issue-body-shape.md) | #745 |
 | 2026-10-27 | Renovate owns the low-risk pins, and nothing generated | [2026-10-27-renovate-dependencies.md](agent-wiki/2026-10-27-renovate-dependencies.md) | #718 |
 | 2026-10-27 | every GitHub Action runs at a commit, not at a tag | [2026-10-27-pin-github-actions.md](agent-wiki/2026-10-27-pin-github-actions.md) | #719 |
 | 2026-10-27 | the scan is its own daily pipeline (never on PR/push), and the pins it names are compiled into the requirements by the run that reports them | [2026-10-27-security-daily-self-correct.md](agent-wiki/2026-10-27-security-daily-self-correct.md) | #738, #718, #739 |

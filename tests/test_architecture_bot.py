@@ -243,7 +243,11 @@ def test_publish_opens_one_linked_issue_and_pr(tmp_path, monkeypatch):
     assert author == "Asimov Agent <support@docondee.com>"
     assert result["pr_body"].rstrip().endswith("closes #7")
     for part in ("Issue:", "Fix:", "Benefit:", "Technical:"):
-        assert part in result["issue_body"]
+        assert part in result["pr_body"]
+    # And the issue carries the shape every issue carries (issue #745)
+    for part in ("## Problem", "## Why it matters", "## How we fix it", "## Benefit",
+                 "## Acceptance criteria", "## Technical"):
+        assert part in result["issue_body"], part
 
     # And it never merged and never pushed to main
     assert not any(" merge" in c for c in calls)

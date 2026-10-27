@@ -72,7 +72,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report check-issue-bodies issue-bodies-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-actions actions-report update-actions \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-renovate renovate-report \
@@ -892,6 +892,10 @@ check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is emp
 	python3 scripts/check_pr_hygiene.py check
 pr-hygiene-report: ## Show every producer the PR/commit-message guard reads, and its verdict
 	python3 scripts/check_pr_hygiene.py report
+check-issue-bodies: ## CI: fail when a producer hand-builds an issue body, a body misses a section or puts `## Technical` anywhere but last, an acceptance criterion is absent, or AGENTS.md / the issue skills lost the rule (issue #745)
+	python3 scripts/check_issue_body.py check
+issue-bodies-report: ## Show every issue producer, whether it renders through the one seam, the section order and the verdict
+	python3 scripts/check_issue_body.py report
 # BASE/HEAD bound the commit range the guard reads (defaults: origin/main..HEAD). ci-unit runs it with
 # no range, so the static half (AGENTS.md + the producers) is still checked on a push to main; a PR
 # run reads the commits the PR adds.
@@ -1482,6 +1486,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-docs
 	$(MAKE) check-dispatch-forms
 	$(MAKE) check-pr-hygiene
+	$(MAKE) check-issue-bodies
 	$(MAKE) check-pr-authors
 	$(MAKE) check-workflows
 	$(MAKE) check-scanner-images

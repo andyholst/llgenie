@@ -30,6 +30,7 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import engine_skill_gap as gap_mod  # noqa: E402
+import issue_body  # noqa: E402  (the one issue shape, issue #745)
 import engine_skills as es  # noqa: E402
 import model_engine_pick as mp  # noqa: E402
 import unit_tests as ut  # noqa: E402  (the unit-suite aggregator, issue #393)
@@ -343,6 +344,9 @@ def test_spawn_opens_one_issue_per_unresolved_engine_with_real_evidence(tmp_path
     assert "`new-7b`" in body          # a model that lists it
     assert "new-7b" in body.split("ONLY engines are unskilled")[1]  # and it is the only one
     assert "#229" in body
+    # And the body is the repository's issue shape: what/why/how/benefit before the evidence
+    assert issue_body.missing(body) == [], issue_body.missing(body)
+    assert issue_body.headings(body)[-1] == "Technical"
     assert "created" in r.stdout
 
     # And the listing call searched for the exact issue title

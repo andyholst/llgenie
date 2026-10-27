@@ -41,9 +41,68 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from issue_body import render as render_body  # noqa: E402  (the one issue shape, #745)
+
 WORKFLOWS = ".github/workflows"
 #: The marker a filed issue carries, so a later run recognises its own work and stays quiet.
 MARKER = "<!-- code-review:{key} -->"
+
+#: What each check family costs, in plain language, so a filed finding says WHY before it says where
+#: (issue #745). `DEFAULT_FAMILY` covers a check added without its own prose — the body is still
+#: complete, just less specific.
+DEFAULT_FAMILY = {
+    "why": ("The rule this check enforces exists because the violation is silent: nothing fails when "
+            "it happens, and the cost only shows up later as an unexplained red run or a step whose "
+            "behaviour differs from every other command in the pipeline."),
+    "how": ["Fix the finding where `where` names it, so the check stops reporting this key.",
+            "Re-run `make code-review-scan` and confirm this key is gone."],
+    "benefit": ("The repository's own rule is enforced by the pipeline instead of by a reviewer who "
+                "has to remember it, and the next change that would repeat the mistake is refused."),
+}
+FAMILY: dict[str, dict] = {
+    "workflow-inline-scripts": {
+        "why": ("A `run:` block that reaches into the repository is a second implementation of a step "
+                "the Makefile already owns: it cannot be reproduced on the host, it is not exercised "
+                "by any make target, and it drifts from the target that does the same work."),
+        "how": ["Move the logic into a make target (or reuse the existing one).",
+                "Call `make <target>` from the step and keep only the gh/git orchestration inline."],
+        "benefit": ("Every command CI runs is the same command a contributor runs, so a broken stage "
+                    "is reproducible locally instead of only in a workflow log."),
+    },
+    "secrets-not-defined": {
+        "why": ("A workflow that reads a secret the repository never defines resolves it to an empty "
+                "string: the step does not fail, it runs with no credential and reports success, "
+                "which is the failure mode that hides a whole run's work."),
+        "how": ["Define the secret on the repository, or stop reading it in that workflow.",
+                "If the value must reach an agent's shell, add it to the forwarded-key list the "
+                "Makefile owns rather than passing it inline."],
+        "benefit": ("A step that needs a credential cannot silently run without one."),
+    },
+    "workflow-never-ran": {
+        "why": ("A scheduled workflow with zero runs is indistinguishable from a healthy one in the "
+                "Actions list: the job it was written to do simply never happens, and nothing "
+                "reports the absence."),
+        "how": ["Check the workflow is enabled and its cron is valid.",
+                "If it was retired on purpose, delete it or record the decision so the silence is "
+                "explicit."],
+        "benefit": "A scheduled job that stops producing runs becomes a filed work item, not a gap.",
+    },
+    "reusable-orphan": {
+        "why": ("A reusable workflow nothing calls is dead weight that still gets validated, pinned "
+                "and read as if it were live machinery."),
+        "how": ["Call it from the workflow it was written for, or delete it.",
+                "If it is kept for a future caller, say so in its header and close this finding."],
+        "benefit": "The workflow roster describes the pipeline that actually runs.",
+    },
+    "cron-collisions": {
+        "why": ("Two workflows in the same slot compete for the same runner capacity: one queues "
+                "behind the other, and a queued job can outlive the run that scheduled it (#254)."),
+        "how": ["Give one of the two its own odd minute.",
+                "Keep the reason in the workflow header so the next added bot does not re-collide."],
+        "benefit": ("Every bot gets its slot, and a queued job stops being mistaken for a slow one."),
+    },
+}
 
 SECRET_REF = re.compile(r"secrets\.([A-Za-z0-9_]+)")
 # A `run:` block that reaches into the repo directly: the standing rule is one make target per step.
@@ -429,17 +488,33 @@ def findings(root: Path = REPO_ROOT, gh: str | None = None, repo: str = "",
 # filing: ONE issue per NEW finding, never code
 # ---------------------------------------------------------------------------
 def issue_body(f: dict) -> str:
-    return "\n".join([
-        f.get("evidence", "").strip(),
-        "",
-        f"- found by: the code-review bot (`scripts/code_review.py`, check `{f['key'].split('/')[0]}`)",
-        f"- where: `{f.get('where', '')}`",
-        "",
-        "This is an analysis finding, not a fix: it is filed for a human to accept, refine or "
-        "decline. Nothing was changed by the run that filed it.",
-        "",
-        MARKER.format(key=f["key"]),
-    ])
+    """The filed issue: the shape every issue in this repository carries (issue #745).
+
+    The evidence stays the `## Problem` (it is what the check measured), the family supplies the
+    readable WHY/HOW/benefit, and the `where`/key detail moves to `## Technical`.
+    """
+    family = f["key"].split("/")[0]
+    meta = FAMILY.get(family, DEFAULT_FAMILY)
+    return render_body(
+        marker=MARKER.format(key=f["key"]),
+        problem=f.get("evidence", "").strip(),
+        why=meta["why"],
+        how=meta["how"],
+        benefit=meta["benefit"],
+        acceptance=[
+            f"`make code-review-scan` no longer reports the key `{f['key']}`",
+            "the change is proved by `make lint check-workflows check-wiring` and the finding's own "
+            "check, not by inspection",
+        ],
+        technical=[
+            f"where: `{f.get('where', '')}`",
+            f"check: `{family}` — key `{f['key']}` (the filing marker on line 1 is the dedupe key, "
+            "so a later run updates this issue instead of filing it again)",
+            "found by: the code-review bot (`scripts/code_review.py`)",
+            "This is an analysis finding, not a fix: it is filed for a human to accept, refine or "
+            "decline. Nothing was changed by the run that filed it.",
+        ],
+    )
 
 
 def filed(gh: str, repo: str, key: str) -> bool:

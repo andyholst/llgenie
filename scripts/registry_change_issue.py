@@ -22,6 +22,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import issue_body  # noqa: E402  (the one issue shape, #745)
+
 REPO = Path(__file__).resolve().parent.parent
 STORE = "data/models.json"
 CONTRACT = "data/model_contract.json"
@@ -154,7 +157,12 @@ def _bullet(items, empty="none", cap: int = LIST_CAP) -> str:
 
 
 def render(f: dict) -> str:
-    """The issue body: the issue shape this repository reads, with the diff as the index."""
+    """The issue body: the shape every issue in this repository carries (issue #745).
+
+    The measured detail ("what changed") is `## Technical`, where a reviewer verifies it; the four
+    readable sections say what happened, why llgenie has to follow it, what the steps are and what
+    landing it buys.
+    """
     added = [f"`{m['id']}` — {m['name']} (VRAM {m['vram_tier']})" for m in f["added_models"]]
     renamed = [f"`{m['id']}`: {m['was']!r} -> {m['now']!r}" for m in f["renamed_models"]]
     work = []
@@ -176,54 +184,68 @@ def render(f: dict) -> str:
                 "`skills-validate REGISTRY=data/models.json UNSUPPORTED=data/unsupported-engines.json`, "
                 "`check-engine-skill-gap`, then `make test-unit`.")
 
-    return f"""Issue: the weekly `registry-sync` produced a new vendored registry —
-`generated_utc` `{f['utc_before']}` -> `{f['utc_after']}` — and llgenie must be brought to it:
-the trend list, the pick, the contract it validates against, and the tests that pin the old rows.
+    technical = [
+        f"models: **{f['models_before']} -> {f['models_after']}**, engines: "
+        f"**{f['engines_before']} -> {f['engines_after']}**",
+        f"quant catalog: {f['catalog_before']['models']} models / {f['catalog_before']['links']} "
+        f"links -> **{f['catalog']['models']} / {f['catalog']['links']}**",
+        f"trend-list matrix cases: {f['matrix_cases']}; unresolved engines in the skill gap: "
+        f"{f['unresolved_engines']}",
+        "files changed: " + (", ".join('`' + p + '`' for p in sorted(f['changed'])) or "none"),
+        f"### Models added ({len(f['added_models'])})",
+        _bullet(added),
+        f"### Models removed ({len(f['removed_models'])})",
+        _bullet(['`' + i + '`' for i in f['removed_models']]),
+        f"### Renamed ({len(f['renamed_models'])})",
+        _bullet(renamed),
+        f"### Engines new to the registry ({len(f['new_engines'])})",
+        _bullet(['`' + e + '`' for e in f['new_engines']]),
+        f"### Contract ({'changed' if f['contract_changed'] else 'unchanged'})",
+        f"required keys added per model row: {f['row_required_added'] or 'none'}",
+        f"required keys removed per model row: {f['row_required_removed'] or 'none'}",
+        f"engine `backend` values added: {f['backend_enum_added'] or 'none'}",
+        f"### README \"Most loved\" ({f['readme_rows_before']} -> {f['readme_rows_after']} rows)",
+        _bullet(['added: ' + n for n in f['readme_added']] + ['removed: ' + n for n in f['readme_removed']]),
+        f"measured against `{f.get('prev_rev', 'HEAD')}`",
+    ]
 
-## What changed (measured against `{f.get('prev_rev', 'HEAD')}`)
-
-- models: **{f['models_before']} -> {f['models_after']}**, engines: **{f['engines_before']} -> {f['engines_after']}**
-- quant catalog: {f['catalog_before']['models']} models / {f['catalog_before']['links']} links -> **{f['catalog']['models']} / {f['catalog']['links']}**
-- trend-list matrix cases: {f['matrix_cases']}; unresolved engines in the skill gap: {f['unresolved_engines']}
-- files changed: {', '.join('`' + p + '`' for p in sorted(f['changed'])) or 'none'}
-
-### Models added ({len(f['added_models'])})
-
-{_bullet(added)}
-
-### Models removed ({len(f['removed_models'])})
-
-{_bullet(['`' + i + '`' for i in f['removed_models']])}
-
-### Renamed ({len(f['renamed_models'])})
-
-{_bullet(renamed)}
-
-### Engines new to the registry ({len(f['new_engines'])})
-
-{_bullet(['`' + e + '`' for e in f['new_engines']])}
-
-### Contract ({'changed' if f['contract_changed'] else 'unchanged'})
-
-- required keys added per model row: {f['row_required_added'] or 'none'}
-- required keys removed per model row: {f['row_required_removed'] or 'none'}
-- engine `backend` values added: {f['backend_enum_added'] or 'none'}
-
-### README "Most loved" ({f['readme_rows_before']} -> {f['readme_rows_after']} rows)
-
-{_bullet(['added: ' + n for n in f['readme_added']] + ['removed: ' + n for n in f['readme_removed']])}
-
-## What this implies for llgenie
-
-{_bullet(work)}
-
-## Not covered
-
-- the ranking rule the trend list is built on is its own decision (#669): this issue reports the
-  data, it does not choose the gate.
-- the sync PR itself: it opens when the job's own gates pass; this issue exists whether it does
-  or not, and it is what the landing change is written from.
-"""
+    return issue_body.render(
+        problem=(
+            f"The weekly `registry-sync` produced a new vendored registry — `generated_utc` "
+            f"`{f['utc_before']}` -> `{f['utc_after']}` — and llgenie is still built to the old one: "
+            f"the trend list, the pick, the contract it validates against and the tests that pin the "
+            f"old rows were all derived from the previous store."
+        ),
+        why=(
+            "`data/models.json` is the data every offer reads, so a store that has moved and a "
+            "llgenie that has not is a product quietly answering from yesterday's catalogue: new "
+            "models are never offered, an engine nobody taught it about stays unranked, and the "
+            "golden tests keep passing against rows upstream has already replaced. Nothing fails "
+            "until someone notices a model missing."
+        ),
+        how=work,
+        benefit=(
+            "llgenie follows the store upstream actually published: the new models are offered, "
+            "every new engine is either shipped or refused with a dated reason, and the tests pin "
+            "the current row set instead of the one from last week."
+        ),
+        acceptance=[
+            "`make check-registry check-registry-keys check-quant-catalog check-trend-list-matrix` "
+            "are green on the synced files",
+            "`make skills-validate REGISTRY=data/models.json "
+            "UNSUPPORTED=data/unsupported-engines.json` and `make check-engine-skill-gap` are green "
+            "(each new engine shipped or decided)",
+            "`make test-unit` is green with the goldens re-derived for the new row set",
+            "the sync PR that carries this store merges, so the next weekly run starts from it",
+        ],
+        technical=technical,
+        not_covered=[
+            "the ranking rule the trend list is built on is its own decision (#669): this issue "
+            "reports the data, it does not choose the gate.",
+            "the sync PR itself: it opens when the job's own gates pass; this issue exists whether "
+            "it does or not, and it is what the landing change is written from.",
+        ],
+    )
 
 
 def _title(utc: str) -> str:

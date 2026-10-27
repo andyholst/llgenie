@@ -35,6 +35,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
+import issue_body  # noqa: E402
 import security_scan as ss  # noqa: E402
 
 REPORTS = Path(os.environ.get("SECURITY_REPORTS") or (REPO / "security-reports"))
@@ -129,28 +130,65 @@ def issue_findings(reports: Path = REPORTS, policy: dict | None = None) -> list[
 
 
 def body_for(finding: Finding, run_url: str = "") -> str:
-    return "\n".join([
-        finding.marker,
-        "",
-        f"**Advisory:** `{finding.advisory}` — scanner: `{finding.source}`",
-        f"**Affected package:** `{finding.package}`",
-        f"**Current → fixed:** `{finding.current}` → `{finding.fixed}`",
-        f"**Severity:** `{finding.severity}`",
-        f"**Scan run:** {run_url or '(local `make security-scan-all`)'}",
-        "",
-        "### Suggested action",
-        "",
-        f"Bump `{finding.package}` from `{finding.current}` to `{finding.fixed}` (or drop the "
-        "dependency), then let the pipeline re-scan. When the scanner no longer reports this "
-        "advisory, the next scan comments the run that cleared it and closes this issue.",
-        "",
-        "### Not covered",
-        "",
-        "- Transitive dependencies this advisory pulls in are separate findings: each gets its own "
-        "issue with its own advisory id.",
-        "- A scanner that could not run (its report is absent) is not a clean result for this "
-        "package: `make security-verdict` refuses instead of passing.",
-    ])
+    """The issue body: the shape every issue in this repository carries (issue #745).
+
+    The marker stays the first line (`MARKER_RE` reads it back, so a re-scan updates this issue
+    instead of opening a duplicate); the advisory detail lives in `## Technical`, where a reviewer
+    verifies it, and the four readable sections say what is wrong and what fixing it buys.
+    """
+    return issue_body.render(
+        marker=finding.marker,
+        problem=(
+            f"`{finding.source}` reports `{finding.advisory}` against `{finding.package}` "
+            f"`{finding.current}`, which this repository ships as a {finding.component} dependency. "
+            f"Severity: {finding.severity}."
+        ),
+        why=(
+            "The advisory is in a version this repository actually ships, so every build carries a "
+            "known-vulnerable dependency and the scan re-reports it on every run until the pin "
+            "moves. Nothing in the product can make it go away by itself."
+        ),
+        how=[
+            f"Move `{finding.package}` from `{finding.current}` to "
+            f"`{finding.fixed or '(no fixed version named)'}` — or drop the dependency — through the "
+            "generated `tools/requirements*.in` -> `requirements*.txt` path, never by editing a "
+            "compiled file.",
+            "Let the pipeline re-scan: the next run of the security pipeline reports whether the "
+            "advisory is gone.",
+            "Close the loop without a human: when no scanner reports this advisory any more, the "
+            "next run comments the run that cleared it and closes this issue.",
+        ],
+        benefit=(
+            f"A shipped dependency stops being known-vulnerable at `{finding.severity}` severity, "
+            "the scan that reported it has a run it can point at as the clearing run, and the work "
+            "is tracked in the issue the remediation path closes instead of in a SARIF file nobody "
+            "reads."
+        ),
+        acceptance=[
+            f"`{finding.package}` is pinned at `{finding.fixed or '(no fixed version named)'}` or "
+            "later in the compiled `requirements*.txt`",
+            f"`make security-scan TOOL={finding.source}` no longer reports `{finding.advisory}` for "
+            f"`{finding.package}`",
+            "the next scan closes this issue with the run that cleared it",
+        ],
+        technical=[
+            f"**Advisory:** `{finding.advisory}` — scanner: `{finding.source}`",
+            f"**Affected package:** `{finding.package}`",
+            f"**Current → fixed:** `{finding.current}` → `{finding.fixed or '(none named)'}`",
+            f"**Severity:** `{finding.severity}`",
+            f"**Component:** `{finding.component}`",
+            f"**Scan run:** {run_url or '(local `make security-scan-all`)'}",
+            "**Idempotency:** the marker on line 1 is the lookup key — `make security-issues` "
+            "updates this issue on the next scan, never files a second one for the same "
+            "(advisory, package).",
+        ],
+        not_covered=[
+            "Transitive dependencies this advisory pulls in are separate findings: each gets its own "
+            "issue with its own advisory id.",
+            "A scanner that could not run (its report is absent) is not a clean result for this "
+            "package: `make security-verdict` refuses instead of passing.",
+        ],
+    )
 
 
 def _gh(args: list[str], repo: str) -> subprocess.CompletedProcess:
