@@ -92,10 +92,10 @@ def test_update_with_only_a_removed_link_probes_nothing():
     assert probes == []
 
 
-# ---- edge case 3: a change that renders the catalog STALE is caught by --check ----
-def test_check_fails_when_generated_differs_from_committed(monkeypatch, tmp_path):
-    # Given a committed catalog (A, B) and a generator that now produces (A, B, C)
-    _stub_generator(monkeypatch, [_A, _B, _C])
+# ---- edge case 3: a drift the repository OWNS is caught by --check ---------------
+def test_check_fails_when_a_committed_plan_is_lost(monkeypatch, tmp_path):
+    # Given a committed catalog (A, B) and a generator that now produces only (A)
+    _stub_generator(monkeypatch, [_A])
     dst = tmp_path / "trending-quant-catalog.json"
     dst.write_text(json.dumps(_payload([_A, _B]), indent=2) + "\n")
     monkeypatch.setattr(sys, "argv", ["gen_trending_quant_catalog.py", "--check", "-o", str(dst)])
@@ -103,9 +103,28 @@ def test_check_fails_when_generated_differs_from_committed(monkeypatch, tmp_path
     # When check-quant-catalog runs (the drift gate)
     rc = gen.main()
 
-    # Then it FAILS: the committed artifact no longer matches the generator (the
-    #   catalog is sensitive to the change — a new link appeared and must be reviewed)
+    # Then it FAILS: the committed artifact records a download the generator can no
+    #   longer produce, so the table llgenie reads is stale (issue #736)
     assert rc == 1
+
+
+def test_check_notes_a_new_link_instead_of_failing(monkeypatch, tmp_path, capsys):
+    # Given a committed catalog (A, B) and a generator that now also lists C — the shape a
+    # live `sort=downloads` search produces when upstream publishes a conversion
+    _stub_generator(monkeypatch, [_A, _B, _C])
+    dst = tmp_path / "trending-quant-catalog.json"
+    dst.write_text(json.dumps(_payload([_A, _B]), indent=2) + "\n")
+    monkeypatch.setattr(sys, "argv", ["gen_trending_quant_catalog.py", "--check", "-o", str(dst)])
+
+    # When check-quant-catalog runs
+    rc = gen.main()
+
+    # Then the addition is a NOTE the next sync records, and the gate stays green
+    #   (it is not the repository's plan that changed — issue #736)
+    out = capsys.readouterr().out
+    repo_c = _C.split("huggingface.co/")[1].split("/resolve/")[0]   # the plan's repo
+    assert rc == 0
+    assert "NOTE" in out and repo_c in out, out
 
 
 def test_check_passes_when_committed_matches_generated(monkeypatch, tmp_path):
