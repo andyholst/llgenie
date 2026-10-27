@@ -72,7 +72,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -902,17 +902,23 @@ check-workflows: ## CI: fail when a YAML file's GitHub expression does not parse
 	python3 scripts/check_workflows.py check
 workflows-report: ## Show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
 	python3 scripts/check_workflows.py report
-scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep, issue #714)
 sbom: ## Generate the CycloneDX SBOM with the pinned Syft image into security-reports/sbom.cdx.json (issue #715)
 	python3 scripts/security_scan.py sbom
-security-scan: ## Run ONE scanner from its immutable image (TOOL=trivy|grype|semgrep); grype needs make sbom first (issue #715)
+security-scan: ## Run ONE scanner from its immutable image (TOOL=trivy|grype|semgrep|snyk); grype needs make sbom first (issue #715)
 	python3 scripts/security_scan.py scan "$(TOOL)"
-security-scan-all: ## Run every scanner from its pinned image in dependency order (Syft SBOM, then Trivy, Grype, Semgrep)
+security-scan-all: ## Run every scanner from its pinned image in dependency order (Syft SBOM, then Trivy, Grype, Semgrep, Snyk)
 	python3 scripts/security_scan.py all
 security-verdict: ## Apply data/security-policy.json to the reports (MODE=full|pr; full is critical+high with a fix, pr is critical only)
 	python3 scripts/security_scan.py verdict --mode "$(MODE)"
 check-security-scan: ## CI: fail when the scan policy is empty/unknown or a scanner ref is missing from digests.json (issue #715)
 	python3 scripts/security_scan.py check
+security-issues-plan: ## Print the tagged issues the current reports would create/update/clear and mutate nothing (issue #716)
+	python3 scripts/security_issues.py plan
+security-issues: ## File or update the tagged vulnerability issues for the current reports (SLUG=owner/name, RUN_URL=<run link>, issue #716)
+	python3 scripts/security_issues.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" --run-url "$(RUN_URL)"
+check-security-issues: ## CI: fail when the issue policy/label roster/marker disagree (issue_severities not a subset of fail_on, a missing label, a marker that does not round-trip) (issue #716)
+	python3 scripts/security_issues.py check
+scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep|snyk, issue #714)
 	python3 scripts/scanner_image.py build "$(SCANNER)"
 test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
 	python3 scripts/scanner_image.py test "$(SCANNER)"
@@ -1454,6 +1460,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-workflows
 	$(MAKE) check-scanner-images
 	$(MAKE) check-security-scan
+	$(MAKE) check-security-issues
 	$(MAKE) check-agent-skills
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates
