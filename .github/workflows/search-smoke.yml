@@ -72,7 +72,7 @@ jobs:
       NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
       FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: The agent's own shell must see the key before the smoke spends it (issue #358)
         run: make agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=FIRECRAWL_API_KEY
       - name: One real request, hard budget, loud on 401/402/403 — never an empty result

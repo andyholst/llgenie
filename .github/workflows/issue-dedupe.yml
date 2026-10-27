@@ -79,7 +79,7 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - name: "Checkout main (read-only for this bot - it pushes nothing)"
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           token: ${{ secrets.BUMP_TOKEN }}
