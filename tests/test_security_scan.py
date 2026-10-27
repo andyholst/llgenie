@@ -275,3 +275,20 @@ def test_a_failed_build_is_loud(tmp_path, monkeypatch):
         assert "cannot build trivy" in str(exc)
     else:
         raise AssertionError("a scanner that could not be obtained was accepted")
+
+
+def test_semgrep_uses_an_explicit_pack_not_auto(tmp_path, monkeypatch):
+    """`--config auto` is refused by Semgrep when metrics are off, so an explicit pack is pinned."""
+
+    # Given a docker stub that records the argv
+    log = _docker_stub(tmp_path, monkeypatch, pull_ok=True, inspect_ok=True)
+
+    # When  a semgrep scan is launched
+    ss.scan("semgrep")
+
+    # Then  the argv names an explicit pack and keeps metrics off
+    runs = [json.loads(l) for l in log.read_text().splitlines() if json.loads(l)[0] == "run"]
+    argv = runs[-1]
+    assert "--config=p/default" in argv
+    assert "auto" not in argv
+    assert "--metrics" in argv and "off" in argv
