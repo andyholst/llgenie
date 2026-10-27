@@ -62,7 +62,7 @@ THEN the suite keeps passing without an edit, and fails only when a rule is brok
 Given a card size and the vendored store,
 When a test needs the models that fit,
 Then it reads them from `mp.fits()` in the store's order, not from the README's VRAM cell.
-- **Test:** `tests/test_trend_list_acceptance.py::test_225_acceptance_strata_on_a_16gb_card`
+- **Test:** `tests/test_trend_list_acceptance.py::test_ac1_rows_are_the_readme_models_that_fit_in_readme_order`
 
 #### Scenario: the README's column is a stated figure, whichever one it prints
 
