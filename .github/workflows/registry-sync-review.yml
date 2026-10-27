@@ -1,0 +1,172 @@
+name: registry-sync-review — a GREEN registry-sync PR is reviewed into ONE agent:implement issue
+
+# Issue #709. The weekly registry-sync job vendors a new store and opens a PR when its gates pass;
+# sync-change-issue (#704) reports what changed even when a gate is red. Nothing yet answered the
+# question a reviewer actually has about a store that CAN land: at each VRAM llgenie sells, does the
+# trending list list models, and does every row name the inference server with the highest t/s that
+# fits that card? That answer is what this bot files, as one reviewable work item.
+#
+# Trigger surface: hourly (minute :23, its own slot) and workflow_dispatch for the owner/collaborators.
+#                  Hourly because the sync PR becomes green only after CI runs on it; the run is
+#                  cheap when nothing is green (the brief exits `action=skip` before any secret is
+#                  spent, and no issue is filed for the same store twice).
+# Flow: guard -> make registry-review-brief (deterministic, offline: the PR's checks + the VRAM
+#       selection table) -> only when `action=review`: agent image + shell-key proof + Hermes leg
+#       (make registry-sync-review, writes registry-review.md) -> make registry-review-publish
+#       (ONE issue labelled agent:implement, keyed by the store's generated_utc).
+# Never: never merges, never pushes, never edits the store/matrix/goldens, never files a second
+#        issue for a store that already has one, never reviews a red or pending PR.
+on:
+  schedule:
+    - cron: "55 * * * *"   # hourly at an odd minute no other bot owns (issue #275/#560)
+
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Preview the brief and the issue body this run would file, filing nothing"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: registry-sync-review
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Owner / collaborator trigger guard
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
+              echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+
+  review:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # The brief must read the store that WOULD LAND, not main's: it checks out the sync PR's head
+      # when one exists, and stays on main (where the brief then answers `skip`) when none does.
+      - name: Check out the sync PR's head (the store this run would review)
+        id: head
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          branch=$(gh pr view chore/registry-sync --json headRefName -q .headRefName)
+          gh pr checkout "$branch"
+          echo "head=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The deterministic half: is the sync PR green, and what does the store's trend list answer?
+      # No secret is read before this, so a skipped run costs nothing.
+      - name: Brief — the sync PR's checks and the VRAM selection table
+        id: brief
+        run: |
+          set -euo pipefail
+          out=$(make registry-review-brief REPO="$REPO")
+          printf '%s\n' "$out"
+          action=$(printf '%s\n' "$out" | sed -n 's/^action=//p' | tail -1)
+          findings=$(printf '%s\n' "$out" | sed -n 's/^findings=//p' | tail -1)
+          echo "action=${action:-skip}" >> "$GITHUB_OUTPUT"
+          echo "findings=${findings:-0}" >> "$GITHUB_OUTPUT"
+
+      # Everything below needs the model key: keep it behind the brief's decision.
+      - name: Resolve the agent image for this commit
+        if: steps.brief.outputs.action == 'review'
+        id: agent
+        run: |
+          set -euo pipefail
+          image=$(make agent-image-ref)
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "agent image: $image"
+
+      - name: Prove the JEV engine is active
+        if: steps.brief.outputs.action == 'review'
+        run: make agent-jev-preflight NERVE_REQUIRE=1
+
+      - name: Prove the agent's shell can see this job's credentials
+        if: steps.brief.outputs.action == 'review'
+        run: make agent-shell-keys-check AGENT_SHELL_CHECK_KEYS="NOUS_API_KEY GH_TOKEN"
+
+      - name: Hermes routing smoke
+        if: steps.brief.outputs.action == 'review'
+        run: make hermes-smoke
+
+      - name: Review the green store with Hermes inside the agent image
+        if: steps.brief.outputs.action == 'review'
+        env:
+          AGENT_IMAGE: ${{ steps.agent.outputs.image }}
+        run: make registry-sync-review AGENT_IMAGE="$AGENT_IMAGE"
+
+      - name: Upload the REDACTED agent transcript
+        if: always() && steps.brief.outputs.action == 'review'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcript-redacted
+          path: hermes-run.scrubbed.log
+          if-no-files-found: ignore
+
+      # The only writer of GitHub state: ONE issue, labelled `agent:implement`, keyed by the store.
+      - name: Publish ONE issue from the review (never merges, never pushes)
+        id: publish
+        if: steps.brief.outputs.action == 'review'
+        env:
+          DRY_INPUT: ${{ inputs.dry }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_INPUT}" = "true" ]; then
+            echo "==> DRY RUN: printing the issue body; filing nothing"
+            cat registry-review.md
+            out=$(make registry-review-publish REPO="$REPO" DRY=1)
+          else
+            out=$(make registry-review-publish REPO="$REPO")
+          fi
+          printf '%s\n' "$out"
+          echo "result=$(printf '%s\n' "$out" | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "### registry-sync-review"
+            echo ""
+            echo "- sync PR green: ${{ steps.brief.outputs.action || 'not reached' }}"
+            echo "- findings: ${{ steps.brief.outputs.findings || 'n/a' }}"
+            echo "- issue: ${{ steps.publish.outputs.result || 'none filed' }}"
+            echo ""
+            echo "A run with no green sync PR files nothing. The bot never merges and never pushes."
+          } >> "$GITHUB_STEP_SUMMARY"

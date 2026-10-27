@@ -65,7 +65,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	install-prism-cuda install-upstream-cuda install-prism-metal install-upstream-metal \
 	sync-registry check-registry skills-validate engine-list engine-hardware engine-plan engine-check engine-install engine-detect engine-smoke test-engine ci-engine-images build-engine-base build-engines generate-build-engine-params test-engine-image push-engine test-published-engine test-install-published engine-launchers test-built-engine test-uninstalled \
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
-	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues registry-change-report sync-change-issue sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
+	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues registry-change-report sync-change-issue registry-review-brief registry-sync-review registry-review-publish sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
 	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
@@ -311,6 +311,30 @@ sync-change-issue: ## Open ONE issue stating what a changed vendored registry ch
 	python3 scripts/registry_change_issue.py open $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 spawn-engine-skill-issues: ## Open one tracking issue per NEW unskilled registry engine (the sync job runs this; DRY=1 previews, REPO= picks the repo)
 	python3 scripts/engine_skill_gap.py spawn $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
+# ---- registry-sync review (issue #709): a GREEN sync PR -> ONE agent:implement issue --------
+# sync-change-issue (#704) states what a store CHANGED, even when a gate is red. This bot answers
+# the other question, for a store that can LAND: at each VRAM llgenie sells, does the trending list
+# list models, and does every row name the inference server with the highest t/s that fits that
+# card? The precondition (an open `chore/registry-sync` PR whose every check is green) and the
+# selection table are deterministic and offline; the issue body is the one agent leg's (its skill
+# is `.hermes/skills/registry-sync-review/SKILL.md`), and publish is the only GitHub writer.
+REGISTRY_REVIEW_BRIEF ?= registry-review-in.md
+REGISTRY_REVIEW_OUT ?= registry-review.md
+registry-review-brief: ## Is the sync PR green, and does the store name the highest-t/s server per card? -> registry-review-in.md (prints action=review|skip and the findings count; read-only; REPO= picks the repo)
+	python3 scripts/registry_review.py brief --out "$(REGISTRY_REVIEW_BRIEF)" $(if $(REPO),--repo "$(GH_REPO)",)
+registry-sync-review: ## Hermes reviews the green store (reads registry-review-in.md) and writes ONE issue body to registry-review.md; no code, no GitHub write; runs INSIDE the agent image; the transcript is REDACTED (issue #709)
+	@python3 scripts/require_env.py NOUS_API_KEY
+	@test -f "$(REGISTRY_REVIEW_BRIEF)" || { echo "Run 'make registry-review-brief' first: $(REGISTRY_REVIEW_BRIEF) is missing"; exit 1; }
+	@$(MAKE) --no-print-directory agent-shell-keys-check AGENT_SHELL_CHECK_KEYS=NOUS_API_KEY
+	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
+	  -e NOUS_API_KEY -e HERMES_REASONING \
+	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
+	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_IMAGE) bash -lc 'make _registry-sync-review')
+_registry-sync-review: # (internal) the host recipe the agent image runs: the review, not the code
+	hermes -z "Follow the preloaded skill registry-sync-review. Its Input is $(REGISTRY_REVIEW_BRIEF) and its Output is $(REGISTRY_REVIEW_OUT), in the shape the skill prints." -s registry-sync-review,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
+registry-review-publish: ## File ONE issue labelled agent:implement from registry-review.md, keyed by the store's generated_utc — updates it in place for the same store (REPO=; DRY=1 previews)
+	python3 scripts/registry_review.py publish --in "$(REGISTRY_REVIEW_OUT)" $(if $(REPO),--repo "$(GH_REPO)",) $(if $(DRY),--dry,)
 # ---- issue-bot: one issue per run, at most 3/day (issue #248) -----------------
 # The dispatcher is deterministic (no LLM): cap -> pick ONE -> claim -> issue.md
 # + branch. `implement-issue` is the shared Hermes agent step (AGENTS.md is the
