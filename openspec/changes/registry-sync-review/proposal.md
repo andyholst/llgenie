@@ -36,7 +36,7 @@ review.
   the store, the matrix, a golden or a branch).
 - **`Makefile`** — `registry-review-brief`, `registry-sync-review` (the leg, inside the agent image,
   redacted transcript), `registry-review-publish`; all `.PHONY`, all documented.
-- **`.github/workflows/registry-sync-review.yml`** — hourly `:23` + `workflow_dispatch`, the owner/
+- **`.github/workflows/registry-sync-review.yml`** — hourly `:55` + `workflow_dispatch`, the owner/
   collaborator guard, and every secret-spending step behind `steps.brief.outputs.action == 'review'`,
   so a run with no green PR costs nothing.
 - **`tests/test_registry_review.py`** — the real `selection()` over a real store built in a temp dir
