@@ -237,7 +237,7 @@ def file_label_issue(repo: str, label: str, body: str, dry: bool = False,
         technical=[
             f"label: `{label}`",
             f"threshold: queued longer than {minutes:.0f} minutes",
-            f"```\n{body}\n```",
+            body,  # already a fenced report: pasted as a block, not as a bullet
         ],
     )
     title = f"ci: no runner matches `{label}` — jobs are queued with no machine to run them"

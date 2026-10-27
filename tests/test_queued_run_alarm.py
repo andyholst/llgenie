@@ -192,7 +192,8 @@ def test_a_run_with_no_pr_files_one_deduped_issue_per_label(tmp_path):
     assert not [c for c in log.read_text().splitlines() if c.startswith("api -X POST")]
 
     # And the filed body is the repository's issue shape, the pasted report as `## Technical`
-    assert issue_body.headings(log.read_text()) == list(issue_body.SECTIONS), log.read_text()
+    filed = log.read_text().split(" --body ", 1)[1]
+    assert issue_body.headings(filed) == list(issue_body.SECTIONS), filed
 
     # Given that issue is already open (the marker in its body), a second sweep files nothing
     log2 = gh_stub(tmp_path, RUN, {"111": [job("macos / unit")]}, run_meta=RUN_META_PUSH,
