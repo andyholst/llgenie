@@ -142,7 +142,11 @@ def scan(tool: str) -> int:
         return _run(["sbom:/work/security-reports/sbom.cdx.json", "-o", "json",
                      "--file", "/work/security-reports/grype.json"], image_ref(tool))
     if tool == "semgrep":
-        return _run(["scan", "--config", "auto", "--json", "--output",
+        # An EXPLICIT registry pack, not `--config auto`: Semgrep refuses `auto` when metrics are
+        # off ("Cannot create auto config when metrics are off"), and sending telemetry from CI is
+        # not something this run should require. `p/default` is the curated ruleset and needs no
+        # per-run decision (measured on the 4th CI run of this job).
+        return _run(["scan", "--config=p/default", "--json", "--output",
                      "/work/security-reports/semgrep.json", "--metrics", "off", "."], image_ref(tool))
     # snyk
     if not os.environ.get("SNYK_TOKEN"):
