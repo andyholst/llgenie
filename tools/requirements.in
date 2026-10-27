@@ -13,3 +13,7 @@ gguf==0.19.0
 # Installing it into the venv makes the launcher self-contained so top-tier
 # download works on any fresh machine regardless of what's in ~/models.
 huggingface_hub[cli]>=0.30
+# The security floors: the MINIMUM version every advisory the daily scan reports demands, written by
+# `make security-bumps` (scripts/security_bumps.py, issue #738) and honoured here as constraints so
+# the compiled requirements.txt is regenerated rather than hand-edited.
+-c security-floors.in

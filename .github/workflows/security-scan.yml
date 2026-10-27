@@ -1,23 +1,27 @@
-name: security-scan — Trivy + Syft + Grype + Semgrep on PR, push, schedule and manual dispatch
+name: security-scan — the daily vulnerability pipeline (Trivy + Syft + Grype + Semgrep), never a PR or push check
 
-# Issue #715 (parent #713). Every scanner runs from ITS OWN immutable image, named by
-# containers/scanners/digests.json (a content hash of the Dockerfile, built by this repository —
-# issue #714). Nothing is installed at scan time and no `uses:` here floats on a tag.
+# Issue #715 (parent #713), own-pipeline rule #738. Every scanner runs from ITS OWN immutable image,
+# named by containers/scanners/digests.json (a content hash of the Dockerfile, built by this
+# repository — issue #714). Nothing is installed at scan time and no `uses:` here floats on a tag.
 #
-# Trigger surface: pull_request (main), push to main, schedule daily 04:05 UTC (its own odd minute —
-#                  no bot shares a cron slot, issue #275), and workflow_dispatch — the manual form is available to the owner,
-#                  the repository bot and any collaborator with write access (the `guard` job).
-# Flow: guard (owner / repository bot on a same-repo head / collaborator with write, BEFORE any
-#       scanner runs) -> make check-security-scan (policy + digests sane) -> make security-scan-all
-#       (Syft SBOM, then Trivy, Grype and Semgrep from their pinned images) -> make
-#       security-verdict MODE=<pr|full> -> upload SARIF + the CycloneDX SBOM artifact.
-# Never: never merges, never pushes, never installs a scanner, never runs a scanner from a floating
-#        tag, and never needs a scanner secret: no scanner takes one.
+# THIS IS NOT PART OF PR OR MAIN CI. The trigger surface is its own daily `schedule` (04:05 UTC, an
+# odd minute no bot shares — issue #275) and `workflow_dispatch`, and nothing else: a pre-existing
+# advisory in an upstream package must never red a pull request or a push to `main` (measured: run
+# 40525155122 failed a push on certifi/filelock/urllib3 pins that nothing bumped). `make
+# check-security-scan` fails if a `push:` or `pull_request:` trigger is added back.
+# Flow: guard (owner / repository bot / collaborator with write, BEFORE any secret is read) ->
+#       make check-security-scan (policy + digests + triggers sane) -> make security-scan-all
+#       (Syft SBOM, then Trivy, Grype and Semgrep from their pinned images) -> make security-verdict
+#       EVENT=<event> (the policy decides whether that event may gate) -> make security-issues (one
+#       tagged issue per finding) -> make security-bumps (the floor the scanner demands, regenerated
+#       into ONE bump PR that closes the issues it fixes) -> upload SARIF + the CycloneDX SBOM.
+# Trigger surface: schedule daily 04:05 UTC (its own odd minute — no bot shares a slot, issue #275) and
+#                  workflow_dispatch (owner / repository bot / collaborator with write), and NOTHING
+#                  else — no pull_request and no push trigger (issue #738).
+# Never: never merges, never pushes to `main`, never installs a scanner, never runs a scanner from a
+#        floating tag, never needs a scanner secret (no scanner takes one), and never gates a pull
+#        request or a push.
 on:
-  pull_request:
-    branches: ["main"]
-  push:
-    branches: ["main"]
   schedule:
     - cron: "5 4 * * *"    # daily 04:05 UTC — its own odd minute (issue #275: no bot shares a slot)
   workflow_dispatch:
@@ -28,9 +32,9 @@ on:
         options: [all, syft, trivy, grype, semgrep]
         default: all
       enforce:
-        description: "Failure policy: full (fail on critical+high with a fix) or pr (critical only)"
+        description: "Failure policy for THIS dispatch: full = the daily policy, report = never gate"
         type: choice
-        options: [full, pr]
+        options: [full, report]
         default: full
 
 permissions:
@@ -82,18 +86,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write          # the `fix/security-floors` bump branch (#738)
       packages: read
+      pull-requests: write     # the one bump PR (#738)
       issues: write            # tagged vulnerability issues (#716)
       security-events: write   # SARIF upload, scoped to this job only
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Pushed and pulled with the owner PAT, never GITHUB_TOKEN (issue #136): a push made with
+          # GITHUB_TOKEN starts no workflows, so the bump PR would arrive untested.
+          token: ${{ secrets.BUMP_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: make check-security-scan (policy + pinned scanner refs must be sane)
+      - name: make check-security-scan (policy + pinned scanner refs + triggers must be sane)
         run: make check-security-scan
 
       - name: make security-scan-all (or one tool from the dispatch input)
-        run: |
+        run: |-
           set -euo pipefail
           tools="${{ github.event.inputs.tools || 'all' }}"
           if [ "$tools" = "all" ]; then
@@ -103,21 +112,25 @@ jobs:
             make security-scan TOOL="$tools"
           fi
 
-      - name: make security-verdict (full on schedule/push/manual, pr on a pull_request)
-        run: |
+      - name: make security-verdict (the policy decides whether THIS event may gate)
+        run: |-
           set -euo pipefail
-          MODE="${{ github.event.inputs.enforce || '' }}"
-          if [ -z "$MODE" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then MODE=pr; else MODE=full; fi
-          fi
-          make security-verdict MODE="$MODE"
+          ENFORCE="${{ github.event.inputs.enforce || '' }}"
+          if [ "$ENFORCE" = "report" ]; then ENFORCE=pr; fi
+          make security-verdict EVENT="${{ github.event_name }}" ENFORCE="$ENFORCE"
 
-      - name: make security-issues (file or update the tagged issues; never on a pull_request)
-        if: github.event_name != 'pull_request'
+      - name: make security-issues (file or update one tagged issue per finding)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN || secrets.GITHUB_TOKEN }}
           SECURITY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: make security-issues SLUG="${{ github.repository }}" RUN_URL="$SECURITY_RUN_URL"
+
+      - name: make security-bumps (the floor the scanner demands, regenerated into ONE bump PR)
+        env:
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BUMP_TOKEN || secrets.GITHUB_TOKEN }}
+          SECURITY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: make security-bumps SLUG="${{ github.repository }}"
 
       - name: Upload SARIF to the Security tab
         if: always() && hashFiles('security-reports/trivy.sarif') != ''

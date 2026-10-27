@@ -102,15 +102,105 @@ def test_pr_mode_only_fails_on_critical(tmp_path, monkeypatch):
 
 
 def test_the_shipped_pr_policy_is_report_only(tmp_path, monkeypatch):
-    """The shipped policy does not gate a pull request at all — it reports and files."""
+    """The shipped policy does not gate a report-only run at all — it reports and files."""
 
     # Given this repository's policy
     pol = ss.policy()
 
-    # Then  a PR run is report-only, and a blocking critical still fails the full mode
+    # Then  a report-only run is report-only, and a blocking critical still fails the full mode
     assert pol["pr_fail_on"] == []
     assert ss.blocking(ss._trivy_findings(TRIVY_OK), pol, "pr") == []
     assert ss.blocking(ss._trivy_findings(TRIVY_OK), pol, "full") != []
+
+
+def test_an_event_outside_enforce_events_is_report_only(tmp_path, monkeypatch):
+    """A push or a PR may never gate: the reports that failed run 40525155122 exit 0."""
+
+    # Given the reports that failed run 40525155122 (one critical, two highs, all with a fix)
+    items = ss._trivy_findings({"Results": [{"Vulnerabilities": [
+        {"VulnerabilityID": "GHSA-6q48-6c7w-9gw2", "PkgName": "certifi",
+         "InstalledVersion": "2026.7.22", "FixedVersion": "2026.10.18", "Severity": "CRITICAL"},
+        {"VulnerabilityID": "CVE-2026-112940", "PkgName": "filelock",
+         "InstalledVersion": "3.32.5", "FixedVersion": "4.2.1", "Severity": "HIGH"},
+        {"VulnerabilityID": "CVE-2026-97687", "PkgName": "urllib3",
+         "InstalledVersion": "2.7.0", "FixedVersion": "2.8.0", "Severity": "HIGH"},
+    ]}]})
+    pol = ss.policy()
+    d = _reports(tmp_path, trivy={"Results": [{"Vulnerabilities": [
+        {"VulnerabilityID": "GHSA-6q48-6c7w-9gw2", "PkgName": "certifi",
+         "InstalledVersion": "2026.7.22", "FixedVersion": "2026.10.18", "Severity": "CRITICAL"},
+        {"VulnerabilityID": "CVE-2026-112940", "PkgName": "filelock",
+         "InstalledVersion": "3.32.5", "FixedVersion": "4.2.1", "Severity": "HIGH"},
+        {"VulnerabilityID": "CVE-2026-97687", "PkgName": "urllib3",
+         "InstalledVersion": "2.7.0", "FixedVersion": "2.8.0", "Severity": "HIGH"},
+    ]}]})
+    monkeypatch.setattr(ss, "REPORTS", d)
+
+    # When  the verdict runs for a push and for a pull request
+    # Then  both are report-only and exit 0, while the mode resolver still says they may not gate
+    assert ss.verdict("", "push") == 0
+    assert ss.verdict("", "pull_request") == 0
+    assert ss.mode_for("push", pol) == "pr"
+    assert items and len(items) == 3
+
+
+def test_the_scheduled_run_still_gates(tmp_path, monkeypatch):
+    """The daily run is where a fixable critical DOES fail — that is the gate."""
+
+    # Given a report with a critical that has a fix
+    monkeypatch.setattr(ss, "REPORTS", _reports(tmp_path, trivy=TRIVY_OK))
+
+    # When  the verdict runs for the schedule
+    # Then  it exits 1 under the shipped policy
+    assert ss.mode_for("schedule") == "full"
+    assert ss.verdict("", "schedule") == 1
+
+
+def test_check_refuses_a_policy_that_gates_a_push(tmp_path, monkeypatch):
+    """`enforce_events` may never name an event that carries main CI (#738)."""
+
+    # Given a policy that would gate a push
+    bad = {"fail_on": ["critical"], "pr_fail_on": [], "issue_severities": ["critical"],
+           "enforce_events": ["push"]}
+    path = tmp_path / "security-policy.json"
+    path.write_text(ss.json.dumps(bad), encoding="utf-8")
+    monkeypatch.setattr(ss, "POLICY", path)
+
+    # When  the gate runs
+    # Then  it fails
+    assert ss.check() == 1
+
+
+def test_check_refuses_an_empty_or_unknown_enforce_events(tmp_path, monkeypatch):
+    """An empty list can never gate; an unknown event is a typo, not a policy."""
+
+    # Given an empty list, then an unknown event
+    for enforce in ([], ["scheduel"]):
+        bad = {"fail_on": ["critical"], "pr_fail_on": [], "issue_severities": ["critical"],
+               "enforce_events": enforce}
+        path = tmp_path / f"policy-{len(enforce)}-{enforce[0] if enforce else 'none'}.json"
+        path.write_text(ss.json.dumps(bad), encoding="utf-8")
+        monkeypatch.setattr(ss, "POLICY", path)
+
+        # When  the gate runs
+        # Then  it fails
+        assert ss.check() == 1, enforce
+
+
+def test_the_scan_is_never_a_pr_or_push_check(tmp_path, monkeypatch):
+    """A trigger the scan must never carry is refused by the gate that reads the workflow."""
+
+    # Given a workflow with a `push:` and a `pull_request:` trigger
+    workflow = tmp_path / "security-scan.yml"
+    workflow.write_text("name: x\non:\n  push:\n    branches: [\"main\"]\n"
+                        "  pull_request:\n    branches: [\"main\"]\n  schedule:\n"
+                        "    - cron: \"5 4 * * *\"\n", encoding="utf-8")
+    monkeypatch.setattr(ss, "WORKFLOW", workflow)
+
+    # When  the gate runs
+    # Then  it fails, and the triggers it read are the ones it complains about
+    assert ss.triggers(workflow.read_text()) == {"push", "pull_request", "schedule"}
+    assert ss.check() == 1
 
 
 def test_the_scanner_runs_as_the_invoking_user(tmp_path, monkeypatch):
@@ -198,9 +288,12 @@ def test_the_workflow_uses_the_digests_and_a_manual_form():
     # When  it is read for the pipeline's hard requirements
     # Then  the manual trigger, the guard, the make seam and the pinned upload actions are present
     assert "workflow_dispatch:" in text
-    assert "  pull_request:" in text and "  push:" in text and "  schedule:" in text
+    assert "  schedule:" in text
     assert "make security-scan-all" in text and "make security-verdict" in text
     assert "guard:" in text
+    # And   it is its OWN pipeline: no pull_request and no push trigger may gate it (issue #738)
+    assert "  pull_request:" not in text
+    assert "  push:" not in text
     # And nothing floats: every `uses:` is a 40-hex SHA
     import re
     refs = re.findall(r"uses:\s+(\S+)", text)

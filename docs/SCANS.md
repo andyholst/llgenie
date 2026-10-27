@@ -5,37 +5,38 @@ The scan pipeline is `.github/workflows/security-scan.yml`; every scanner it run
 `scripts/security_scan.py`. There is no second code path: the workflow, a developer and CI call the
 same `make` targets.
 
-## Triggers
+## Triggers — its own daily pipeline, never a PR or push check
 
 | Event | When | Failure policy |
 |---|---|---|
-| `pull_request` (main) | every PR | **report-only** — `pr_fail_on` is empty, so a PR is never gated by a pre-existing advisory |
-| `push` (main) | every merge | `full` mode — `fail_on` (critical + high, with a fix) |
-| `schedule` | daily 04:23 UTC | `full` mode |
+| `schedule` | daily 04:05 UTC | `full` mode — `fail_on` (critical + high, with a fix) |
 | `workflow_dispatch` | owner, repository bot, collaborator with write | the `enforce` input, default `full` |
 
-The manual form asks two things: `tools` (`all` or one scanner) and `enforce` (`full` or `pr`). The
-`guard` job runs **before any scanner** and allows the owner, `github-actions[bot]` on a same-repo
-head, and any collaborator with `admin`/`maintain`/`write`; anyone else is refused.
+**There is no `pull_request` trigger and no `push` trigger, on purpose (issue #738).** A scan answers
+"is an upstream package old today", and `main` CI answers "does this change work"; putting the first
+on every PR and every push made a pre-existing advisory red the pipeline forever. Measured: run
+40525155122 (a push) failed on `certifi`, `filelock` and `urllib3` — transitive pins nothing in the
+repository bumped. `make check-security-scan` now **fails** when either trigger is added back, and it
+also fails when `enforce_events` in `data/security-policy.json` names `push` or `pull_request`.
 
-## Why a PR run is narrower than the daily run
+The manual form asks two things: `tools` (`all` or one scanner) and `enforce` (`full`, or `report` to
+run the whole sweep without gating). The `guard` job runs **before any scanner** and allows the owner,
+`github-actions[bot]` on a same-repo head, and any collaborator with `admin`/`maintain`/`write`;
+anyone else is refused.
 
-A repository accumulates High advisories with a fix that no one has applied yet. If a PR enforced
-`fail_on`, every PR — including one that fixes something else — would be red, which is how a
-security gate gets switched off. So a `pull_request` run enforces `pr_fail_on` (critical only,
-with a fix) and still uploads every report; the daily and manual runs enforce the full policy. Both
-sets live in `data/security-policy.json`, never in a workflow literal.
+## Which events may gate, and what a report-only run does
+
+The set of events that may fail the run is **data**, never a literal in a workflow step:
 
 ```json
-{"fail_on": ["critical", "high"], "pr_fail_on": [],
+{"fail_on": ["critical", "high"], "pr_fail_on": [], "enforce_events": ["schedule", "workflow_dispatch"],
  "require_fix": true, "issue_severities": ["critical", "high"]}
 ```
 
-`pr_fail_on` is **empty on purpose**: any repository eventually carries a High with a fix nobody has
-applied yet, and gating every PR on it reds PRs that fix something else — the standard way a security
-gate gets switched off. A PR run therefore *reports* (SARIF + the artifact) and files nothing; the
-daily schedule and a manual dispatch enforce `fail_on` and file the issues. Set `pr_fail_on` to a
-subset of `fail_on` when the tree is clean enough to gate PRs on it.
+`enforce_events` names the ONLY events that can gate. Any other event — and an explicit `ENFORCE=pr`
+dispatch — is **report-only**: every finding is counted, printed, uploaded as SARIF and filed as an
+issue, and the run exits 0. `pr_fail_on` is the narrower set such a run would use; it is empty on
+purpose.
 
 `require_fix: true` means an advisory with no fixed version is **recorded, never blocking** — it is
 work nobody can do today, and #716 decides which recorded findings become issues.
@@ -123,6 +124,37 @@ the issue instead of guessing.
 | `make security-bot DRY=1` | print the edit, push nothing |
 | `make security-bot` | apply, run the gates, push, open the PR |
 | `make check-security-bot` | **The gate** (inside `make ci-unit`): the select labels must exist in the issuer's roster and no compiled file may be an edit target |
+
+## The scan fixes what it reports: the floor, regenerated into the pins
+
+A red scan that nobody can act on is noise, so the daily run closes its own loop (issue #738):
+
+1. **Derive the floor.** `scripts/security_bumps.py` reads the reports and, per package, takes the
+   lowest fixed version that clears **every** advisory reported for it (the maximum of the
+   minimums). Only a finding with a fixed version becomes a floor, and the value is always the
+   scanner's own `fixed` — nothing is invented.
+2. **Write it once.** `tools/security-floors.in` is a pip-compile constraint file, e.g.
+   `urllib3>=2.8.0   # trivy CVE-2026-97687: 2.7.0 -> 2.8.0`. Both `tools/requirements.in` and
+   `tools/requirements-dev.in` include it with `-c security-floors.in`, so the compiled files
+   respect it without a second source of truth.
+3. **Regenerate, never hand-edit.** The daily run calls `make -C tools generate-requirements` and
+   `generate-requirements-dev` — the ONE generator (AGENTS.md). A compiled `requirements*.txt` is
+   never an edit target.
+4. **One PR that closes what it fixes.** The change lands on `fix/security-floors` with a body
+   carrying `Issue: / Fix: / Benefit: / Technical:` and `closes #<n>` for every tagged issue (#716)
+   it fixes. An unsatisfied floor after the regeneration, or a red fast gate, reverts the file, opens
+   **no** PR and exits non-zero.
+
+Renovate (`docs/RENOVATE.md`, #718) keeps the same pins moving *forward* between scans; the floor is
+the minimum an advisory *requires*. What neither can place — a base digest with no newer upstream
+digest, an action SHA, a floor the resolver refuses — is #739.
+
+| Target | What it does |
+|---|---|
+| `make security-bumps-plan` | print the floor, the pins it would move, and the issues the PR would close (no write) |
+| `make security-bumps DRY=1` | same, and nothing regenerated or pushed |
+| `make security-bumps` | write the floor, regenerate both compiled files, gate, push `fix/security-floors`, open/update the PR |
+| `make check-security-bumps` | **The gate** (inside `make ci-unit`): a floor line with no advisory, a compiled pin below its floor, or a missing `-c security-floors.in` fails |
 
 ## Reading a failure
 
