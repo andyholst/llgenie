@@ -1704,7 +1704,7 @@ def _main_pick(args):
             r["local"], r["plans"] = None, {}
             r["engines"] = [{**e, "use_format": fmt} for e in r["engines"]]
     else:
-        rows = mp.offer(reg, gb=gb)
+        rows = mp.offer(reg, gb=gb, ram_gb=mp.system_ram_gb())
     if args.engine:  # only models the requested engine can run here
         want = args.engine.lower()
         rows = [r for r in rows if any(want in (e["id"] + " " + e["engine"]).lower() for e in r["engines"])]

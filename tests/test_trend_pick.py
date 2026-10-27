@@ -65,17 +65,22 @@ README = REPO / "data" / "trending-README.md"
 
 def _readme_rows() -> list[tuple[str, int]]:
     """(name, VRAM GB) of the vendored upstream README "Most loved" table, parsed
-    straight from the markdown: the list a user reads on GitHub. The VRAM column is
-    `16GB`, a bare `8`, or `CPU` (a CPU-only model); all three parse the same way
-    production does (mp._num: 16, 8, 0)."""
+    straight from the markdown: the list a user reads on GitHub.
+
+    The VRAM column is found BY NAME and read off its annotated cell (`16GB`, `**12GB**<br>
+    <sub>stated by the source …</sub>`, `8`, `CPU` — issue #669/#693), the way production
+    reads the store's `vram_min` (mp._num: 16, 12, 8, 0)."""
     import re
     section = README.read_text().split(sr.MOST_LOVED, 1)[1].split("\n## ", 1)[0]
+    lines = section.splitlines()
+    header = next(l for l in lines if l.startswith("| Model"))
+    vram_at = [c.strip() for c in header.strip().strip("|").split("|")].index("VRAM")
     rows = []
-    for line in section.splitlines():
+    for line in lines:
         m = re.match(r"^\| \[\*\*(.+?)\*\*\]", line)
         if m:
             cells = [c.strip() for c in line.split(" | ")]
-            vram = next(c for c in cells if re.fullmatch(r"\d+GB|\d+|CPU", c))
+            vram = cells[vram_at].split("<br>", 1)[0].replace("*", "").strip()
             rows.append((m.group(1), int(mp._num(vram))))
     return rows
 
@@ -413,8 +418,12 @@ def test_live_upstream_registry_is_the_live_readme_list():
 def test_vendored_registry_is_the_vendored_readme_list():
     # Given the vendored registry and the README it was synced with
     data = json.loads(VENDORED.read_text())
-    # Then the models are the README "Most loved" rows, same names, same order, same VRAM
-    assert [(m["name"], int(mp._num(m["vram_tier"]))) for m in data["models"]] == _readme_rows()
+    # Then the models are the README "Most loved" rows, same names, same order, and each
+    # row's README VRAM is the store's measured minimum (the tier rounds differently — #669)
+    assert [m["name"] for m in data["models"]] == [n for n, _ in _readme_rows()]
+    for (name, vram), model in zip(_readme_rows(), data["models"]):
+        stated = mp.vram_min_gb(model) or mp._num(model.get("vram_tier"))
+        assert abs(stated - vram) <= 1, f"{name}: README {vram}GB vs the store's {stated}GB"
 
 
 @pytest.mark.parametrize("backend,gb", [("cuda", 16), ("cuda", 24), ("cpu", 16), ("rocm", 8),
