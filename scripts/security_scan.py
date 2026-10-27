@@ -46,8 +46,8 @@ SBOM_TOOL = "syft"
 #: Syft is a first-class tool id: `make security-scan TOOL=syft` writes the SBOM, and the default
 #: sweep runs it first because Grype matches exactly that file. It is reached through the Grype
 #: image (`--entrypoint syft`), so the stack builds one image per CVE scanner and none per SBOM.
-#: Snyk was REMOVED: it was the one scanner behind `SNYK_TOKEN`, and it re-reported the CVEs Trivy
-#: and Grype already report from the same tree and the same SBOM. No scanner needs a secret now.
+#: No tool in ALL_TOOLS reads a credential: each judges the tree from data the runner downloads
+#: itself, so no scan is ever skipped for a missing secret.
 ALL_TOOLS = (SBOM_TOOL,) + TOOLS
 DEFAULT_POLICY = {
     "fail_on": ["critical", "high"],

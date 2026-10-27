@@ -60,7 +60,7 @@ would leave root-owned files in the tree (issue #433).
   `github/codeql-action/upload-sarif` (pinned by SHA), category `trivy`.
 - **Reports** — `security-reports/sbom.cdx.json`, `trivy.json`, `grype.json`, `semgrep.json`.
 - **No scanner takes a secret.** Trivy, Syft, Grype and Semgrep run from their pinned images, so
-  no scan is ever skipped for a missing credential (Snyk, removed, was the exception).
+  no scan is ever skipped for a missing credential.
 
 ## Targets
 
