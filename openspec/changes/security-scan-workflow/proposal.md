@@ -6,7 +6,7 @@ Blocked by: [#714](https://github.com/asimov-agent/llgenie/issues/714) (the scan
 
 ## Why
 
-The repository has no workflow that scans anything (`grep -rl 'trivy\|grype\|snyk\|semgrep' .github`
+The repository has no workflow that scans anything (`grep -rl 'trivy\|grype\|semgrep' .github`
 → empty) and no manual entry point for a scan. With #714 the scanner images exist; without a single
 invocation seam, each caller would invent its own flags, its own severity threshold and its own idea
 of what "green" means.
