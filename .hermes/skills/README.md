@@ -17,6 +17,7 @@ The repo's `skills/engines/` is a different thing: those describe inference serv
 | `issue-implement` | `make implement-issue` | the change + `pr-body.md` |
 | `architecture-doc` | `make architecture-bot-doc` | rewrite `docs/ARCHITECTURE.md` |
 | `agent-fetch` | `make agent-fetch` | one masked URL fetch → `$OUT` |
+| `registry-sync-review` | `make registry-sync-review` | the green store's VRAM→model→server answer → `registry-review.md` |
 | `rebase-conflict` | `make rebase-bot-agent` | resolve a stopped rebase |
 | `pr-fix` | `make fix-loop-image` | repair a red PR check |
 

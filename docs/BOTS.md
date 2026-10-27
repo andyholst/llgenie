@@ -93,6 +93,25 @@ it with `if: always()`, so the issue exists even when a gate reds and the PR ste
 the landing change is written from (#677/#693). The body carries a marker for the store's
 `generated_utc`, so a re-run updates that issue instead of filing another.
 
+A **green** sync PR is reviewed into its own work item (issue #709). `make registry-review-brief` is
+deterministic and offline: it reads the open `chore/registry-sync` PR and every check bucket, and — only
+when every check is green — renders the VRAM selection check: for each `(arch, vram, ram)` the trend list
+is built from, the models that fit that card and, per model, the server `rank_engines()` puts first with
+its measured t/s. It reports `slower-than-class` (the named server is not the fastest of its own rank
+class), `no-engine` (a listed model no image can run), `unmeasured` (a named server with no figure) and
+`empty-tier` (a card that lists nothing).
+
+The one agent leg runs under `.hermes/skills/registry-sync-review/SKILL.md` and writes `registry-review.md`
+only: the issue title and a body in this repository's issue shape, quoting the measured numbers. Then
+`make registry-review-publish` files ONE issue labelled `agent:implement`, keyed by the store's
+`generated_utc` (`<!-- registry-sync-review: <utc> -->`), editing it on a re-run and linking the store's
+change report (#704) instead of repeating it. Every secret-spending step in
+`registry-sync-review.yml` is gated on the brief's `action == 'review'`, so an hourly run with no green
+PR costs nothing — measured on `main@2cbfb11`, `make registry-review-brief` prints `action=skip` (no open
+sync PR) and still renders 92 `no-engine` findings over the 80 cases, on three models
+(`nemotron-3.5-lightning-30b-a3b`, `glm-5.3-flash`, `llama-3.1-8b`), each listed on an architecture no
+engine image can run it on.
+
 #### The unit gate is hermetic: live-Hub work has its own target (issue #438)
 
 `make test-unit` is the gate every change runs, so nothing in it may leave the machine. Three tests
@@ -240,6 +259,7 @@ queues behind its scheduled run instead of overlapping it. The current slots:
 | `queued-alarm` | `7,37 * * * *` | twice hourly (:07, :37) |
 | `engine-bump-rebase` | `41 5 * * *` | daily 05:41 |
 | `registry-sync` | `19 5 * * 1` | Monday 05:19 |
+| `registry-sync-review` | `55 * * * *` | hourly at :55 (issue #709) |
 | `engine-bump` | `53 6 * * 1` | Monday 06:53 |
 | `architecture-bot` | `47 */6 * * *` | every 6 hours at :47 (issue #449) |
 | `auto-merge` (recheck sweep) | `3,33 * * * *` | twice hourly (:03, :33 — issue #560) |
@@ -1220,6 +1240,7 @@ from the pipeline that will run.
 | `publish-agent-image.yml` | builds + pushes the Hermes agent image when its hash is not on GHCR yet | `force` (optional, default `false`) — Rebuild + push even if the hash tag is already on GHCR |
 | `queued-alarm.yml` | reports CI jobs queued far too long, once per affected run | `minutes` (optional, default `30`) — report jobs queued longer than this many minutes |
 | `rebase-bot.yml` | keeps every open PR current with main, every eligible PR per run (never merges) | `max_prs` (optional, default `10`) — Most PRs this run may rebase (the sweep's daily cap still applies on top) |
+| `registry-sync-review.yml` | a GREEN registry-sync PR is reviewed into ONE agent:implement issue | `dry` (optional, default `false`) — Preview the brief and the issue body this run would file, filing nothing |
 | `registry-sync.yml` | syncs the vendored registry and regenerates the derived tables, then opens the PR | none — the sync has no modes: it always fetches the upstream registry, regenerates |
 | `search-smoke.yml` | one real Firecrawl request proves the masked web reach | none — the smoke takes no target: it always proves the same leg with one request. |
 <!-- dispatch-forms:end -->

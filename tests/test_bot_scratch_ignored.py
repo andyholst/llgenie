@@ -42,6 +42,8 @@ RUN_INPUTS = {
     "params-review-in.md": "the engine-bump documentation review's brief (issue #583)",
     "params-review.md": "the documentation review's proposals",
     "params-review-section.md": "the review section the bump PR body carries",
+    "registry-review-in.md": "the registry-sync review's brief (issue #709)",
+    "registry-review.md": "the registry-sync review's issue body",
 }
 
 
