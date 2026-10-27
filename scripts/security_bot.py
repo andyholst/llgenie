@@ -215,7 +215,7 @@ def apply(repo: str, root: Path = REPO, dry: bool = False, run_url: str = "") ->
     steps = [
         ["git", "checkout", "-b", branch],
         ["git", "add", str(path)],
-        ["git", "-c", "user.name=Asimov Agent", "-c", "user.email=support@docondee.com",
+        ["git", "-c", 'user.name="Asimov Agent"', "-c", 'user.email="support@docondee.com"',
          "commit", "-m", f"fix(security): bump {target.package} {before.split('==')[-1]} -> "
                          f"{after.split('==')[-1]} for {target.advisory}"],
         ["git", "push", "-u", "origin", branch],
