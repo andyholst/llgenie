@@ -30,6 +30,11 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
   verdict `REPORT-ONLY (pr)` exit 0, while `MODE=full` exits 1 listing the critical/high findings that
   have a fix.
 
+- **Snyk is opt-in, not part of a scan.** It is the one scanner here that needs a paid account, a
+  token and a third-party service to receive the analysis; Trivy + Syft/Grype + Semgrep cover the
+  same question with data the runner downloads itself. So `TOOLS` is the local three,
+  `OPTIONAL_TOOLS` is `snyk`, and `make security-scan TOOL=snyk` is the deliberate way to run it.
+
 ## Decisions
 
 - **One seam.** `scripts/security_scan.py` is the only place a scanner is invoked; the workflow,
