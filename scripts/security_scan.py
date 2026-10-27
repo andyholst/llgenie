@@ -66,13 +66,48 @@ def policy() -> dict:
     return merged
 
 
+def ensure_image(tool: str) -> str:
+    """The pinned image, from the registry when it is published, else built from its Dockerfile.
+
+    A pull is the normal path. It fails for a `pull_request` run before the first publish (the
+    `scanner-images` job publishes on a push to main only), and for a fork run, whose token cannot
+    write the base repo's packages. That is not a reason to skip a scan, and it is not a second
+    implementation: the SAME Dockerfile — digest-pinned base, exact versions — is built and tagged
+    with the SAME immutable ref the workflow asked for, and the log says which path was taken.
+    """
+    ref = image_ref(tool)
+    if subprocess.run([RUNTIME, "image", "inspect", ref],
+                      capture_output=True).returncode == 0:
+        return ref
+    pull = subprocess.run([RUNTIME, "pull", ref], capture_output=True, text=True)
+    if pull.returncode == 0:
+        print(f"[security-scan] pulled {ref}")
+        return ref
+    context = REPO / "containers" / "scanners" / tool
+    print(f"[security-scan] {ref} is not published yet — building {context} (the same Dockerfile "
+          "the publish job builds) and tagging it with the ref the scan asked for")
+    build = subprocess.run([RUNTIME, "build", "-t", ref, str(context)],
+                           capture_output=True, text=True)
+    if build.returncode != 0:
+        raise SystemExit(f"[security-scan] cannot build {tool}: {build.stderr.strip()[-400:]}")
+    return ref
+
+
 def _run(argv: list[str], image: str) -> int:
     """Run one scanner from its image, with the checkout mounted so it writes its reports."""
     REPORTS.mkdir(parents=True, exist_ok=True)
     cmd = [RUNTIME, "run", "--rm", "-v", f"{REPO}:/work:rw", "-w", "/work",
-           "-e", "HOME=/tmp", "-e", "SNYK_TOKEN", image, *argv]
+           "-e", "HOME=/tmp", "-e", "SNYK_TOKEN", ensure_image_for(image), *argv]
     print(f"[security-scan] $ {' '.join(cmd)}")
     return subprocess.run(cmd).returncode
+
+
+def ensure_image_for(ref: str) -> str:
+    """`_run` is handed a ref; resolve it to an available image (see `ensure_image`)."""
+    tool = ref.rsplit("/", 1)[-1].split(":")[0]
+    if tool in TOOLS:
+        return ensure_image(tool)
+    return ref
 
 
 def sbom() -> int:

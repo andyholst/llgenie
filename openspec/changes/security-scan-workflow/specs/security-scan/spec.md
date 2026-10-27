@@ -24,6 +24,37 @@ Then   it is `<registry>/llgenie/<tool>:<content hash>` from that file's recorde
 - **Test:** `tests/test_security_scan.py::test_the_policy_and_digests_are_sane` (plus
   `make scanner-ref TOOL=trivy`)
 
+### Requirement: The pinned image is obtained, never skipped
+
+The run MUST use the ref `containers/scanners/digests.json` names: pull it when published, and when
+it cannot be pulled build the SAME `containers/scanners/<id>/Dockerfile` and tag it with that same
+ref. A build failure MUST fail the run.
+
+#### Scenario: an unpublished image is built, not skipped
+
+Given a scanner ref that is not on the registry (a pull_request run before the first publish),
+When   the image is resolved,
+Then   the Dockerfile under `containers/scanners/<id>` is built, tagged with the requested ref, and
+       the scan runs against it.
+
+- **Test:** `tests/test_security_scan.py::test_an_unpublished_image_is_built_from_the_same_dockerfile`
+
+#### Scenario: a published image is pulled and nothing is built
+
+Given a scanner ref that is already on the registry,
+When   the image is resolved,
+Then   it is pulled, and no build runs.
+
+- **Test:** `tests/test_security_scan.py::test_a_published_image_is_pulled_and_used`
+
+#### Scenario: an unobtainable scanner fails the run
+
+Given a ref that cannot be pulled and a Dockerfile that cannot be built,
+When   the image is resolved,
+Then   the run fails naming the scanner.
+
+- **Test:** `tests/test_security_scan.py::test_a_failed_build_is_loud`
+
 ### Requirement: The failure policy is data, and a PR run is narrower than the daily run
 
 `data/security-policy.json` MUST carry `fail_on`, `pr_fail_on`, `require_fix` and
