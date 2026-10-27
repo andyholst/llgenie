@@ -108,8 +108,9 @@ only: the issue title and a body in this repository's issue shape, quoting the m
 change report (#704) instead of repeating it. Every secret-spending step in
 `registry-sync-review.yml` is gated on the brief's `action == 'review'`, so an hourly run with no green
 PR costs nothing — measured on `main@2cbfb11`, `make registry-review-brief` prints `action=skip` (no open
-sync PR) and still renders 92 findings for `nemotron-3.5-lightning-30b-a3b`, which is listed at 16 GB and
-above with no backend that can run it.
+sync PR) and still renders 92 `no-engine` findings over the 80 cases, on three models
+(`nemotron-3.5-lightning-30b-a3b`, `glm-5.3-flash`, `llama-3.1-8b`), each listed on an architecture no
+engine image can run it on.
 
 #### The unit gate is hermetic: live-Hub work has its own target (issue #438)
 

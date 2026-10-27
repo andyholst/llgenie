@@ -12,10 +12,11 @@ answers the question the green PR exists for:
 That answer is read by eye today, per run, from a 20k-line JSON diff and an 81-case matrix fixture —
 and the store is frozen: `data/models.json` still carries `generated_utc 2026-10-13T14:31:40Z` on
 `main@2cbfb11`, because no sync PR has landed since (#534, #659, #684). Run against that store, the
-check in this change already reports **92 findings over the 80 cases**, every one of them
-`nemotron-3.5-lightning-30b-a3b` listed at 16 GB and above with no backend that can run it — the class
-#686 is about. #669 (the order is global, not tier-local), #677/#693 (the suite pins old rows) and #687
-are facets of the same missing review.
+check in this change already reports **92 `no-engine` findings over the 80 cases**, on three models —
+`nemotron-3.5-lightning-30b-a3b` (60 cases), `glm-5.3-flash` (16) and `llama-3.1-8b` (16) — each listed
+on an architecture where no engine image can run it, which is the class #686 is about. #669 (the order is
+global, not tier-local), #677/#693 (the suite pins old rows) and #687 are facets of the same missing
+review.
 
 ## What changes
 

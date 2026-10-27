@@ -23,8 +23,9 @@ highest t/s that fits that card?
   four tests in the same file.
 - **Measured on the real tree** (`main@2cbfb11`): `make registry-review-brief` prints
   `action=skip` / `reason=no open `chore/registry-sync` PR` and still renders 92 `no-engine` findings over
-  the 80 cases — all of them `nemotron-3.5-lightning-30b-a3b`, listed at 16 GB and above with no backend
-  that can run it. The store itself is frozen at `generated_utc 2026-10-13T14:31:40Z` (#534/#659/#684),
+  the 80 cases, on three models — `nemotron-3.5-lightning-30b-a3b` (60 cases), `glm-5.3-flash` (16) and
+  `llama-3.1-8b` (16) — each listed on an architecture no engine image can run it on. The store itself is
+  frozen at `generated_utc 2026-10-13T14:31:40Z` (#534/#659/#684),
   which is why the weekly sync PR never turns green today: this bot reports that state, it does not fix it.
 
 ## Decisions taken
