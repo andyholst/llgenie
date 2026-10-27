@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-27 | a check whose exit code is discarded is not a gate | [2026-10-27-quant-catalog-check-exit.md](agent-wiki/2026-10-27-quant-catalog-check-exit.md) | #701 |
 | 2026-10-27 | a `formats` name that is not a format is not a loss | [2026-10-27-registry-keys-format-vocab.md](agent-wiki/2026-10-27-registry-keys-format-vocab.md) | #698, #700 |
 | 2026-10-26 | the store is vendored with the contract it is written against | [2026-10-26-vendor-model-contract.md](agent-wiki/2026-10-26-vendor-model-contract.md) | #694, #699 |
 | 2026-10-26 | the registry link check asks the Hub's API, and a 429 is not a dead link | [2026-10-26-registry-link-check-hub.md](agent-wiki/2026-10-26-registry-link-check-hub.md) | #690, #691 |
