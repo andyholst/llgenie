@@ -67,6 +67,11 @@ VRAM figures the README column prints.
   instead of a literal name list.
 - **The matrix fixture is regenerated** from the committed store
   (`make render-trend-list-matrix`, 81 cases) — the branch had left the pre-#669 copy.
+- **Every spec `- **Test:**` reference resolves.** One scenario named
+  `test_225_acceptance_strata_on_a_16gb_card`, which does not exist in this branch or on
+  `main`; it now names `test_ac1_rows_are_the_readme_models_that_fit_in_readme_order`, the
+  test that actually builds its expectation from `mp.fits()` (checked programmatically: 9
+  references, 0 missing).
 
 ## Status
 
