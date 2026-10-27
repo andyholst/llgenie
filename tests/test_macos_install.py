@@ -873,7 +873,9 @@ def test_macos_ci_does_not_run_docker_github_actions():
 
     # Then no workflow step runs a Docker GitHub Action, and no macOS job starts Colima
     assert "uses: docker/setup-docker-action" not in docker
-    assert "uses: docker/setup-buildx-action@v3" in docker and "runner.os == 'Linux'" in docker
+    # the setup-buildx ref is pinned to a commit SHA (issue #719); the tag stays as a comment
+    assert re.search(r"uses: docker/setup-buildx-action@[0-9a-f]{40}(\s+#\s*v\d+)?", docker)
+    assert "runner.os == 'Linux'" in docker
     assert "colima start" not in docker
     assert "macOS must not call this action" in docker
 

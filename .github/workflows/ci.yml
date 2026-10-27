@@ -113,9 +113,9 @@ jobs:
     env:
       LLGENIE_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: make publish-ci-images (build + push only the hashes not on GHCR yet)
@@ -140,9 +140,9 @@ jobs:
     env:
       LLGENIE_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: make ci-scanner-images (build + version-test every scanner; publish on a push run)
@@ -201,8 +201,8 @@ jobs:
       # get a read-only token: they build, use the published cache, and test.
       PUBLISH: ${{ github.event_name == 'push' && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GHCR (every run is a push run and publishes)
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: make build-engine-base BACKEND=${{ matrix.backend }} (PUSH=1 on push runs)
@@ -214,7 +214,7 @@ jobs:
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - id: m
@@ -253,12 +253,12 @@ jobs:
       LLGENIE_REGISTRY: ghcr.io/${{ github.repository_owner }}
       PUBLISH: ${{ github.event_name == 'push' && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: ${{ matrix.engine != 'none' }}
       - name: Free disk (CUDA/ROCm bases are large)
         if: ${{ matrix.engine != 'none' }}
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: ${{ matrix.engine != 'none' }}
       - name: Log in to GHCR (every run is a push run and publishes)
         if: ${{ matrix.engine != 'none' }}
@@ -269,7 +269,7 @@ jobs:
       - name: Pull the test image (GHCR, published by ci-images; the post-build pytest stage runs in llgenie/test)
         if: ${{ matrix.engine != 'none' }}
         run: make test-image-pull
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         if: ${{ matrix.engine != 'none' }}
       - name: hf CLI (tiny test model)
         if: ${{ matrix.engine != 'none' }}
@@ -321,19 +321,19 @@ jobs:
     env:
       LLGENIE_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: ${{ matrix.engine != 'none' }}
       - name: Free disk (CUDA/ROCm images are large)
         if: ${{ matrix.engine != 'none' }}
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: ${{ matrix.engine != 'none' }}
       # a package published for the first time can be private until linked: pull
       # with the run's token (packages: read) instead of anonymously
       - name: Log in to GHCR (read)
         if: ${{ matrix.engine != 'none' }}
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         if: ${{ matrix.engine != 'none' }}
       - name: hf CLI (tiny test model)
         if: ${{ matrix.engine != 'none' }}

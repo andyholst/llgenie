@@ -73,6 +73,8 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-actions actions-report update-actions \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -938,6 +940,12 @@ ci-scanner-images: ## CI job scanner-images: build and version-test every scanne
 	python3 scripts/scanner_image.py ci
 check-scanner-images: ## CI: fail when a scanner Dockerfile floats (tag base, version range) or digests.json is stale (issue #714)
 	python3 scripts/scanner_image.py check all
+check-actions: ## CI: fail when a GitHub Action in any workflow or composite action is not pinned to a full commit SHA (issue #719)
+	python3 scripts/pin_actions.py check
+actions-report: ## Show every `uses:` ref the action-pin gate reads, its pin state and its tag
+	python3 scripts/pin_actions.py report
+update-actions: ## Re-resolve every pinned action's tag to its current commit SHA and rewrite the workflows (needs gh + network)
+	python3 scripts/pin_actions.py update
 # UNSUPPORTED=<file>: upstream engines with no skill are omitted from the trend
 # offer (no image). Passing the decisions file tolerates ONLY the engines recorded
 # there with a dated decision (issue #229); an engine with no skill and no decision
@@ -1468,6 +1476,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-security-scan
 	$(MAKE) check-security-issues
 	$(MAKE) check-security-bot
+	$(MAKE) check-actions
 	$(MAKE) check-agent-skills
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates

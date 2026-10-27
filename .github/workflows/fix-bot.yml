@@ -162,7 +162,7 @@ jobs:
 
       - name: Checkout with the owner PAT (so the push re-triggers CI)
         if: steps.pr.outputs.branch != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
           token: ${{ secrets.BUMP_TOKEN }}
@@ -244,7 +244,7 @@ jobs:
       # transcript, never the raw capture (which holds the unredacted stream by construction).
       - name: Upload the REDACTED agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: agent-transcript-redacted
           path: hermes-run.scrubbed.log
@@ -334,7 +334,7 @@ jobs:
       pull-requests: write
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # A `workflow_run` gives us a RUN, not a PR (issue #538). `make fix-bot-resolve` is the resolution
       # the merge gate uses, asked with THIS caller's consequence (issue #629): a `CI` failure report can
       # arrive after its PR already merged or closed, and then there is nothing to repair — so an empty

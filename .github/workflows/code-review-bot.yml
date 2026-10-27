@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # The scan is the record of what the checks saw: it runs on the checked-out tree, writes
       # nothing, and its output is the evidence the issues will quote. It carries the SAME token as

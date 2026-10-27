@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Report jobs queued far too long, delivered to the run's PR (else one issue per stuck label)
         env:
           # It comments on a PR / files ONE deduped issue: `issues: write` is declared above and
