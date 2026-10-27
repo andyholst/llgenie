@@ -30,12 +30,10 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
   verdict `REPORT-ONLY (pr)` exit 0, while `MODE=full` exits 1 listing the critical/high findings that
   have a fix.
 
-- **Snyk was REMOVED, not made opt-in.** It was the one scanner needing a paid account, a
-  token and a third-party service to receive the analysis; Trivy + Syft/Grype + Semgrep cover the
-  same question with data the runner downloads itself. So `TOOLS` is the local three,
-  so the stack is Trivy + Syft + Grype + Semgrep and takes no secret at all. An earlier revision of
-  this note made Snyk opt-in; that was a half-measure — a scanner nobody should need is a scanner
-  the repository should not ship.
+- **The stack takes no credential at all.** `TOOLS` is the local three — Trivy + Syft/Grype +
+  Semgrep — and each judges the tree from data the runner downloads itself. `ALL_TOOLS` adds Syft,
+  the SBOM writer, reached through the Grype image. No tool reads a token, so no scan is ever
+  skipped for a missing secret.
 
 ## Decisions
 

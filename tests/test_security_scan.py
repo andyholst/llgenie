@@ -322,7 +322,7 @@ def test_an_unknown_tool_is_refused():
     # Given an id that is not in the stack
     # When  a scan is asked for it
     try:
-        ss.scan("snyk")
+        ss.scan("gitleaks")
     except SystemExit as exc:
         # Then  it exits non-zero naming what IS known, and never runs a scanner
         assert "unknown tool" in str(exc) and "grype" in str(exc), str(exc)
