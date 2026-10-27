@@ -96,7 +96,11 @@ def ensure_image(tool: str) -> str:
 def _run(argv: list[str], image: str) -> int:
     """Run one scanner from its image, with the checkout mounted so it writes its reports."""
     REPORTS.mkdir(parents=True, exist_ok=True)
-    cmd = [RUNTIME, "run", "--rm", "-v", f"{REPO}:/work:rw", "-w", "/work",
+    # The image's own USER is a non-root one, but the mounted checkout belongs to the RUNNER user:
+    # without `--user` the scanner cannot create its report ("permission denied") and would leave
+    # root-owned files in the worktree (issue #433). Running as the invoking user fixes both.
+    cmd = [RUNTIME, "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
+           "-v", f"{REPO}:/work:rw", "-w", "/work",
            "-e", "HOME=/tmp", "-e", "SNYK_TOKEN", ensure_image_for(image), *argv]
     print(f"[security-scan] $ {' '.join(cmd)}")
     return subprocess.run(cmd).returncode
@@ -198,6 +202,8 @@ def blocking(items: list[dict], pol: dict, mode: str = "full") -> list[dict]:
     """The findings that must fail the run, for the mode's severity set."""
     severities = pol.get("pr_fail_on") if mode == "pr" else pol.get("fail_on")
     fail_on = {str(s).lower() for s in severities or []}
+    if not fail_on:  # report-only mode: the PR run writes SARIF + the artifact and never gates
+        return []
     out = []
     for item in items:
         if item["severity"] not in fail_on:
@@ -213,6 +219,10 @@ def verdict(mode: str = "full") -> int:
     items = findings()
     bad = blocking(items, pol, mode)
     severities = pol.get("pr_fail_on") if mode == "pr" else pol.get("fail_on")
+    if not severities:
+        print(f"[security-scan] REPORT-ONLY ({mode}): {len(items)} finding(s) recorded; this run "
+              "does not fail a pull request — the daily and manual runs enforce the policy")
+        return 0
     if bad:
         print(f"[security-scan] FAIL ({mode}): {len(bad)} finding(s) at {severities}"
               f"{' with a fix available' if pol.get('require_fix') else ''}")
@@ -230,7 +240,7 @@ def check() -> int:
     problems: list[str] = []
     pol = policy()
     known = {"critical", "high", "medium", "low", "negligible", "unknown"}
-    for key in ("fail_on", "pr_fail_on", "issue_severities"):
+    for key in ("fail_on", "issue_severities"):
         values = pol.get(key)
         if not values:
             problems.append(f"security-policy.json: `{key}` is empty")
@@ -238,6 +248,9 @@ def check() -> int:
         for severity in values:
             if str(severity).lower() not in known:
                 problems.append(f"security-policy.json: `{severity}` in `{key}` is not a severity")
+    for severity in pol.get("pr_fail_on") or []:
+        if str(severity).lower() not in known:
+            problems.append(f"security-policy.json: `{severity}` in `pr_fail_on` is not a severity")
     if set(map(str.lower, pol.get("pr_fail_on") or [])) - set(map(str.lower, pol.get("fail_on") or [])):
         problems.append("security-policy.json: `pr_fail_on` is not a subset of `fail_on`")
     recorded = digests()
