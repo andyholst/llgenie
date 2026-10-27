@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-27 | the bot turns one auto-fixable issue into one green PR, or nothing | [2026-10-27-security-bot.md](agent-wiki/2026-10-27-security-bot.md) | #717 |
 | 2026-10-27 | a finding becomes exactly one tagged issue, and never a duplicate | [2026-10-27-security-issues.md](agent-wiki/2026-10-27-security-issues.md) | #716 |
 | 2026-10-27 | the scans run from pinned images; a PR run is narrower than the daily run | [2026-10-27-security-scan-workflow.md](agent-wiki/2026-10-27-security-scan-workflow.md) | #715 |
 | 2026-10-27 | one immutable Wolfi image per scanner | [2026-10-27-scanner-images.md](agent-wiki/2026-10-27-scanner-images.md) | #714 |

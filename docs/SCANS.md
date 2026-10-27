@@ -97,6 +97,33 @@ never on a `pull_request`, whose findings belong to the PR) turns the reports in
 | `make security-issues SLUG=owner/name RUN_URL=<link>` | create/update/close through `gh` |
 | `make check-security-issues` | **The gate** (inside `make ci-unit`): `issue_severities` empty or not a subset of `fail_on`, a missing label, or a marker that does not round-trip fails |
 
+## The remediation bot
+
+`.github/workflows/security-bot.yml` runs `make security-bot`, which is `scripts/security_bot.py`:
+
+1. **select** the oldest open issue carrying `security` + `vulnerability` + `auto-fixable`;
+2. **parse** the package and `current -> fixed` out of the body the issuer wrote (#716) — a body
+   without those lines is refused, never guessed;
+3. **edit the one line that owns the pin** (`tools/requirements.in` / `requirements-dev.in`). A
+   compiled `requirements*.txt` is never an edit target — it is regenerated;
+4. **run the fast gates** (`make lint check-wiring check-docs check-security-scan`);
+5. **push a branch and open ONE PR** whose body carries `Issue: / Fix: / Benefit: / Technical:` and
+   `closes #<issue>`.
+
+**Green or nothing:** when a gate is red the bot reverts the edit, comments the real output on the
+issue, and opens no PR. It never merges, never pushes to `main`, never force-pushes.
+
+It **refuses** a finding it cannot place — a `component:container` advisory (a base-image or
+scanner bump, which is a reviewed change) or a package pinned nowhere it can see — and says so on
+the issue instead of guessing.
+
+| Target | What it does |
+|---|---|
+| `make security-bot-pick` | print the one issue the run would take |
+| `make security-bot DRY=1` | print the edit, push nothing |
+| `make security-bot` | apply, run the gates, push, open the PR |
+| `make check-security-bot` | **The gate** (inside `make ci-unit`): the select labels must exist in the issuer's roster and no compiled file may be an edit target |
+
 ## Reading a failure
 
 `make security-verdict` prints every blocking finding as

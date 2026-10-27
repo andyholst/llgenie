@@ -72,7 +72,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
 	scrub-log \
-	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
+	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
@@ -918,6 +918,12 @@ security-issues: ## File or update the tagged vulnerability issues for the curre
 	python3 scripts/security_issues.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" --run-url "$(RUN_URL)"
 check-security-issues: ## CI: fail when the issue policy/label roster/marker disagree (issue_severities not a subset of fail_on, a missing label, a marker that does not round-trip) (issue #716)
 	python3 scripts/security_issues.py check
+security-bot-pick: ## Print the ONE auto-fixable issue the remediation bot would take, and what it would edit (issue #717)
+	python3 scripts/security_bot.py select --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)"
+security-bot: ## Apply the advisory's pin, run the fast gates, and open ONE PR that closes the issue (DRY=1 prints the edit and pushes nothing; issue #717)
+	python3 scripts/security_bot.py apply --repo "$(if $(SLUG),$(SLUG),asimov-agent/llgenie)" $(if $(DRY),--dry,)
+check-security-bot: ## CI: fail when the bot's select labels/pin sources disagree with the issue roster or a compiled requirements file became an edit target (issue #717)
+	python3 scripts/security_bot.py check
 scanner-image: ## Build one scanner image from containers/scanners/<SCANNER>/Dockerfile (SCANNER=trivy|grype|semgrep|snyk, issue #714)
 	python3 scripts/scanner_image.py build "$(SCANNER)"
 test-scanner-image: ## Build a scanner image and prove it prints the version its Dockerfile pins (SCANNER=<id>)
@@ -1461,6 +1467,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-scanner-images
 	$(MAKE) check-security-scan
 	$(MAKE) check-security-issues
+	$(MAKE) check-security-bot
 	$(MAKE) check-agent-skills
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates

@@ -65,6 +65,7 @@ FAST_GATES: tuple[str, ...] = (
 #: `ci-unit` that appears in NEITHER this mapping nor `FAST_GATES` is a finding (issue #475): a new
 #: gate has to be classified, so it cannot be silently skipped here.
 DEFERRED: dict[str, str] = {
+    "check-security-bot": "reads the bot's select labels and pin sources against the issue roster: a security-tracker change moves it, not the issue-bot's own PR",
     "check-security-issues": "reads the issue label roster and the scan policy: a security-tracker change moves it, not the issue-bot's own PR",
     "check-security-scan": "reads data/security-policy.json and the scanner digests: a security-pipeline change moves it, not the issue-bot's own PR",
     "check-scanner-images": "reads the scanner Dockerfiles and digests.json: a static gate a scan-pipeline change moves, not the issue-bot's own PR",
