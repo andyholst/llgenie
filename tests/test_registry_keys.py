@@ -72,6 +72,34 @@ def run_cli(args: list[str]) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
+def test_a_dropped_non_format_name_is_not_a_loss():
+    """A `formats[].name` that is not a format is upstream display text: the normaliser
+    drops it and states the real format, and that is not the store losing data (#698)."""
+    # Given a committed row that called its format after the model
+    prev = registry()
+    prev["models"][0]["formats"] = [{"name": "Model One", "hf": "a/m1"}]
+
+    # When the sync normalises that row to GGUF
+    cur = copy.deepcopy(prev)
+    cur["models"][0]["formats"] = [{"name": "GGUF", "hf": "a/m1"}]
+
+    # Then no finding calls the dropped display name a loss
+    assert RK.compare(prev, cur) == []
+
+
+def test_a_dropped_real_format_is_still_a_loss():
+    """A format the pick can act on going away is what the guard exists for."""
+    # Given a committed row offering GGUF and MLX
+    prev = registry()
+
+    # When the sync keeps only MLX
+    cur = copy.deepcopy(prev)
+    cur["models"][0]["formats"] = [{"name": "MLX", "hf": "a/m1-mlx"}]
+
+    # Then the finding names the format that went away
+    assert "m1: formats lost ['GGUF']" in RK.compare(prev, cur)
+
+
 def test_compare_reports_every_kind_of_loss():
     """A model, key, engine, list entry, stated footprint or tracked post that goes
     away is a loss — the set llgenie ranks really got thinner."""

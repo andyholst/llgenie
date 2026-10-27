@@ -23,9 +23,10 @@ or a post, and every one of them used to read as a "loss" and freeze the sync fo
   FAIL (exit 1) — a model row gone; a key gone from a model row; an engine that had a
     measurement for a model and has none now (`rank_engines` groups by engine, so that
     is the unit whose loss thins the trend list); a `backends` / `supported_engines`
-    entry or a `formats` name gone; an engine-registry entry gone; a stated footprint
-    scalar (`weight_gb`, `context_tokens`, `system_ram_min`) lowered; a tracked post
-    (`/status/<id>`) gone from the WHOLE store.
+    entry gone; a FORMAT (`GGUF`, `MLX`, …) gone — a non-format display name in
+    `formats` is not data and cannot be lost (#698); an engine-registry entry gone; a
+    stated footprint scalar (`weight_gb`, `context_tokens`, `system_ram_min`) lowered; a
+    tracked post (`/status/<id>`) gone from the WHOLE store.
   NOTE (printed, not fatal) — a surviving post's stated t/s lowered (upstream
     correcting a figure), an engagement counter decreased (a live re-scrape), the
     `seen_posts` placeholder shrinking (it is derived and rebuilt on every sort).
@@ -53,6 +54,11 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    from .sync_registry import FORMAT_VOCAB
+except ImportError:
+    from sync_registry import FORMAT_VOCAB  # type: ignore
 
 REPO = Path(__file__).resolve().parent.parent
 VENDORED = REPO / "data" / "models.json"
@@ -142,6 +148,28 @@ def _scalar_losses(prev_model: dict, cur_model: dict, where: str = "") -> list[s
         if now < was:
             out.append(f"{where}{field} lowered {prev_model.get(field)!r} -> {cur_model.get(field)!r}")
     return out
+
+
+_FORMAT_CANON = {name.lower(): name for name in FORMAT_VOCAB}
+
+
+def _real_formats(row: dict) -> set[str]:
+    """The `formats[].name` values in `row` that are formats at all (issue #698).
+
+    `scripts/sync_registry.normalise_formats` (issue #687) drops every name outside
+    FORMAT_VOCAB — upstream writes model and recipe text there ("Ornith 1.5") — and states
+    the real format instead. Such a name was never data, so losing it removes nothing a
+    consumer can rank or download; the same reasoning #668 applied to the derived
+    `engagement.seen_posts` placeholder. A vocabulary format that disappears is still a
+    loss. FORMAT_VOCAB is imported from the normaliser, so widening the vocabulary widens
+    this check in the same edit.
+    """
+    found = set()
+    for entry in row.get("formats") or []:
+        canon = _FORMAT_CANON.get(str(entry.get("name") or "").strip().lower())
+        if canon:
+            found.add(canon)
+    return found
 
 
 def post_key(url) -> str | None:
@@ -261,8 +289,7 @@ def compare(prev: dict, cur: dict) -> list[str]:
             lost = [x for x in pm.get(field) or [] if x not in (cm.get(field) or [])]
             if lost:
                 findings.append(f"{model_id}: {field} lost {lost}")
-        lost_formats = [f.get("name") for f in pm.get("formats") or []
-                        if f.get("name") not in [c.get("name") for c in cm.get("formats") or []]]
+        lost_formats = sorted(_real_formats(pm) - _real_formats(cm))
         if lost_formats:
             findings.append(f"{model_id}: formats lost {lost_formats}")
 
