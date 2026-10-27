@@ -116,7 +116,7 @@ def _run(argv: list[str], image: str, entrypoint: str | None = None) -> int:
     extra = ["--entrypoint", entrypoint] if entrypoint else []
     cmd = [RUNTIME, "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", *extra,
            "-v", f"{REPO}:/work:rw", "-w", "/work",
-           "-e", "HOME=/tmp", "-e", "SNYK_TOKEN", ensure_image_for(image), *argv]
+           "-e", "HOME=/tmp", ensure_image_for(image), *argv]
     print(f"[security-scan] $ {' '.join(cmd)}")
     return subprocess.run(cmd).returncode
 
