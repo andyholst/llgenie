@@ -11,6 +11,7 @@ NO-SKIP POLICY: a missing prerequisite is a LOUD FAILURE, never a skip.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -92,12 +93,41 @@ def test_pr_mode_only_fails_on_critical(tmp_path, monkeypatch):
     # Given a HIGH with a fix
     items = ss._trivy_findings(TRIVY_HIGH)
 
-    # When  the pull-request policy is applied
+    # When  a pull-request policy that names critical only is applied
     bad = ss.blocking(items, POLICY, "pr")
 
     # Then  it does not block, and the full mode still does
     assert bad == []
     assert ss.blocking(items, POLICY, "full") != []
+
+
+def test_the_shipped_pr_policy_is_report_only(tmp_path, monkeypatch):
+    """The shipped policy does not gate a pull request at all — it reports and files."""
+
+    # Given this repository's policy
+    pol = ss.policy()
+
+    # Then  a PR run is report-only, and a blocking critical still fails the full mode
+    assert pol["pr_fail_on"] == []
+    assert ss.blocking(ss._trivy_findings(TRIVY_OK), pol, "pr") == []
+    assert ss.blocking(ss._trivy_findings(TRIVY_OK), pol, "full") != []
+
+
+def test_the_scanner_runs_as_the_invoking_user(tmp_path, monkeypatch):
+    """The mounted checkout belongs to the runner user; the scanner must write its report as them."""
+
+    # Given a docker stub that records its argv
+    log = _docker_stub(tmp_path, monkeypatch, pull_ok=True, inspect_ok=True)
+
+    # When  a scan is launched
+    ss._run(["version"], ss.image_ref("trivy"))
+
+    # Then  `--user <uid>:<gid>` is on the command line (issues #433 and the CI permission denial)
+    runs = [json.loads(l) for l in log.read_text().splitlines() if json.loads(l)[0] == "run"]
+    assert len(runs) == 1
+    argv = runs[0]
+    assert "--user" in argv
+    assert argv[argv.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
 
 
 def test_a_finding_without_a_fix_never_blocks():
