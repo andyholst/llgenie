@@ -14,11 +14,21 @@ Issue #715 (parent #713, blocked by #714). Branch `feat/security-scan-workflow`,
 - `make check-wiring` → OK, 239 targets, CI reaches 93; `check-workflows` green (every `${{ }}` in
   the new file parses); `check-docs` green after `docs/SCANS.md` was linked from `README.md`.
 
-- **CI caught a real defect the local run could not**: the first `pull_request` run of the scan job
-  died on `denied` pulling `llgenie/trivy:<hash>` — the image is published on a push to `main` only,
-  so a PR run has no tag to pull. `ensure_image()` now pulls when published and otherwise builds the
-  SAME Dockerfile and tags it with the same ref (three tests cover pull / build / loud failure), and
-  the SARIF step no longer fails the job when no file was produced.
+- **Five defects the real CI runs found, each fixed and re-verified here** (the local suite could not
+  see any of them, because they only appear when the scanners actually run):
+  1. `denied` pulling `llgenie/trivy:<hash>` — the image is published on a push to `main` only, so a
+     PR run has no tag. `ensure_image()` now pulls when published and otherwise builds the SAME
+     Dockerfile and tags it with the same ref (three tests: pull / build / loud failure).
+  2. the SARIF step failed on a file that no run had produced — it is now gated on `hashFiles`.
+  3. trivy could not write its report (`permission denied`): the image's USER is non-root while the
+     mounted checkout belongs to the runner. `_run` passes `--user <uid>:<gid>` (also satisfies
+     issue #433).
+  4. `syft` never ran: the Grype image's ENTRYPOINT is `grype`, so `syft …` was read as a second
+     positional ("accepts at most 1 arg(s), received 2"). The SBOM step uses `--entrypoint syft`.
+  5. Semgrep refused `--config auto` with metrics off; the SAST step pins `--config=p/default`.
+- A `pull_request` run is **report-only** (`pr_fail_on: []`), measured locally: 27 findings recorded,
+  verdict `REPORT-ONLY (pr)` exit 0, while `MODE=full` exits 1 listing the critical/high findings that
+  have a fix.
 
 ## Decisions
 
