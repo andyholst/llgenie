@@ -1,6 +1,6 @@
 # 2026-10-27 — a new registry engine now reaches a bot with a file to write
 
-Issue: [#757](https://github.com/asimov-agent/llgenie/issues/757) — PR: [#759](https://github.com/asimov-agent/llgenie/pull/759)
+Issue: [#757](https://github.com/asimov-agent/llgenie/issues/757) — PR: [#760](https://github.com/asimov-agent/llgenie/pull/760)
 
 ## What the chain was, and where it stopped
 
