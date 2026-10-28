@@ -413,10 +413,13 @@ def pr_title(title: str, num: int) -> str:
     return f"{subject} (#{num})"
 
 
-def render_pr_body(text: str, num: int, diffstat: str) -> str:
-    """Validate the agent's PR body and compose it with the commit's own file list.
+def body_problems(text: str) -> list[str]:
+    """What a PR body is missing, as lines a bot can print (empty when the body is usable).
 
-    Refuses — loudly, naming what is missing — rather than opening a PR whose description says nothing.
+    The four parts are the contract the PR body and the issue body share (issue #745), and an empty
+    part is exactly as useless as a missing one — measured on the #759 leg, whose `Technical:` line
+    carried nothing and killed the run at the LAST step, after the whole gate suite had passed
+    (issue #770). Naming the part is what lets the implement leg fix it where it can still act.
     """
     problems = []
     for part in PR_PARTS:
@@ -425,6 +428,15 @@ def render_pr_body(text: str, num: int, diffstat: str) -> str:
             problems.append(f"`{part}` is missing")
         elif not m.group(1).strip():
             problems.append(f"`{part}` states nothing")
+    return problems
+
+
+def render_pr_body(text: str, num: int, diffstat: str) -> str:
+    """Validate the agent's PR body and compose it with the commit's own file list.
+
+    Refuses — loudly, naming what is missing — rather than opening a PR whose description says nothing.
+    """
+    problems = body_problems(text)
     if problems:
         raise SystemExit(f"[issue-implementer] {PR_BODY_FILE} cannot become a PR body: "
                          + "; ".join(problems))
@@ -658,6 +670,12 @@ def main(argv=None) -> int:
                    help="the agent's four-part PR body (default pr-body.md)")
     o.add_argument("--dry", action="store_true")
 
+    cb = sub.add_parser("check-body")
+    cb.add_argument("--body-file", default=PR_BODY_FILE,
+                    help="the four-part PR body to validate (default pr-body.md)")
+    cb.add_argument("--issue", type=int, default=None,
+                    help="when given, the body must also name `#<issue>`")
+
     args = p.parse_args(argv)
     if args.cmd == "count":
         print(count(args.gh, args.repo, args.bot, args.today))
@@ -679,8 +697,19 @@ def main(argv=None) -> int:
         url = open_pr(args.gh, args.repo, args.issue, args.branch, args.title,
                       args.body_file, args.dry)
         print(f"pr_url={url}")
+    elif args.cmd == "check-body":
+        path = Path(args.body_file)
+        if not path.exists():
+            raise SystemExit(f"[issue-implementer] {path} does not exist: the implementation leg must "
+                             f"write it (Issue:/Fix:/Benefit:/Technical:, one line each at minimum)")
+        problems = body_problems(path.read_text())
+        if args.issue is not None and f"#{args.issue}" not in path.read_text():
+            problems.append(f"it must name the issue it implements (`#{args.issue}`) in its `Issue:` part")
+        if problems:
+            raise SystemExit(f"[issue-implementer] {path} cannot become a PR body: " + "; ".join(problems))
+        print(f"[issue-implementer] {path} carries all four parts and names its issue")
     else:
-        p.error("need a command: count | dispatch | apply-verdict | changed | open-pr")
+        p.error("need a command: count | dispatch | apply-verdict | changed | open-pr | check-body")
     return 0
 
 

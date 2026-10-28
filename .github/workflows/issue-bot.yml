@@ -266,6 +266,11 @@ jobs:
           # issue #345), sourced from the ONE seam that sets it (issue #840) rather than a literal in
           # this file; a github-actions[bot] branch is also held for approval on its PR.
           make git-identity-apply
+          # A containerized leg runs as root and leaves `.git/objects` owned by root, so this step
+          # used to die at `git add` with "insufficient permission for adding an object to repository
+          # database" and push nothing (issue #770: run 40673131217, head ea80ab49). The repair is
+          # also part of `make implement-issue`; this is the belt for a leg that ran an older image.
+          sudo chown -R "$(id -u):$(id -g)" .
           git checkout -b "$BRANCH"
           # The bot's own run inputs (issue.md, triage.md, refine*.md, comment.md) are in
           # .gitignore, so this stages repository content only: there is no per-file exclude

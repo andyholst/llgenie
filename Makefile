@@ -69,7 +69,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
 	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues engine-skill-scaffold registry-change-report sync-change-issue registry-review-brief registry-sync-review registry-review-publish sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
-	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-report worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image ci-requeue-cancelled \
+	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-report worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image ci-requeue-cancelled issue-bot-pr-body-check agent-repo-ownership \
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight jev-preflight-required nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
@@ -553,6 +553,8 @@ scrub-log: ## Redact a captured agent log and print its bounded tail (LOG=<path>
 
 
 AGENT_IMAGE := llgenie/agent:latest
+#: The checkout `make agent-repo-ownership` gives back to the invoking user (issue #770).
+OWNERSHIP_DIR ?= $(CURDIR)
 
 issue-bot-image: ## Build/pull the agent image the issue-bot runs in (the same image the fix-bot uses; alias of agent-image)
 	python3 scripts/ci_images.py ensure agent
@@ -776,6 +778,19 @@ implement-issue: ## Implement issue.md with Hermes INSIDE the agent image (AGENT
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
 	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _implement-issue')
+	$(MAKE) --no-print-directory agent-repo-ownership
+	$(MAKE) --no-print-directory issue-bot-pr-body-check ISSUE=$(if $(ISSUE),$(ISSUE),$(shell echo "$(BRANCH)" | sed -n 's|^agent/issue-\([0-9]*\).*|\1|p'))
+
+agent-repo-ownership: ## Give the mounted checkout back to the invoking user after a containerized agent leg (a root-run leg leaves `.git/objects` unwritable, so the next `git add` dies with "insufficient permission"; issue #770)
+	@python3 scripts/require_env.py NOUS_API_KEY
+	python3 scripts/ci_images.py ensure agent
+	$(call scrubbed_run,$(RUNTIME) run --rm -v "$(OWNERSHIP_DIR):/repo" --entrypoint chown \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
+	  $(AGENT_IMAGE) -R $(shell id -u):$(shell id -g) /repo)
+
+issue-bot-pr-body-check: ## CI: refuse the agent's pr-body.md before the leg spends its gates on a body that cannot become a PR (a missing or empty Issue:/Fix:/Benefit:/Technical: part; issue #770)
+	@test -f $(if $(BODY_FILE),$(BODY_FILE),pr-body.md) || { echo "[issue-implementer] no $(if $(BODY_FILE),$(BODY_FILE),pr-body.md) was written - the leg cannot open a PR without it (issue #770)"; exit 1; }
+	python3 scripts/issue_implementer.py check-body --body-file $(if $(BODY_FILE),$(BODY_FILE),pr-body.md) $(if $(ISSUE),--issue $(ISSUE),)
 
 hermes-smoke: ## Prove the alias the bots use can CALL A TOOL, inside the agent image: a terminal call that prints a per-run nonce, asserted from the session transcript (die in seconds, not after 20 min); the transcript is REDACTED before it prints (issues #359, #407)
 	@python3 scripts/require_env.py NOUS_API_KEY
