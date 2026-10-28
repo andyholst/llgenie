@@ -377,6 +377,10 @@ model-pin-report: ## Print the bots' pinned model snapshot, where each place dec
 # the leg preloads it with `hermes -s <name>`. The gate fails a leg that preloads nothing,
 # names a skill that does not exist, carries a name that disagrees with its directory, grows
 # past the pointer budget, or inlines the unattended contract again.
+.PHONY: bot-preflight
+bot-preflight: ## Fetch origin/main, fast-forward a behind checkout, and record the AGENTS.md this run is measured against (issue #792)
+	python3 scripts/bot_preflight.py $(if $(CHECK),--check,)
+
 check-agent-skills: ## CI: fail when a bot leg does not preload its project skill, names a missing one, or carries a rulebook inline instead of a pointer (issue #577)
 	python3 scripts/check_agent_skills.py check
 
