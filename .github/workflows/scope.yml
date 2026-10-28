@@ -1,4 +1,4 @@
-name: scope
+name: ci-scope — selects the CI stages a diff needs, and runs the docs gates a docs-only PR still needs
 
 # Trigger surface: `pull_request` with NO path filter, so one check of this exact name always reports
 # (issue #824). `ci.yml` ignores a docs-only diff at the trigger, because a job-level `if:` that skips a
@@ -8,9 +8,12 @@ name: scope
 # Flow: classify the diff (scripts/ci_scope.py) -> the docs-class gates -> the decision printed in the log.
 # Never: publishes an image, reads a repository secret, or runs on a push (`ci.yml` owns those).
 
+# dispatch: no inputs — dispatch re-classifies the current tree against `main`; the selected set is a
+# function of the diff, so no input can change it (issue #824).
 on:
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 # One PR supersedes its own previous run, exactly like ci.yml's pull_request group (issue #288). The
 # value is EVALUATED per event, never a bare `true`: a bare true is what killed in-flight bot runs and
@@ -33,7 +36,16 @@ jobs:
       - name: make test-env (Python 3.11 + the test image the gates run in)
         run: make test-env
       - name: classify the diff (one class= line per class, one job= line per stage)
-        run: python3 scripts/ci_scope.py --base "origin/${{ github.base_ref }}"
+        # `github.base_ref` is empty for every non-`pull_request` event, so the dispatch path falls back
+        # to `main` rather than diffing against the empty string and classifying nothing (issue #824).
+        run: |
+          BASE="${{ github.base_ref }}"
+          if [ -z "$BASE" ]; then
+            echo "No github.base_ref for event '${{ github.event_name }}': reporting the diff against main."
+            BASE=main
+          fi
+          git fetch --no-tags origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
+          python3 scripts/ci_scope.py --base "origin/$BASE"
       - name: make ci-lint (linefeed / editorconfig — the markdown gate)
         run: make ci-lint
       - name: make check-docs
