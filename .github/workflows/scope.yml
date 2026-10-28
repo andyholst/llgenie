@@ -1,0 +1,49 @@
+name: scope
+
+# Trigger surface: `pull_request` with NO path filter, so one check of this exact name always reports
+# (issue #824). `ci.yml` ignores a docs-only diff at the trigger, because a job-level `if:` that skips a
+# stage is invisible in the job list and `tests/test_ci_images.py::test_no_ci_step_or_job_is_skipped`
+# allows no such condition — so the docs class is selected before any job exists, and this workflow is
+# where the docs gates still run.
+# Flow: classify the diff (scripts/ci_scope.py) -> the docs-class gates -> the decision printed in the log.
+# Never: publishes an image, reads a repository secret, or runs on a push (`ci.yml` owns those).
+
+on:
+  pull_request:
+    branches: ["main"]
+
+# One PR supersedes its own previous run, exactly like ci.yml's pull_request group (issue #288). The
+# value is EVALUATED per event, never a bare `true`: a bare true is what killed in-flight bot runs and
+# half-pushed GHCR tags, and `tests/test_ci_concurrency.py` refuses it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0   # the classifier diffs against the PR base
+      - name: make test-env (Python 3.11 + the test image the gates run in)
+        run: make test-env
+      - name: classify the diff (one class= line per class, one job= line per stage)
+        run: python3 scripts/ci_scope.py --base "origin/${{ github.base_ref }}"
+      - name: make ci-lint (linefeed / editorconfig — the markdown gate)
+        run: make ci-lint
+      - name: make check-docs
+        run: make check-docs
+      - name: make check-wiring
+        run: make check-wiring
+      - name: make check-issue-bodies
+        run: make check-issue-bodies
+      - name: make ci-openspec (validate every active change, no unchecked task)
+        run: make ci-openspec
+      - name: Prune orphaned test containers
+        if: always()
+        run: make test-clean

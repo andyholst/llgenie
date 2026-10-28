@@ -165,3 +165,32 @@ def test_the_docs_trigger_list_matches_the_docs_class_minus_its_wildcards():
     assert set(ignore) <= docs_globs, set(ignore) - docs_globs
     wildcard_docs = {w for w in cs.WILDCARDS if w in docs_globs}
     assert wildcard_docs <= set(negations), (wildcard_docs, negations)
+
+
+def test_ci_yml_ignores_exactly_the_docs_trigger_list():
+    """The YAML and the classifier are the same decision, so they cannot drift (issue #824)."""
+    workflow = yaml.safe_load(CI.read_text())
+    on = workflow.get("on") or workflow.get(True)
+    declared = on["pull_request"]["paths-ignore"]
+
+    assert declared == list(cs.DOCS_TRIGGER_IGNORE), declared
+    # And the push trigger carries NO path filter: `main` must never be under-tested.
+    assert "paths-ignore" not in on["push"] and "paths" not in on["push"]
+
+
+def test_the_scope_workflow_has_no_path_filter_and_runs_the_docs_gates():
+    """`scope` is the always-present check: no filter, one job named `scope`, the docs gates inside."""
+    path = REPO / ".github" / "workflows" / "scope.yml"
+    workflow = yaml.safe_load(path.read_text())
+    on = workflow.get("on") or workflow.get(True)
+
+    assert "paths" not in on["pull_request"] and "paths-ignore" not in on["pull_request"], on
+    assert list(workflow["jobs"]) == ["scope"], workflow["jobs"]
+    runs = " ".join(step.get("run", "") for step in workflow["jobs"]["scope"]["steps"])
+    for gate in ("scripts/ci_scope.py", "make ci-lint", "make check-docs", "make check-wiring",
+                 "make check-issue-bodies", "make ci-openspec"):
+        assert gate in runs, (gate, runs)
+    # No new third-party action: the one `uses:` is the same pinned checkout ci.yml uses.
+    uses = [step["uses"] for step in workflow["jobs"]["scope"]["steps"] if "uses" in step]
+    assert uses == ["actions/checkout@11d5960a326750d5838078e36cf38b85af677262"], uses
+

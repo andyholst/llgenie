@@ -7,6 +7,21 @@ name: CI
 on:
   pull_request:
     branches: ["main"]
+    # A docs-only diff does not start this workflow at all (issue #824): the class is selected at the
+    # TRIGGER, because a job-level `if:` that skips a stage is invisible in the job list and
+    # `tests/test_ci_images.py::test_no_ci_step_or_job_is_skipped` allows no such shape. The docs gates
+    # themselves (`lint`, `check-docs`, `check-wiring`, `check-issue-bodies`, `openspec`) run in
+    # `scope.yml`, which carries no path filter and reports one always-present `scope` check.
+    #
+    # This list is `scripts/ci_scope.py::DOCS_TRIGGER_IGNORE` — the `docs` class MINUS its wildcards, so
+    # a path that can change what any gate proves re-includes the whole matrix (`AGENTS.md` is a `*.md`).
+    # `tests/test_ci_scope.py` asserts the two agree, so the YAML cannot drift from the classifier.
+    paths-ignore:
+      - "*.md"
+      - "!AGENTS.md"
+      - "docs/**"
+      - "agent-wiki/**"
+      - "openspec/**"
   push:
     branches: ["main"]    # merges: run the PR gate suite (engine build/publish lives in engine-build)
 
