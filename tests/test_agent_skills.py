@@ -220,6 +220,38 @@ def test_a_skill_nothing_preloads_is_reported(tmp_path):
     assert "skill-unused" in keys(root)
 
 
+def test_a_named_host_skill_needs_no_leg(tmp_path):
+    """A GPU-host operator loop has no CI leg; admission by NAME keeps the exception reviewable."""
+
+    # Given a tree carrying a skill no leg preloads, whose name is in HOST_SKILLS
+    # When  the guard runs
+    # Then  it is NOT dead weight, because an operator on a host loads it
+    assert guard.HOST_SKILLS, "HOST_SKILLS is empty: this test would pass vacuously"
+    host = sorted(guard.HOST_SKILLS)[0]
+    root = make_tree(tmp_path, leg_line(),
+                     {"demo": GOOD_SKILL.format(name="demo"),
+                      "bot-unattended": GOOD_SKILL.format(name="bot-unattended"),
+                      host: GOOD_SKILL.format(name=host)})
+    assert "skill-unused" not in keys(root)
+
+
+def test_a_host_skill_still_owes_its_contract_sections(tmp_path):
+    """Exemption is from the unused rule ONLY: a host skill without Rules is still a hole."""
+
+    # Given a host skill that lost its Rules section
+    # When  the guard runs
+    # Then  the missing section is a finding, exactly as for a bot's skill
+    host = sorted(guard.HOST_SKILLS)[0]
+    body = GOOD_SKILL.format(name=host).replace("## Rules", "## Notes")
+    root = make_tree(tmp_path, leg_line(),
+                     {"demo": GOOD_SKILL.format(name="demo"),
+                      "bot-unattended": GOOD_SKILL.format(name="bot-unattended"),
+                      host: body})
+    items = guard.findings(root)
+    assert "skill-section" in {i["key"] for i in items}
+    assert any(host in i["where"] for i in items if i["key"] == "skill-section")
+
+
 def test_the_retired_rules_file_is_refused(tmp_path):
     """One mechanism: the fix bot's rules are the `pr-fix` skill, not a second file."""
 

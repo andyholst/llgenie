@@ -3,7 +3,8 @@
 One Hermes **project skill** per agent leg, in the layout Hermes itself discovers
 (`.hermes/skills/<name>/SKILL.md`), preloaded by that leg with `hermes -s <name>`. They are the
 contract each bot runs under: `Inputs` says what the host prepared, `Output` says the one file the
-leg may write, `Rules` says what it must not do.
+leg may write, `Rules` says what it must not do. A skill no leg can load (it needs a GPU) is a HOST
+skill: the same contract shape, admitted by name in `HOST_SKILLS`, run by an operator on a host.
 
 The repo's `skills/engines/` is a different thing: those describe inference servers and are read by
 `scripts/engine_skills.py` → `make generate-engine-params`, never by an agent.
@@ -20,6 +21,11 @@ The repo's `skills/engines/` is a different thing: those describe inference serv
 | `registry-sync-review` | `make registry-sync-review` | the green store's VRAM→model→server answer → `registry-review.md` |
 | `rebase-conflict` | `make rebase-bot-agent` | resolve a stopped rebase |
 | `pr-fix` | `make fix-loop-image` | repair a red PR check |
+| `llgenie-engine-improver` | **no leg** — host skill | the engine loop a GPU host runs: sync → skill → params/image → tune → picker |
+
+`llgenie-engine-improver` is the one HOST skill: an operator loop that needs a real GPU, so no CI leg
+preloads it. It is admitted by name in `HOST_SKILLS` (`scripts/check_agent_skills.py`) and is exempt
+from the unused-skill rule only — it still owes frontmatter and `Inputs`/`Output`/`Rules`.
 
 Rules for adding one:
 
