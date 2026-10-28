@@ -228,6 +228,13 @@ jobs:
             exit "$rc"
           fi
 
+      # The sync above rewrote the branch; this PROVES the result contains main and records the
+      # AGENTS.md the repair obeys (issue #792). A sync that conflicted (rc=2) is left to the
+      # rebase-bot, so this step does not run on a base nobody could bring current.
+      - name: Preflight — prove the branch contains main and record the AGENTS.md it obeys (issue #792)
+        if: steps.sync.outputs.rc == '0'
+        run: make bot-preflight PROFILE=fix-bot
+
       - name: Run the fix loop INSIDE the agent image (check -> repair -> re-check)
         id: loop
         if: steps.pr.outputs.branch != ''

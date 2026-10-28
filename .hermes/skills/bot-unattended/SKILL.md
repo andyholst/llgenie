@@ -39,6 +39,14 @@ That skill says what this run is; this one says how a run with nobody watching i
   step and is worse than doing nothing.
 - **Write nothing outside your skill's Output file.** A leg that touched the tree would have its
   edits committed by the job as if a human had made them.
+- **Preflight before anything else (issue #792).** Your first action is `make bot-preflight`: it
+  fetches `origin/main`, refuses a dirty or diverged tree (exit 2 — stop and say so, never work
+  around it), fast-forwards a behind one, and writes `preflight.txt` with the line
+  `AGENTS: <main sha> <bytes>b <lines>l` plus a digest of its `## ` headings. Re-read `AGENTS.md`
+  in the tree the preflight proved — that copy is the rulebook this run obeys, not what you
+  remember — and repeat the `AGENTS:` line verbatim in the artifact your own skill's Output names
+  (the PR body, the brief, the report). A leg whose artifact carries no `AGENTS:` line is rejected
+  by `make check-pr-hygiene`, so the line is not optional.
 - **AGENTS.md still governs the repository.** This skill adds the unattended contract; it relaxes
   nothing there. Where the two meet, AGENTS.md wins.
 - **A failing tool is reported, never worked around.** If a command you need fails, say what failed

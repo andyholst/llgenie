@@ -20,7 +20,18 @@ helper) — extracts every commit and every PR open they run, and reports:
 * `agents-mandate`      an `AGENTS.md` that no longer carries the message mandate, so the rule
                         cannot be deleted silently;
 * `agents-closing-rule` an `AGENTS.md` that no longer states that a PR closes the issue it
-                        implements, so the closing rule cannot be deleted silently either.
+                        implements, so the closing rule cannot be deleted silently either;
+* `pr-agents-line`      a PR body whose `AGENTS: <sha> <bytes>b <lines>l` line is missing, names a
+                        sha that is not `git merge-base origin/main HEAD`, or carries counts that
+                        are not those of `AGENTS.md` at that sha.
+
+The `AGENTS:` line is how a reviewer reads which rulebook the work obeyed, so a body without it (or
+with a line taken from an older `main`) is the same defect as a body that states no benefit. The
+body itself is read WITHOUT network when one is available: `--pr-body`, `--pr-body-file`,
+`$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing line is caught before the PR opens),
+`$GITHUB_EVENT_PATH`'s `pull_request.body` inside `ci-unit`; `--pr <n> --repo <slug>` is the one
+path that calls `gh`. On a push to `main` there is no PR body at all: that half reports what it read
+and the static half still decides the exit code.
 
 A producer that opens a PR through a variable or a file is accepted — the guard checks that a real
 body is PASSED, and the producers' own tests pin what that body says. Message content (the
@@ -38,7 +49,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,6 +60,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ".github/workflows"
 SCRIPTS = "scripts"
 AGENTS = "AGENTS.md"
+#: The line a bot PR body carries, verbatim: `AGENTS: <main sha> <bytes>b <lines>l` (issue #792).
+AGENTS_LINE = re.compile(r"(?m)^AGENTS: (?P<sha>[0-9a-f]{40}) (?P<bytes>\d+)b (?P<lines>\d+)l$")
+#: What that line must look like, quoted in a finding so a reader can fix it without the spec.
+AGENTS_LINE_SHAPE = "AGENTS: <sha of git merge-base origin/main HEAD> <bytes of AGENTS.md>b <lines>l"
 #: The mandate heading AGENTS.md must carry. Deleting it is a violation, not an edit.
 AGENTS_MANDATE = "## Every PR body and commit message carries the issue, the fix and the benefit"
 #: The closing rule AGENTS.md must carry — a PR that implements an issue closes it. The loophole
@@ -330,8 +348,134 @@ def check_agents_mandate(root: Path) -> list[dict]:
     return out
 
 
-def findings(root: Path = REPO_ROOT) -> list[dict]:
-    return check_producers(root) + check_agents_mandate(root)
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True)
+
+
+def merge_base(root: Path, base: str, head: str) -> str | None:
+    """`git merge-base <base> <head>` — the `main` the PR was cut from, or None when unreadable."""
+    proc = _git(root, "merge-base", base, head)
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+
+
+def agents_at(root: Path, sha: str) -> str | None:
+    """`AGENTS.md` as it was at *sha*, read from the object store (not the working tree)."""
+    proc = _git(root, "show", f"{sha}:{AGENTS}")
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _agents_line_finding(key: str, title: str, evidence: str, where: str) -> dict:
+    return {"key": key, "title": title, "evidence": evidence, "where": where}
+
+
+def check_agents_line(body: str, root: Path = REPO_ROOT,
+                      base: str = "origin/main", head: str = "HEAD") -> list[dict]:
+    """A bot PR body carries `AGENTS:` with the merge-base sha and that sha's `AGENTS.md` counts."""
+    out: list[dict] = []
+    where = "pull request body"
+    m = AGENTS_LINE.search(body or "")
+    if not m:
+        return [_agents_line_finding(
+            "pr-agents-line-missing/pull-request",
+            "ci: the PR body carries no `AGENTS:` line",
+            f"The body states no `{AGENTS_LINE_SHAPE}` line, so a reviewer cannot tell which "
+            f"`{AGENTS}` the work obeyed. `make bot-preflight` writes the line (first line of "
+            f"`preflight.txt`); the PR body repeats it verbatim (issue #792).",
+            where,
+        )]
+    sha, claimed_bytes, claimed_lines = m.group("sha"), int(m.group("bytes")), int(m.group("lines"))
+
+    want = merge_base(root, base, head)
+    if want is None:
+        return [_agents_line_finding(
+            "pr-agents-line-base/pull-request",
+            f"ci: the merge base of {base} and {head} could not be read",
+            f"The body's `AGENTS:` line cannot be checked against `{base}`: "
+            f"`git merge-base {base} {head}` failed in {root}. The rule needs the base the PR was "
+            f"cut from, so an unreadable base is a failure, not a pass.",
+            where,
+        )]
+    if sha != want:
+        out.append(_agents_line_finding(
+            "pr-agents-line-sha/pull-request",
+            "ci: the PR body cites an `AGENTS.md` that is not the merge base's",
+            f"The body's `AGENTS:` line names `{sha}`, but `git merge-base {base} {head}` is "
+            f"`{want}`. The work was measured against a rulebook that is not the current base — "
+            f"re-run `make bot-preflight` and copy its line (issue #792).",
+            where,
+        ))
+
+    text = agents_at(root, sha)
+    if text is None:
+        out.append(_agents_line_finding(
+            "pr-agents-line-object/pull-request",
+            f"ci: `{sha}` carries no readable `{AGENTS}`",
+            f"The body's `AGENTS:` line names `{sha}`, but `git show {sha}:{AGENTS}` failed, so "
+            f"the byte/line counts cannot be verified against the rulebook at that commit.",
+            where,
+        ))
+        return out
+    real_bytes, real_lines = len(text.encode("utf-8")), text.count("\n")
+    if (claimed_bytes, claimed_lines) != (real_bytes, real_lines):
+        out.append(_agents_line_finding(
+            "pr-agents-line-size/pull-request",
+            "ci: the PR body's `AGENTS:` counts do not match `AGENTS.md` at its sha",
+            f"The body claims `{claimed_bytes}b {claimed_lines}l`, but `{AGENTS}` at `{sha}` is "
+            f"`{real_bytes}b {real_lines}l`. A count that drifts from the sha means the line was "
+            f"copied from somewhere other than that rulebook (issue #792).",
+            where,
+        ))
+    return out
+
+
+def read_pr_body(root: Path = REPO_ROOT, body: str | None = None, body_file: str | None = None,
+                 pr: str | None = None, repo: str | None = None) -> tuple[str | None, str]:
+    """The PR body to read, and where it came from — no `gh` call unless `--pr`/`--repo` ask for one.
+
+    A push to `main` has no PR body; the static half of this gate still runs there, so "no body
+    source" is a stated note rather than a failure. Every source that IS given must be readable: an
+    unreadable file or an undefined `gh` is a failure, never a silent "no body".
+    """
+    if body is not None:
+        return body, "--pr-body"
+    if body_file:
+        path = Path(body_file)
+        if not path.is_file():
+            raise RuntimeError(f"--pr-body-file {body_file} does not exist")
+        return path.read_text(encoding="utf-8"), f"--pr-body-file {body_file}"
+    env_file = os.environ.get("PR_BODY_FILE")
+    if env_file:
+        path = Path(env_file)
+        if not path.is_file():
+            raise RuntimeError(f"$PR_BODY_FILE {env_file} does not exist")
+        return path.read_text(encoding="utf-8"), f"$PR_BODY_FILE {env_file}"
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path and Path(event_path).is_file():
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"$GITHUB_EVENT_PATH {event_path} is unreadable: {exc}") from exc
+        pull = event.get("pull_request") if isinstance(event, dict) else None
+        if isinstance(pull, dict) and pull.get("body") is not None:
+            return pull["body"], f"$GITHUB_EVENT_PATH pull_request.body (#{pull.get('number', '?')})"
+        return None, f"$GITHUB_EVENT_PATH {event_path} carries no pull_request.body"
+    if pr and repo:
+        proc = subprocess.run(["gh", "pr", "view", str(pr), "--repo", repo, "--json", "body",
+                               "-q", ".body"], capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"`gh pr view {pr} --repo {repo}` failed: "
+                               f"{(proc.stderr or proc.stdout).strip()}")
+        return proc.stdout, f"gh pr view {pr} --repo {repo}"
+    return None, "no PR body source (a push to main has none, and neither --pr-body-file nor $PR_BODY_FILE was set)"
+
+
+def findings(root: Path = REPO_ROOT, base: str = "origin/main", head: str = "HEAD",
+             body: str | None = None) -> list[dict]:
+    """Every violation: the producers, the AGENTS.md mandates, and the PR body's `AGENTS:` line."""
+    out = check_producers(root) + check_agents_mandate(root)
+    if body is not None:
+        out += check_agents_line(body, root, base, head)
+    return out
 
 
 def render(items: list[dict]) -> str:
@@ -343,7 +487,8 @@ def render(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def report(root: Path = REPO_ROOT) -> str:
+def report(root: Path = REPO_ROOT, base: str = "origin/main", head: str = "HEAD",
+           body: str | None = None, body_source: str = "none") -> str:
     """Every producer and the messages it passes — the human view of what the guard reads."""
     lines = ["[pr-hygiene] producers and their messages"]
     for path in producer_files(root):
@@ -369,7 +514,16 @@ def report(root: Path = REPO_ROOT) -> str:
         if found:
             lines.append(f"- {rel}")
             lines += found
-    lines += ["", render(findings(root))]
+    lines += ["", f"[pr-hygiene] PR body source: {body_source}"]
+    if body is not None:
+        agents_found = check_agents_line(body, root, base, head)
+        verdict = "OK" if not agents_found else f"{len(agents_found)} finding(s)"
+        lines.append(f"[pr-hygiene] AGENTS: line: {verdict}")
+        for item in agents_found:
+            lines.append(f"  {item['key']}: {item['title']}")
+    else:
+        lines.append("[pr-hygiene] AGENTS: line: no body to read (the static half decides)")
+    lines += ["", render(findings(root, base, head, body))]
     return "\n".join(lines)
 
 
@@ -379,14 +533,28 @@ def main(argv=None) -> int:
     for name in ("check", "report"):
         c = sub.add_parser(name)
         c.add_argument("--root", default=str(REPO_ROOT))
+        c.add_argument("--base", default="origin/main",
+                       help="the base the AGENTS: line is measured against")
+        c.add_argument("--head", default="HEAD")
+        c.add_argument("--pr-body", default=None, help="the PR body itself (tests, ad-hoc checks)")
+        c.add_argument("--pr-body-file", default=None,
+                       help="a file carrying the PR body, e.g. the implementer's pr-body.md")
+        c.add_argument("--pr", default=None, help="read the body of this PR through `gh` (with --repo)")
+        c.add_argument("--repo", default=None, help="owner/name for --pr")
     args = p.parse_args(argv)
     if not args.cmd:
         p.error("need a command: check | report")
     root = Path(args.root)
+    try:
+        body, source = read_pr_body(root, args.pr_body, args.pr_body_file, args.pr, args.repo)
+    except RuntimeError as exc:
+        print(f"[pr-hygiene] FAIL: {exc}", file=sys.stderr)
+        return 2
     if args.cmd == "report":
-        print(report(root))
+        print(report(root, args.base, args.head, body, source))
         return 0
-    items = findings(root)
+    print(f"[pr-hygiene] PR body: {source}")
+    items = findings(root, args.base, args.head, body)
     print(render(items))
     return 1 if items else 0
 

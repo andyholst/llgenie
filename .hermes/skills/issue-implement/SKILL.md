@@ -30,6 +30,10 @@ what you leave behind, so the tree and `pr-body.md` are the deliverable.
   you changed and why it addresses the cause), `Benefit:` (what it buys and what it prevents),
   `Technical:` (the files, targets and tests you touched). The job refuses to open the PR without
   this file.
+- **And the `AGENTS:` line, verbatim.** `preflight.txt` at the repo root was written by
+  `make bot-preflight` before this run; its FIRST line is `AGENTS: <main sha> <bytes>b <lines>l`.
+  Copy that line into `pr-body.md` unchanged. `make check-pr-hygiene` rejects the PR without it, and
+  it is how a reviewer reads which rulebook this work obeyed (issue #792).
 
 ## Rules
 

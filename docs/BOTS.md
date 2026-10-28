@@ -60,6 +60,61 @@ A bot never works from a stale base:
 Driven by `scripts/bot_sync_main.sh`; `tests/test_bot_sync.py` runs the rules through a real
 scratch git repository.
 
+### The preflight: prove the base, read the rulebook, cite it in the PR (issue #792)
+
+`bot-sync-main` above proves a tree CAN be brought to `main`. The **preflight** proves it IS, and
+records the `AGENTS.md` the leg then obeys — because a branch cut before a rule changed silently
+applies the old rule, and nothing in the run said which version it read.
+
+`make bot-preflight` (`scripts/bot_preflight.py`, stdlib only) runs before the work:
+
+```
+git fetch origin main                       # a leg that cannot see main does not start
+origin must be a GitHub remote whose slug is asimov-agent/llgenie
+the working tree must be clean               # run inputs are gitignored, so they do not count
+HEAD must CONTAIN origin/main                # ahead is fine; behind is fast-forwarded
+git merge --ff-only origin/main              # never a rebase, never a reset
+a DIVERGED tree is refused, with the left/right counts printed
+```
+
+Every refusal exits **2** and says what it read — a stale base is a failed preflight, not a rejected
+PR an hour later. `PROFILE=` records which leg ran it, `REMOTE=`/`BRANCH=` pick another remote or
+branch (a clone whose remote is a local path is accepted and says so; only a GitHub remote naming
+another repository is refused).
+
+**`preflight.txt`** is the record: a gitignored run input, like `issue.md`. Its first line is the one
+a PR body repeats verbatim —
+
+```
+AGENTS: <main sha> <bytes>b <lines>l
+AGENTS-HEADINGS: sha256:<digest of the "## " heading list>
+MAIN: <main sha>
+TREE: <short head> <at|ahead|fast-forwarded>
+PROFILE: <the leg>
+WHEN: <utc>
+```
+
+The heading digest is what a **rule** change moves: rewording a sentence inside an existing section
+leaves it alone. `CHECK=1` re-reads an existing file against the live tree and prints the FIRST field
+that disagrees, so a leg that reused a stale record is caught before it writes anything.
+
+**The PR carries the line.** `make check-pr-hygiene` rejects a bot PR whose body has no `AGENTS:`
+line, whose sha is not `git merge-base origin/main HEAD`, or whose counts are not `AGENTS.md` at that
+sha. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
+line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` in `ci-unit`, or
+`PR=<n> REPO=<owner/name>` through `gh`. A push to `main` has no PR body; the static half of the gate
+still decides the exit code there.
+
+**Wired legs:** `issue-bot.yml` (triage, refiner, dedup, implement) and `architecture-bot.yml` call
+`make bot-preflight` in place of `make bot-sync-main`, and `fix-bot.yml` calls it after
+`make bot-sync-branch`. Every leg preloads the `bot-unattended` skill, which states the preflight as
+a rule; `make check-agent-skills` fails when that skill loses it, so a leg cannot be written that
+omits it.
+
+Tests: `tests/test_bot_preflight.py` (real git: a bare `origin` and a clone, so the fetch,
+fast-forward and divergence check are the real ones), the `AGENTS:` cases in
+`tests/test_pr_hygiene.py`, and `tests/test_agent_skills.py` for the skill rule.
+
 ### Every target is declared `.PHONY` (issue #392)
 
 `make` runs a recipe when no **file** carries the target's name, so a target that produces no such

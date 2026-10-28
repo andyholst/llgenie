@@ -491,3 +491,38 @@ def test_the_variable_expansion_is_bounded_and_safe(tmp_path):
     # Then  the known one is replaced and the others are left alone
     assert "$(GOOD)" not in out and ",gamma," in out
     assert "$(MISSING)" in out
+
+
+# --------------------------------------------------------------------------- the preflight (issue #792)
+
+
+def test_the_unattended_skill_states_the_preflight():
+    """Every leg preloads `bot-unattended`, so the preflight it must run lives there."""
+
+    # Given `.hermes/skills/bot-unattended/SKILL.md` in this repository
+    body = (REPO / ".hermes" / "skills" / "bot-unattended" / "SKILL.md").read_text(encoding="utf-8")
+
+    # When  the guard reads the tree
+    found = guard.findings(REPO)
+
+    # Then  the skill states the target and the gate reports no preflight finding
+    assert guard.UNATTENDED_PREFLIGHT in body
+    assert "unattended-preflight" not in {item["key"] for item in found}
+    assert "unattended-skill" not in {item["key"] for item in found}
+
+
+def test_a_skill_that_dropped_the_preflight_fails_the_gate(tmp_path):
+    """A shared contract that lost the preflight lets a leg start on a stale base."""
+
+    # Given a fixture whose `bot-unattended` skill states no preflight
+    root = make_tree(tmp_path, leg_line(),
+                     {"demo": GOOD_SKILL.format(name="demo"),
+                      "bot-unattended": GOOD_SKILL.format(name="bot-unattended")})
+
+    # When  the guard reads it
+    items = guard.findings(root)
+
+    # Then  the missing preflight is a finding naming the target it lost
+    dropped = [i for i in items if i["key"] == "unattended-preflight"]
+    assert dropped, [i["key"] for i in items]
+    assert guard.UNATTENDED_PREFLIGHT in dropped[0]["detail"]

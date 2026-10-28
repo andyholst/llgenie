@@ -56,6 +56,10 @@ AGENTS_MARKER = "## A bot's behaviour lives in its project skill"
 RETIRED_RULES_FILE = Path("scripts") / "fix_bot_rules.md"
 #: Text that belongs in `bot-unattended/SKILL.md` and nowhere near a make recipe.
 INLINE_UNATTENDED = "NEVER ask a question"
+#: The preflight every leg owes (issue #792): fetch `main`, re-read AGENTS.md, cite it. It lives in
+#: the shared unattended skill — the one file every leg preloads — so a leg cannot be written that
+#: omits it, and this gate keeps it there.
+UNATTENDED_PREFLIGHT = "make bot-preflight"
 LEG_SOURCES = ("Makefile", "scripts/*.sh")
 _SKILL_FLAG = re.compile(r"(?:^|\s)(?:-s|--skills)[\s=]+(\S+)")
 
@@ -294,6 +298,29 @@ def findings(root: Path = REPO_ROOT) -> list[dict]:
                 "where": str((found[name] / SKILL_FILE).relative_to(root)),
                 "detail": "no leg preloads this skill — a contract nothing loads is dead weight, "
                           "not a rule",
+            })
+
+    # ---- the shared contract states the preflight (issue #792) --------------------
+    # Every leg preloads `bot-unattended`, so its rules are the ones no leg can be written without.
+    # The preflight is one of them: without it a leg starts on a stale `main` and applies a rulebook
+    # it never re-read, and nothing in the run says which version it obeyed.
+    unattended = found.get(UNATTENDED_SKILL)
+    if unattended is None:
+        items.append({
+            "key": "unattended-skill",
+            "where": str(SKILLS_DIR / UNATTENDED_SKILL / SKILL_FILE),
+            "detail": f"the shared `{UNATTENDED_SKILL}` skill is gone, so the preflight rule "
+                      f"(`{UNATTENDED_PREFLIGHT}`) has nowhere to live and every leg loses it",
+        })
+    else:
+        unattended_body = (unattended / SKILL_FILE).read_text(encoding="utf-8")
+        if UNATTENDED_PREFLIGHT not in unattended_body:
+            items.append({
+                "key": "unattended-preflight",
+                "where": str((unattended / SKILL_FILE).relative_to(root)),
+                "detail": f"does not state the preflight (`{UNATTENDED_PREFLIGHT}`): a leg written "
+                          f"against this skill would start without proving its base or the "
+                          f"`AGENTS.md` it obeys (issue #792)",
             })
 
     # ---- one mechanism, and a rulebook that states it ------------------------------

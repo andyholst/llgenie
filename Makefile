@@ -82,7 +82,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-coverage engine-coverage-report check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
-	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk ci-slow-rows test-engine-stage bot-sync-main bot-sync-branch ci-wait-engine-images \
+	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk ci-slow-rows test-engine-stage bot-sync-main bot-sync-branch bot-preflight ci-wait-engine-images \
 	ci-install-dry ci-install-run ci-install-uninstall test-env test-top-tier test-top-tier-ci test-top-tier-cli-ci test-top-tier-serve test-top-tier-serve-ci \
 	check-agent-model model-pin-report check-agent-skills agent-skills-report test-agent-skills-live hermes-skills-register \
 	test-hub-live test-strata-live test-engine-bump-live test-native-engines test-native-engine-light test-variant-image \
@@ -599,6 +599,15 @@ bot-sync-main: ## Fetch upstream main and reset the working tree to it, so a NEW
 bot-sync-branch: ## Fetch upstream main and rebase the checked-out PR branch onto it before repairing (issue #303); exit 2 means the rebase conflicts and is left to the rebase-bot
 	@bash scripts/bot_sync_main.sh rebase
 
+# The PREFLIGHT (issue #792). `bot-sync-main` above proves the tree CAN be brought to main; this
+# proves it IS, and records the rulebook the leg then obeys. It fetches, refuses an origin that is
+# not this repository, refuses a dirty tree, fast-forwards a behind one (`--ff-only`, never a reset
+# and never a rebase), and refuses a diverged one with the left/right counts. What it read goes into
+# `preflight.txt` (a gitignored run input): the `AGENTS:` line a PR body repeats, the heading digest
+# that a rule change moves and a prose edit does not, and the profile that ran it.
+bot-preflight: ## Fetch upstream main, fast-forward or refuse, and record the AGENTS.md it read in preflight.txt (PROFILE= CHECK=1 REMOTE= BRANCH=); exit 2 = stale/diverged/dirty, never a silent start (issue #792)
+	@python3 scripts/bot_preflight.py --remote "$(if $(REMOTE),$(REMOTE),origin)" --branch "$(if $(BRANCH),$(BRANCH),main)" $(if $(PROFILE),--profile "$(PROFILE)",) $(if $(CHECK),--check,)
+
 # The AGENT's shell sees every credential this container receives (issue #358).
 # Hermes strips provider credentials from its terminal tool, so a key forwarded as
 # `-e NOUS_API_KEY` reaches the container and the Hermes process while the agent's
@@ -918,6 +927,14 @@ auto-merge-explain: ## Print why a PR was (or was not) auto-merged: state, merge
 verify-closure: ## Prove a merged PR closed what its body claims: prints every closing reference and its state, and fails naming an issue that is still OPEN (PR= REPO=)
 	@test -n "$(PR)" && test -n "$(REPO)" || { echo "Usage: make verify-closure PR=<n> REPO=<owner/repo>"; exit 1; }
 	python3 scripts/verify_closure.py verify --repo "$(GH_REPO)" --pr $(PR)
+# The PR body is read WITHOUT network when one is available: `$PR_BODY_FILE` (the implementer's
+# pr-body.md, so a missing `AGENTS:` line is caught before the PR opens) or `$GITHUB_EVENT_PATH` in
+# ci-unit. `PR=<n> REPO=<owner/name>` is the one path that asks `gh`; a push to `main` has no body,
+# and the static half still decides the exit code (issue #792).
+check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is empty/placeholder, when AGENTS.md lost the mandate, or when the PR body's `AGENTS:` line is not the merge base's (issues #313, #792; PR= REPO= PR_BODY_FILE= BASE=)
+	python3 scripts/check_pr_hygiene.py check --base "$(if $(BASE),$(BASE),origin/main)" $(if $(PR_BODY_FILE),--pr-body-file "$(PR_BODY_FILE)",) $(if $(PR),--pr "$(PR)" --repo "$(GH_REPO)",)
+pr-hygiene-report: ## Show every producer the PR/commit-message guard reads, the `AGENTS:` line it found and its verdict (PR= REPO= PR_BODY_FILE= BASE=)
+	python3 scripts/check_pr_hygiene.py report --base "$(if $(BASE),$(BASE),origin/main)" $(if $(PR_BODY_FILE),--pr-body-file "$(PR_BODY_FILE)",) $(if $(PR),--pr "$(PR)" --repo "$(GH_REPO)",)
 check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is empty, a placeholder, a subject with no body, or when AGENTS.md lost the mandate (issue #313)
 	python3 scripts/check_pr_hygiene.py check
 pr-hygiene-report: ## Show every producer the PR/commit-message guard reads, and its verdict

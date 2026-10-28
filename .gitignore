@@ -70,6 +70,11 @@ registry-review.md
 comment.md
 pr-body.md
 
+# The preflight's record of the rulebook a leg read (issue #792): the `AGENTS: <sha> <bytes>b <lines>l`
+# line, the `## ` heading digest and the main sha. A leg cites the line in its PR body; the file is a
+# run input (not `.md`, so it sits in its own section rather than the artefacts block above).
+preflight.txt
+
 # A bot leg's captured agent stream (the `$(call scrubbed_run,…)` seam, issue #359) and its
 # REDACTED copy. The raw file is never printed and never uploaded — the scrubbed one is the
 # run artifact — and neither belongs in the tree.

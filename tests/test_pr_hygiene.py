@@ -14,6 +14,8 @@ NO-SKIP POLICY: a missing prerequisite is a LOUD FAILURE, never a skip.
 """
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -270,3 +272,188 @@ def test_this_repositorys_producers_state_the_issue_the_fix_and_the_benefit():
         assert all('-m "$msg"' in l for l in commit_lines), rel
         for part in ("Issue:", "Fix:", "Benefit:", "Technical:"):
             assert part in text, f"{rel} does not state {part}"
+
+
+# ---------------------------------------------------------------------------------------------
+# The `AGENTS:` line a bot PR body carries (issue #792). Every case runs REAL git: the rule is a
+# merge-base fact and a `git show <sha>:AGENTS.md` fact, so a stubbed git would prove nothing.
+# ---------------------------------------------------------------------------------------------
+
+
+def _git(cwd: Path, *args: str) -> str:
+    """Run real git with an identity and return its stdout."""
+    proc = subprocess.run(
+        ["git", "-c", "user.name=Asimov Agent", "-c", "user.email=support@docondee.com",
+         "-c", "commit.gpgsign=false", *args],
+        cwd=str(cwd), capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed: {proc.stderr or proc.stdout}")
+    return proc.stdout
+
+
+def _history(tmp_path: Path) -> tuple[Path, str, str]:
+    """A repo whose `origin/main` is one commit behind HEAD — the base and head shas it returns."""
+    root = tmp_path / "gitrepo"
+    root.mkdir()
+    _git(tmp_path, "init", "-q", "-b", "main", str(root))
+    (root / cph.AGENTS).write_text(AGENTS_OK, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "chore: the rulebook on main")
+    base = _git(root, "rev-parse", "HEAD").strip()
+    _git(root, "update-ref", "refs/remotes/origin/main", base)
+    _git(root, "checkout", "-qb", "feat/x")
+    (root / "change.py").write_text("print('the change')\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "feat: the change")
+    return root, base, _git(root, "rev-parse", "HEAD").strip()
+
+
+def _line(sha: str, text: str = AGENTS_OK) -> str:
+    return f"AGENTS: {sha} {len(text.encode())}b {text.count(chr(10))}l"
+
+
+def _body(line: str | None) -> str:
+    parts = ["Issue: #792 — a leg works from a stale tree.",
+             "Fix: the preflight fetches and refuses.",
+             "Benefit: the PR states the rulebook it obeyed.",
+             "Technical: `scripts/bot_preflight.py`, `scripts/check_pr_hygiene.py`."]
+    if line:
+        parts.append(line)
+    return "\n\n".join(parts) + "\n"
+
+
+def _keys_with_body(root: Path, body: str | None, base: str = "origin/main") -> list[str]:
+    return [f["key"].split("/")[0] for f in cph.findings(root, base, "HEAD", body)]
+
+
+def test_a_pr_body_with_the_matching_agents_line_passes(tmp_path: Path):
+    """The merge base's sha with that sha's `AGENTS.md` counts is what the rule asks for."""
+
+    # Given a PR body carrying the AGENTS: line for the merge base
+    root, base, _ = _history(tmp_path)
+    body = _body(_line(base))
+
+    # When  the guard reads it
+    keys = _keys_with_body(root, body)
+
+    # Then  no agents-line finding is reported
+    assert [k for k in keys if k.startswith("pr-agents-line")] == []
+    assert cph.check_agents_line(body, root) == []
+
+
+def test_a_pr_body_without_the_agents_line_is_a_violation(tmp_path: Path):
+    """A body that states the issue, the fix, the benefit and the technical and NOT the rulebook."""
+
+    # Given a complete-looking body with no AGENTS: line
+    root, _, _ = _history(tmp_path)
+
+    # When  the guard reads it
+    found = cph.check_agents_line(_body(None), root)
+
+    # Then  it reports the missing line and says what the shape is
+    assert [f["key"] for f in found] == ["pr-agents-line-missing/pull-request"]
+    assert "AGENTS:" in found[0]["evidence"]
+
+
+def test_a_pr_body_whose_agents_sha_is_not_the_merge_base_is_a_violation(tmp_path: Path):
+    """A line copied from an older main is exactly the drift this rule exists to catch."""
+
+    # Given a body whose AGENTS: sha is the commit main was cut from two commits ago
+    root, base, head = _history(tmp_path)
+    body = _body(_line("0" * 40))
+
+    # When  the guard reads it
+    found = cph.check_agents_line(body, root)
+
+    # Then  it names both shas
+    assert "pr-agents-line-sha/pull-request" in [f["key"] for f in found]
+    evidence = next(f["evidence"] for f in found if f["key"].startswith("pr-agents-line-sha"))
+    assert "0" * 40 in evidence and base in evidence
+    assert head != base
+
+
+def test_a_pr_body_whose_agents_counts_are_wrong_is_a_violation(tmp_path: Path):
+    """The sha is right and the counts are not: the line was not copied from that rulebook."""
+
+    # Given the merge base's sha with byte and line counts that are not AGENTS.md's
+    root, base, _ = _history(tmp_path)
+    body = _body(f"AGENTS: {base} 1b 1l")
+
+    # When  the guard reads it
+    found = cph.check_agents_line(body, root)
+
+    # Then  it names the field and the real values from that sha's AGENTS.md
+    keys = [f["key"] for f in found]
+    assert keys == ["pr-agents-line-size/pull-request"]
+    assert f"{len(AGENTS_OK.encode())}b" in found[0]["evidence"]
+
+
+def test_the_pr_body_is_read_from_the_github_event_without_network(tmp_path: Path, monkeypatch):
+    """`ci-unit` gets the body from the event JSON it was already given — no `gh`, no network."""
+
+    # Given a GitHub event carrying pull_request.body with the right line
+    root, base, _ = _history(tmp_path)
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"number": 900, "body": _body(_line(base))}}),
+                     encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.delenv("PR_BODY_FILE", raising=False)
+
+    # When  the guard resolves the body
+    body, source = cph.read_pr_body(root)
+
+    # Then  it read the event's body and the rule passes on it
+    assert source.startswith("$GITHUB_EVENT_PATH") and "pull_request.body" in source
+    assert body is not None and _line(base) in body
+    assert cph.main(["check", "--root", str(root)]) == 0
+
+
+def test_with_no_pr_body_the_static_half_still_decides(tmp_path: Path, monkeypatch, capsys):
+    """A push to `main` has no PR body: the note is printed and the exit code stays the static half's."""
+
+    # Given no body source at all
+    root, _, _ = _history(tmp_path)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    monkeypatch.delenv("PR_BODY_FILE", raising=False)
+
+    # When  the guard runs against a clean tree
+    rc = cph.main(["check", "--root", str(root)])
+
+    # Then  it says it read no body, reports no agents-line finding, and exits 0
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "no PR body source" in out.out
+    assert "pr-agents-line" not in out.out
+
+
+def test_an_unreadable_pr_body_file_fails_loudly(tmp_path: Path, capsys):
+    """A body source that IS given must be readable — never a silent "no body to check"."""
+
+    # Given a --pr-body-file that does not exist
+    root, _, _ = _history(tmp_path)
+
+    # When  the guard runs with it
+    rc = cph.main(["check", "--root", str(root), "--pr-body-file", str(tmp_path / "gone.md")])
+
+    # Then  it exits 2 and names the file
+    out = capsys.readouterr()
+    assert rc == 2
+    assert "does not exist" in out.err
+
+
+def test_a_pr_body_file_is_the_implementers_pr_body(tmp_path: Path, monkeypatch):
+    """`$PR_BODY_FILE` is how the implementer's `pr-body.md` is checked BEFORE the PR opens."""
+
+    # Given the implementer's pr-body.md carrying a stale line
+    root, base, _ = _history(tmp_path)
+    body_file = tmp_path / "pr-body.md"
+    body_file.write_text(_body(f"AGENTS: {base} 1b 1l"), encoding="utf-8")
+    monkeypatch.setenv("PR_BODY_FILE", str(body_file))
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+
+    # When  the guard runs with no PR= at all
+    rc = cph.main(["check", "--root", str(root)])
+
+    # Then  it fails on the counts, naming the file it read
+    assert rc == 1

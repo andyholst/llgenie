@@ -119,8 +119,8 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BUMP_TOKEN }}
 
-      - name: Sync with latest upstream main (the branch must start from it - issue #303)
-        run: make bot-sync-main
+      - name: Preflight — prove the tree is at main and record the AGENTS.md this run obeys (issues #303, #792)
+        run: make bot-preflight PROFILE=issue-bot
 
       - name: Dispatch (cap -> pick one -> claim -> issue.md + branch)
         id: dispatch

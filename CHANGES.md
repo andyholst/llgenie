@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-28 | every bot leg proves its tree contains current `main` and cites the `AGENTS.md` it read: `make bot-preflight` (fast-forward or refuse, `preflight.txt` with the `AGENTS:` line and the heading digest), the `AGENTS:` line gated in `make check-pr-hygiene`, and the rule kept in `bot-unattended` | [2026-10-28-bot-preflight.md](agent-wiki/2026-10-28-bot-preflight.md) | #792 |
 | 2026-10-29 | `make check-wiring` also asserts the reverse `.PHONY` direction: every key must name a target with a recipe, an inline `;` command or a prerequisite (a declared alias) — a key whose recipe is gone is a permanent green no-op (`make <name>` → "Nothing to be done", exit 0) | [2026-10-29-check-wiring-phony-declares-recipe.md](agent-wiki/2026-10-29-check-wiring-phony-declares-recipe.md) | #883 |
 | 2026-10-28 | green ⇒ merged is permanent policy, and guarded: deleting `auto-merge.yml`, dropping its automatic PR-completion trigger, or loosening `REQUIRED_MERGE_STATE` each reds `ci-unit` | [2026-10-28-auto-merge-guard.md](agent-wiki/2026-10-28-auto-merge-guard.md) | #874 |
 | 2026-10-28 | `linux / top-tier` is off the `pull_request` matrix — main + the `ci:slow` label only — decided by `make ci-slow-rows` and carried into `pipeline.yml`'s one matrix axis (the macOS rows the issue also named were removed by #870) | [2026-10-28-pr-matrix-trim-slow-rows.md](agent-wiki/2026-10-28-pr-matrix-trim-slow-rows.md) | #859 |
