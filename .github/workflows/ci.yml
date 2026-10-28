@@ -49,6 +49,16 @@ concurrency:
 # runner today, which means no check on this repository exercises macOS. `make ci-engines
 # BACKEND=metal` and the native-engine targets remain verified on an Apple-Silicon host by hand.
 #
+# ONE HEAVY ROW IS NOT A PR GATE (issue #859). `linux / top-tier` downloads and serves a real model
+# on every pull request; what it proves is a property of `main` and of the weekly engine/registry
+# data, not of a diff. It does not run on a pull request any more, and it DOES run on every non-PR
+# event (this file's `push` to main: one run per merge still catches a model/engine regression) and
+# on a pull request carrying the `ci:slow` label — the decision is scripts/ci_slow_rows.py behind
+# `make ci-slow-rows`, published by the `guard` job and consumed by `pipeline.yml`'s `top-tier`
+# matrix (see "ROW SELECTION" there). Every other row is unchanged: `linux / unit` remains the PR
+# gate for the suite, and `linux / cpu-health` still serves a real model on a PR. docs/BOTS.md
+# states the trade. The macOS rows #859 also named are gone by deletion (#870), not by a condition.
+#
 # ci-images (issue #117) publishes the CI images (llgenie/test, llgenie/openspec) to GHCR
 # once per content hash; every other job PULLS them (make test-image-pull /
 # make openspec-image-pull) and never builds them.
@@ -74,7 +84,30 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # WHICH HEAVY ROWS THIS RUN SCHEDULES (issue #859). `linux / top-tier` downloads and serves a
+    # real model — a property of `main` and of the weekly engine/registry data, not of an arbitrary
+    # diff — and it is one of the longest rows. It is therefore NOT scheduled on a pull request and
+    # IS scheduled on every non-PR event (the `push` to `main`, so one run per merge still catches a
+    # model/engine regression), and on a pull request carrying the `ci:slow` label.
+    # (The macOS half of #859 is moot by deletion: `ci.yml` has no `macos` group since #870.)
+    # The decision is scripts/ci_slow_rows.py (make ci-slow-rows), not an expression in this file,
+    # so it is tested — tests/test_ci_slow_rows.py. The `linux` caller passes the result into
+    # pipeline.yml, whose `top-tier` job uses it as its ONE matrix axis; a row the run does not
+    # schedule is the `["none"]` placeholder, which runs no make target and prints why it did
+    # nothing. Nothing is skipped silently, and no other row changes: `linux / unit` is still the
+    # PR gate for the suite. docs/BOTS.md states the trade.
+    outputs:
+      top_tier_rows: ${{ steps.rows.outputs.top_tier_rows }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Decide which heavy rows this run schedules (make ci-slow-rows)
+        id: rows
+        env:
+          # A non-PR event has no pull_request payload: the script reads that as "schedule the row"
+          # (fail closed), so only a pull request can lose it.
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: make ci-slow-rows
       - name: Owner / collaborator trigger guard
         env:
           ACTOR: ${{ github.actor }}
@@ -156,7 +189,9 @@ jobs:
         run: make ci-scanner-images
 
   linux:
-    needs: [ci-images]
+    # `guard` is in `needs` for its row-selection output (issue #859): `linux / top-tier` follows
+    # the `ci:slow` label, every other row of this call does not.
+    needs: [ci-images, guard]
     uses: ./.github/workflows/pipeline.yml
     permissions:
       contents: read
@@ -164,6 +199,7 @@ jobs:
     secrets: inherit
     with:
       runner: ubuntu-latest
+      top_tier_rows: ${{ needs.guard.outputs.top_tier_rows }}
 
   # ------------------------------------------------------------------
   # engine-images (issue #98). Pure make, no LLM, nothing built on a laptop:

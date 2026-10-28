@@ -314,11 +314,12 @@ def test_linux_and_macos_run_the_same_pipeline():
     assert triggers["pull_request"]["branches"] == ["main"]
     assert triggers["push"]["branches"] == ["main"]
 
-    # And ONE pipeline runs, on a Linux runner: issue #870 removed the macOS caller entirely, so no
-    # runner is requested for it (the file still takes the label as an input, which is what makes the
-    # coverage restorable by adding a caller back).
+    # And linux calls the shared pipeline, on a Linux runner.
+    # Issue #870 removed the macOS caller by DELETION (owner instruction: no more macOS runners), so
+    # there is no `macos` caller to compare any more — pipeline.yml keeps its `runner` input, which is
+    # what keeps the coverage restorable by adding a caller back.
     assert callers["linux"] == ("./.github/workflows/pipeline.yml", "ubuntu-latest")
-    assert "macos" not in callers, callers
+    assert "macos" not in callers and not [n for n in jobs if "macos" in n.lower()], list(jobs)
     assert callers["linux-published"] == ("./.github/workflows/published.yml", "ubuntu-latest")
     # And macOS has no published-image stage: it never runs an engine container (issue #120)
     assert "macos-published" not in jobs
@@ -333,6 +334,7 @@ def test_linux_and_macos_run_the_same_pipeline():
     published = yaml.safe_load((wf / "published.yml").read_text())["jobs"]
     for name, job in {**pipeline, **published}.items():
         assert job["continue-on-error"] is False, name
+    # (the `macos` caller is gone, #870: only the Linux callers remain to check)
     assert "optional" not in jobs["linux"]["with"] and "optional" not in jobs["linux-published"]["with"]
     install = "\n".join(st.get("run", "") for st in pipeline["install"]["steps"])
     assert "make ci-install" in install and "make install\n" not in install
@@ -880,10 +882,13 @@ def test_macos_ci_does_not_run_docker_github_actions():
     assert "macOS must not call this action" in docker
 
     # And every shared pipeline job that mentions the Docker action gates it to Linux
-    # (published.yml is Linux only: macOS has no published-image stage)
+    # (published.yml is Linux only: macOS has no published-image stage).
+    # issue #859: `top-tier` also gates every working step on its row axis, so the OS gate appears
+    # combined there — the Linux-only property is what matters.
     for name, step in ((name, st) for name, j in pipeline.items()
                        for st in j.get("steps", []) if st.get("uses") == "./.github/actions/docker"):
-        assert step.get("if") == "runner.os == 'Linux'", name
+        assert step.get("if") in ("runner.os == 'Linux'",
+                                  "matrix.row != 'none' && runner.os == 'Linux'"), name
     assert "macos-published" not in ci
 
     # And install, health and top-tier are the same targets on both OSes (no second Darwin install)
@@ -901,7 +906,7 @@ def test_macos_ci_does_not_run_docker_github_actions():
     # And every macOS job and every Linux job must succeed for the run to be green
     for name, job in {**pipeline, **published}.items():
         assert job["continue-on-error"] is False, name
-    # issue #870 removed the `macos` caller: only the Linux pair remains to be checked
+    # issue #870: the `macos` caller no longer exists, so only the Linux callers are checked here
     for name in ("linux", "linux-published"):
         assert "optional" not in ci[name]["with"], name
 
@@ -919,7 +924,8 @@ def test_macos_has_no_published_image_or_native_engine_ci_job():
     runners = {n: j.get("runs-on") or j.get("with", {}).get("runner") for n, j in ci.items()}
     macos = {n for n, r in runners.items() if r and "macos" in str(r)}
 
-    # Then there is NO macOS job at all (issue #870: the group was deleted, not gated)
+    # Then NO job requests a macOS runner at all: issue #870 removed the shared-pipeline macOS caller
+    # by deletion, so there is no macOS row left to be conditional — and none may reappear silently.
     assert macos == set(), macos
     assert "macos-published" not in ci and "native-engine-macos-arm64" not in ci
 

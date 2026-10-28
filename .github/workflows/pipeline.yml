@@ -25,6 +25,16 @@ on:
         required: false
         default: false
         type: boolean
+      # ROW SELECTION (issue #859). A JSON list and the ONLY matrix axis of the `top-tier` job:
+      # `["run"]` runs the stage, `["none"]` is a placeholder that runs no make target. ci.yml
+      # supplies it from `make ci-slow-rows` — `["none"]` on a pull request that does not carry the
+      # `ci:slow` label, `["run"]` on every non-PR event (a push to main) and on a labelled PR. The
+      # default is `["run"]`: an old caller, or a caller that says nothing, keeps the full matrix.
+      top_tier_rows:
+        description: 'JSON list — ["run"] runs the top-tier stage, ["none"] is the placeholder row (issue #859)'
+        required: false
+        default: '["run"]'
+        type: string
 
 # Passed in by ci.yml (secrets: inherit). Every make ci-* job can call the Hub with it.
 env:
@@ -168,7 +178,17 @@ jobs:
   # 90 minutes, not 60: the macOS stage alone measured 2278 s (38 min) for 15 cases, and a
   # dry run that outlives its 780 s deadline now gets the one retry the seam promises
   # (issue #676) — up to another 780 s, which did not fit in 60 with the job's setup.
+  # ROW SELECTION (issue #859): `row` is this job's ONE matrix axis, supplied by ci.yml from
+  # `make ci-slow-rows`. `["run"]` runs the stage; `["none"]` is a placeholder that runs no make
+  # target — the row downloads and serves a real model, which is a property of `main` and of the
+  # weekly engine/registry data, not of a pull request's diff. No job-level `if:`: a skipped job
+  # makes its check name disappear (tests/test_ci_images.py::test_no_ci_step_or_job_is_skipped), so
+  # the absence stays VISIBLE as a row whose one unguarded step says why it did nothing.
   top-tier:
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJSON(inputs.top_tier_rows) }}
     runs-on: ${{ inputs.runner }}
     continue-on-error: false
     timeout-minutes: 90
@@ -176,13 +196,23 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Say which row this is, and why (issue #859)
+        run: |
+          if [ "${{ matrix.row }}" = "none" ]; then
+            echo "[slow-rows] top-tier on ${{ inputs.runner }} = NOT SCHEDULED: it runs on a push to main and on a pull request labelled ci:slow."
+          else
+            echo "[slow-rows] top-tier on ${{ inputs.runner }} = RUN: the ci-top-tier stage."
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: matrix.row != 'none'
       - uses: ./.github/actions/docker
-        if: runner.os == 'Linux'  # macOS: no Colima
+        if: matrix.row != 'none' && runner.os == 'Linux'  # macOS: no Colima
       - name: make test-env (Python 3.11 - Linux pulls llgenie/test from GHCR, macOS builds the 3.11 venv)
+        if: matrix.row != 'none'
         run: make test-env
       - name: make ci-top-tier (same targets on both OSes; macOS Colima, not a Docker GitHub Action)
+        if: matrix.row != 'none'
         run: make ci-top-tier
       - name: Prune orphaned test containers
-        if: always()
+        if: matrix.row != 'none' && always()
         run: make test-clean
