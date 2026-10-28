@@ -30,6 +30,7 @@ on:
     workflows:
       - architecture-bot — rewrites docs/ARCHITECTURE.md from the tree and opens a linked issue + PR (never merges)
       - auto-merge
+      - CI requeue (cancelled runs)
       - CI
       - code-review-bot — reviews the tree and the pipelines and files one issue per finding (never edits code)
       - engine-build — builds and verifies EVERY engine at its committed pin, in parallel (never merges)

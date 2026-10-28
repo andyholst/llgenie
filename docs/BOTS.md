@@ -1510,6 +1510,15 @@ make check-strata-models     # fail when data/strata_models.json differs from St
 make queued-alarm      # report CI jobs stuck in `queued` too long (a runner that never picks them up, issue #254);
                        # COMMENT=1 delivers it to the run's pull request (else ONE deduped issue per stuck runner
                        # label, for runs no PR tracks) and a delivery that fails is exit 3, never silent; DRY=1 previews
+make ci-requeue-cancelled  # re-run the CI runs a bulk cancel killed, ONLY where the head sha has no other run
+                           # (a superseded run already has its verdict): WINDOW=2h, DRY=1 previews; issue #843
+
+Scheduled: `.github/workflows/ci-requeue.yml` runs that same target every 30 minutes (`23,53 * * * *`,
+off the hour and off the other bots' minutes) with `concurrency: cancel-in-progress: false`, so one
+round can never be cancelled by the next — the exact bug the healer exists to undo. It holds only
+`contents: read` / `actions: write` / `pull-requests: read` (what `gh run rerun` needs) and it is named
+in `run-failure-reactor.yml`'s roster, so its own red is routed like every other workflow's.
+
 make run-failure-reactor  # route a failed CI run to a remedy (REPO=; RUN_ID=; DRY=1 previews): a PR this bot can push
                        # (this repo or the owner's fork) -> dispatch the fix-bot as the OWNER (DISPATCH_TOKEN); else file
                        # ONE deduped issue labelled agent:implement (issue #286, fork routing #555)

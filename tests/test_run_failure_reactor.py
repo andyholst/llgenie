@@ -459,3 +459,45 @@ def test_an_unreadable_run_list_is_not_a_supersede(tmp_path):
     assert "SUPERSEDED" not in r.stdout, r.stdout
     calls = log.read_text().splitlines()
     assert len([l for l in calls if l.startswith("issue create")]) == 1, calls
+
+
+# ---------------------------------------------------------------------------
+# A cancellation is not an answer (issue #843)
+# ---------------------------------------------------------------------------
+def test_a_cancelled_run_with_no_later_run_is_reported_pending(tmp_path):
+    """A bulk cancel kills a run mid-flight; the reactor must not read that as "nothing to do"."""
+
+    # Given a CANCELLED run whose branch has no later run of the same workflow
+    log = gh_stub(tmp_path, failed_run(conclusion="cancelled", created_at="2026-10-28T15:00:00Z"), [],
+                  rest=_main_rest(), newer_runs=[])
+
+    # When  the reactor routes it
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"])
+
+    # Then  it says the verdict is still owed, and names the target that re-runs it
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "CANCELLED with no later run" in r.stdout, r.stdout
+    assert "PENDING, not a verdict" in r.stdout, r.stdout
+    assert "make ci-requeue-cancelled" in r.stdout, r.stdout
+    # And nothing was filed or dispatched for it
+    calls = log.read_text().splitlines()
+    assert not [c for c in calls if c.startswith("issue create")], calls
+    assert not [c for c in calls if "workflow run" in c], calls
+
+
+def test_a_cancelled_run_a_later_run_took_over_is_superseded(tmp_path):
+    """`cancel-in-progress` kills the PREVIOUS run: a later run of the same workflow owns the verdict."""
+
+    # Given a cancelled run and a LATER run of the same workflow on the same branch
+    log = gh_stub(tmp_path, failed_run(conclusion="cancelled", created_at="2026-10-28T15:00:00Z"), [],
+                  rest=_main_rest(),
+                  newer_runs=[_run_row("success", "2026-10-28T15:20:00Z")])
+
+    # When  the reactor routes it
+    r = run_reactor(tmp_path, ["--repo", f"{OWNER}/llgenie", "--run-id", "123"])
+
+    # Then  it is reported as superseded with the time the later run took over, and nothing is filed
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "took over at 2026-10-28T15:20:00Z" in r.stdout, r.stdout
+    assert "superseded, nothing to do" in r.stdout, r.stdout
+    assert not [c for c in log.read_text().splitlines() if c.startswith("issue create")]

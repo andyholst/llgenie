@@ -1,0 +1,42 @@
+name: CI requeue (cancelled runs)
+
+# Issue #843: 56% of the runs in a 300-run window are `cancelled`, and a bulk cancel to free runner
+# capacity costs every killed PR its verdict - `gh pr checks` renders `completed/cancelled` as fail,
+# auto-merge needs a green run, `run-failure-reactor` fires only on `conclusion: failure` and
+# `run-failure-reactor` no longer treats a cancellation as "nothing to do". This is the scheduled half
+# of the healer; `make ci-requeue-cancelled` is the manual half and takes WINDOW/DRY.
+
+on:
+  schedule:
+    - cron: "23,53 * * * *" # every 30 minutes, off the hour and off the other bots' minutes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # `gh run rerun` is a write on the Actions API
+  pull-requests: read
+
+# a requeue round must never be cancelled by the next one - that is the bug this workflow heals
+concurrency:
+  group: ci-requeue
+  cancel-in-progress: false
+
+jobs:
+  requeue:
+    name: requeue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned
+      - name: Re-run only the cancelled runs no later run superseded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOW: 2h
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          make ci-requeue-cancelled
+      - name: Say what the round could not decide
+        if: always()
+        run: |
+          echo "window=2h target=ci-requeue-cancelled manual-equivalent=\"make ci-requeue-cancelled DRY=1\""

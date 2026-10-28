@@ -464,11 +464,46 @@ def file_issue(repo: str, run: dict, job: dict, log_tail: str, marker: str,
     return out.strip()
 
 
+def later_run_of_the_same_workflow(repo: str, run: dict) -> str | None:
+    """The createdAt of the LATEST later run of this workflow on this branch (None when none is seen).
+
+    A cancelled run is not an answer (#843): if a later run of the same workflow exists on the branch,
+    the cancellation was a supersede and there is nothing to do; if none exists, the run was killed
+    with its verdict still owed, and the log must say so instead of "not a failure, nothing to do".
+    An unreadable listing returns None — an unknown never becomes a decision.
+    """
+    workflow = run.get("workflowName") or ""
+    branch = run.get("head_branch") or (run_rest(repo, run.get("databaseId") or 0).get("head_branch") or "")
+    if not workflow or not branch:
+        return None
+    out = _gh_soft(["run", "list", "--repo", repo, "--branch", branch, "--workflow", workflow,
+                    "--limit", str(SUPERSEDE_SCAN), "--json", "databaseId,conclusion,createdAt"])
+    if out is None:
+        return None
+    mine = run.get("createdAt") or ""
+    later = [row.get("createdAt") or "" for row in json.loads(out or "[]")
+             if (row.get("createdAt") or "") > mine]
+    return max(later) if later else None
+
+
 def route(repo: str, run_id: int, check: str = "make ci-unit", dry: bool = False) -> int:
     """Route one completed failed run to a remedy. Returns the exit code."""
     run = run_detail(repo, run_id)
     conclusion = (run.get("conclusion") or "").lower()
     if conclusion != "failure":
+        if conclusion == "cancelled":
+            # A cancellation is not a verdict (#843): the run was killed, and whether it still owes
+            # one depends on whether a later run of the same workflow took over.
+            later = later_run_of_the_same_workflow(repo, {**run, "databaseId": run_id})
+            if later:
+                print(f"[run-fixer] run {run_id} was cancelled and a later run of "
+                      f"`{run.get('workflowName') or '?'}` took over at {later} - superseded, "
+                      f"nothing to do", flush=True)
+            else:
+                print(f"[run-fixer] run {run_id} was CANCELLED with no later run of "
+                      f"`{run.get('workflowName') or '?'}` on its branch - that is PENDING, not a "
+                      f"verdict: `make ci-requeue-cancelled` re-runs it (issue #843)", flush=True)
+            return 0
         print(f"[run-fixer] run {run_id} conclusion is `{conclusion or '?'}` - not a failure, "
               f"nothing to do", flush=True)
         return 0

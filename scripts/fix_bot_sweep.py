@@ -84,8 +84,25 @@ def failing_checks(repo: str, pr: int) -> list[str]:
     if not out:
         return []
     rows = json.loads(out)
-    return [r["name"] for r in rows
-            if (r.get("bucket") or r.get("state", "")).lower() in ("fail", "failure", "error")]
+    red: list[str] = []
+    cancelled: list[str] = []
+    for row in rows:
+        state = (row.get("state") or "").upper()
+        bucket = (row.get("bucket") or "").lower()
+        # #843: `gh pr checks` buckets a CANCELLED check as `fail`, so a bulk cancel used to look
+        # exactly like a real failure and this bot would "fix" a PR whose only problem was that its
+        # run was killed. A cancellation is not a verdict: it is PENDING, and `make
+        # ci-requeue-cancelled` is what gives it one back.
+        if bucket == "cancel" or state in ("CANCELLED", "CANCELED"):
+            cancelled.append(row.get("name") or "?")
+            continue
+        if bucket in ("fail", "failure", "error") or state in ("FAILURE", "ERROR", "TIMED_OUT"):
+            red.append(row["name"])
+    if cancelled:
+        print(f"[sweep] #{pr}: {len(cancelled)} cancelled check(s) "
+              f"({', '.join(sorted(cancelled)[:3])}{'…' if len(cancelled) > 3 else ''}) - "
+              f"PENDING, not red: `make ci-requeue-cancelled` re-runs them (issue #843)")
+    return red
 
 
 def bot_attempts(repo: str, pr: int) -> int:
