@@ -159,6 +159,27 @@ def test_a_branch_ahead_of_main_passes(tmp_path: Path, capsys):
     assert "ahead" in recorded(work)["TREE"]
 
 
+def test_a_branch_that_edits_agents_records_the_rulebook_at_main(tmp_path: Path, capsys):
+    """The recorded counts describe `AGENTS.md` at the recorded sha, not the branch's copy (#865)."""
+
+    # Given a branch ahead of main that edits AGENTS.md
+    _, work = clone(tmp_path)
+    (work / bp.AGENTS).write_text(AGENTS + "\n## A branch-only rule\n\nText.\n", encoding="utf-8")
+    git(work, "add", "-A")
+    git(work, "commit", "-m", "docs: add a branch-only rule")
+    main_sha = git(work, "rev-parse", "origin/main").strip()
+
+    # When  the preflight runs
+    rc = bp.main(["--root", str(work)])
+
+    # Then  the line names main's sha with main's AGENTS.md counts, so its own gate accepts it
+    out = capsys.readouterr()
+    assert rc == 0, out.err
+    line = (work / bp.PREFLIGHT).read_text(encoding="utf-8").splitlines()[0]
+    assert line == bp.agents_line(main_sha, AGENTS)
+    assert f"{main_sha[:12]}:{bp.AGENTS}" in out.out
+
+
 # ---------------------------------------------------------------------------------------------
 # refusals — a leg that cannot prove its base does not start
 # ---------------------------------------------------------------------------------------------

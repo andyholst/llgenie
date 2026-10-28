@@ -95,8 +95,11 @@ WHEN: <utc>
 ```
 
 The heading digest is what a **rule** change moves: rewording a sentence inside an existing section
-leaves it alone. `CHECK=1` re-reads an existing file against the live tree and prints the FIRST field
-that disagrees, so a leg that reused a stale record is caught before it writes anything.
+leaves it alone. The counts and the digest are read from `AGENTS.md` at the recorded sha
+(`git show <sha>:AGENTS.md`), so a branch that edits the rulebook still writes a line its own gate
+accepts; a remote whose object is absent falls back to the working tree and says so. `CHECK=1`
+re-reads an existing file against the live tree and prints the FIRST field that disagrees, so a leg
+that reused a stale record is caught before it writes anything.
 
 **The PR carries the line.** `make check-pr-hygiene` rejects a bot PR whose body has no `AGENTS:`
 line, whose sha is not `git merge-base origin/main HEAD`, or whose counts are not `AGENTS.md` at that

@@ -181,7 +181,18 @@ def verify(root: Path, remote: str, branch: str) -> dict:
         state = f"fast-forwarded ({behind} commit(s) from {remote}/{branch})"
         head = target
 
-    size, lines, digest = agents_record((root / AGENTS).read_text(encoding="utf-8"))
+    # The counts and the digest must describe the SAME file the recorded sha names: read `AGENTS.md`
+    # at the fetched commit, not the working tree, so a branch that edits the rulebook still writes
+    # a line its own `check-pr-hygiene` accepts (issue #865). Only a remote whose object is absent
+    # falls back to the working tree, and that source is stated in the record.
+    shown = git(root, "show", f"{target}:{AGENTS}")
+    if shown.returncode == 0:
+        agents_text, source = shown.stdout, f"{target[:12]}:{AGENTS}"
+    else:
+        agents_text, source = (root / AGENTS).read_text(encoding="utf-8"), f"working tree {AGENTS}"
+        note = (note + "; " if note else "") + f"`{target}:{AGENTS}` is not in the object store, so " \
+            f"the counts were read from the working tree"
+    size, lines, digest = agents_record(agents_text)
     return {
         "note": note,
         "sha": target,
@@ -190,6 +201,7 @@ def verify(root: Path, remote: str, branch: str) -> dict:
         "bytes": size,
         "lines": lines,
         "digest": digest,
+        "source": source,
         "line": f"AGENTS: {target} {size}b {lines}l",
     }
 
@@ -251,6 +263,7 @@ def run(root: Path, remote: str, branch: str, profile: str, check: bool) -> int:
 
     (root / PREFLIGHT).write_text(body, encoding="utf-8")
     print(f"[bot-preflight] OK: tree is {result['state']} ({remote}/{branch} {result['sha'][:12]})")
+    print(f"[bot-preflight] read {result['source']}")
     print(f"[bot-preflight] {result['line']}")
     print(f"[bot-preflight] wrote {PREFLIGHT}")
     return 0

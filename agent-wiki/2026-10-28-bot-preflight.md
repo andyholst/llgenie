@@ -55,6 +55,10 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
 - **`AGENTS.md` does not yet carry a preflight section.** An agent run may not edit that file
   (protected: the write needs a human's approval), so the standing rule lives in `bot-unattended`
   and `docs/BOTS.md`, and the `AGENTS.md` section is filed as its own follow-up.
+- **The counts come from the recorded sha, not the working tree.** `verify()` reads
+  `AGENTS.md` with `git show <sha>:AGENTS.md`, so a branch that edits the rulebook writes a line its
+  own `check-pr-hygiene` accepts (found as #865 while implementing this). Only an absent object
+  falls back to the working tree, and the printed output names the source.
 - **The `AGENTS:` rule is scoped to a bot range.** A PR is a bot PR when every commit it adds is
   authored by `Asimov Agent <support@docondee.com>` (`check_pr_hygiene.is_bot_pr`). Without that
   scope every PR a person opens would go red on `ci-unit` for a line stated nowhere they read — 7 of

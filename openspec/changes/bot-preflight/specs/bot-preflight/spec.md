@@ -69,8 +69,11 @@ THEN the tree contains `origin/main`, or the run stops with exit 2 and the reaso
 The preflight MUST write `preflight.txt` at the repository root, a run input that is gitignored and
 never committed. It MUST carry the line `AGENTS: <main sha> <bytes>b <lines>l` — the exact line a PR
 body repeats — plus a `sha256` digest of the `## ` headings of `AGENTS.md`, so a prose edit does not
-change the digest while a rule change does. `--check` MUST re-read an existing file against live
-values and print the **first** difference instead of passing.
+change the digest while a rule change does. The counts and the digest MUST be read from `AGENTS.md`
+at **that sha** (`git show <sha>:AGENTS.md`), so a branch that edits the rulebook still writes a line
+its own hygiene gate accepts; only when the object is absent MAY the working tree be read, and the
+source MUST be stated. `--check` MUST re-read an existing file against live values and print the
+**first** difference instead of passing.
 
 WHEN the preflight has verified the tree
 THEN `preflight.txt` states the sha, the byte size, the line count and the heading digest it read,
@@ -83,6 +86,14 @@ and a stale file is named by `--check` with the field that disagrees.
 - **Then** the first line of `preflight.txt` is `AGENTS: <sha> <bytes>b <lines>l` for that
   `AGENTS.md`, and the file also carries the heading digest
 - **Test:** `tests/test_bot_preflight.py::test_a_clean_checkout_at_main_passes_and_records_the_line`
+
+#### Scenario: the counts come from the rulebook at the recorded sha
+
+- **Given** a branch ahead of `main` that edits `AGENTS.md`
+- **When** the preflight runs
+- **Then** the `AGENTS:` line names `main`'s sha with `AGENTS.md` counts at that sha, not the branch's
+  copy, and the printed source names the object it read
+- **Test:** `tests/test_bot_preflight.py::test_a_branch_that_edits_agents_records_the_rulebook_at_main`
 
 #### Scenario: the heading digest follows the rules, not the prose
 
