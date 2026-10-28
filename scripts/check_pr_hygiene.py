@@ -371,6 +371,22 @@ def _agents_line_finding(key: str, title: str, evidence: str, where: str) -> dic
     return {"key": key, "title": title, "evidence": evidence, "where": where}
 
 
+def _range_authors(root: Path, base: str, head: str) -> tuple[list[str], int]:
+    """`(authors of the commits the range ADDS, how many commits the range holds)`.
+
+    Merge commits are skipped, exactly as AGENTS.md's author gate does: on a `pull_request`
+    checkout `HEAD` is `refs/pull/N/merge` and the merge commit GitHub wrote is authored by the
+    merger (`Andy`, or `GitHub <noreply@github.com>` on a same-repo head), never by the bot. Counting
+    it made every bot PR look human and silently disabled the `AGENTS:` rule in CI (issue #792).
+    """
+    proc = _git(root, "log", "--no-merges", "--format=%ae", f"{base}..{head}")
+    authors = [line.strip() for line in proc.stdout.splitlines() if line.strip()] \
+        if proc.returncode == 0 else []
+    counted = _git(root, "rev-list", "--count", f"{base}..{head}")
+    total = int(counted.stdout.strip()) if counted.returncode == 0 and counted.stdout.strip() else 0
+    return authors, total
+
+
 def is_bot_pr(root: Path, base: str, head: str) -> bool:
     """Whether the commits this PR adds are a bot leg's — every one authored by `BOT_EMAIL`.
 
@@ -379,11 +395,20 @@ def is_bot_pr(root: Path, base: str, head: str) -> bool:
     every PR a person opens would go red for a rule stated nowhere they read. An empty range (a
     push to `main`, or `HEAD` == `base`) is not a bot PR.
     """
-    proc = _git(root, "log", "--format=%ae", f"{base}..{head}")
-    if proc.returncode != 0:
-        return False
-    authors = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    authors, _ = _range_authors(root, base, head)
     return bool(authors) and all(author == BOT_EMAIL for author in authors)
+
+
+def undecidable_note(root: Path, base: str, head: str) -> str | None:
+    """A note when the range holds commits but no non-merge one — the rule cannot be applied.
+
+    Such a range must say so out loud: silence is how the `AGENTS:` rule went missing in CI.
+    """
+    authors, total = _range_authors(root, base, head)
+    if total and not authors:
+        return (f"[pr-hygiene] NOTE: `{base}..{head}` holds {total} commit(s) and none of them is a "
+                f"non-merge commit, so the `AGENTS:` rule cannot be decided here — it was skipped.")
+    return None
 
 
 def check_agents_line(body: str, root: Path = REPO_ROOT,
@@ -575,6 +600,9 @@ def main(argv=None) -> int:
         print(report(root, args.base, args.head, body, source))
         return 0
     print(f"[pr-hygiene] PR body: {source}")
+    note = undecidable_note(root, args.base, args.head)
+    if note:
+        print(note)
     items = findings(root, args.base, args.head, body)
     print(render(items))
     return 1 if items else 0

@@ -102,10 +102,14 @@ re-reads an existing file against the live tree and prints the FIRST field that 
 that reused a stale record is caught before it writes anything.
 
 **The PR carries the line.** `make check-pr-hygiene` rejects a bot PR whose body has no `AGENTS:`
-line, whose sha is not a `main` commit the PR contains (an ancestor of both the branch and the base),
-or whose counts are not `AGENTS.md` at that sha. A PR is a **bot PR** when every commit it adds is authored by `Asimov Agent
+line, whose sha is not a `main` commit the PR contains (an ancestor of both the branch and the base,
+never equality with the merge base that `rebase-bot` moves), or whose counts are not `AGENTS.md` at
+that sha. A PR is a **bot PR** when every commit it adds is authored by `Asimov Agent
 <support@docondee.com>` — the repository's bot identity; a human-authored PR is skipped, because a
-rule a person never reads must not turn their PR red. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
+rule a person never reads must not turn their PR red. **Merge commits are skipped** as the author gate
+does: on a `pull_request` run `actions/checkout` gives the job `refs/pull/N/merge`, whose merge commit
+is authored by the merger (or `GitHub <noreply@github.com>` on a same-repo head), so counting it made
+every bot PR look human and the rule a silent no-op in CI. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
 line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` in `ci-unit`, or
 `PR=<n> REPO=<owner/name>` through `gh`. A push to `main` has no PR body; the static half of the gate
 still decides the exit code there.
@@ -113,9 +117,11 @@ still decides the exit code there.
 **Wired legs:** `issue-bot.yml` (triage, refiner, dedup, implement) and `architecture-bot.yml` call
 `make bot-preflight` right after `make bot-sync-main` — the sync is the WRITE that resets to main, the
 preflight the READ that proves the result and records it — and `fix-bot.yml` calls it after
-`make bot-sync-branch`. Every leg preloads the `bot-unattended` skill, which states the preflight as
-a rule; `make check-agent-skills` fails when that skill loses it, so a leg cannot be written that
-omits it.
+`make bot-sync-branch`. Every other leg (`issue-refiner`, `issue-dedup`, `registry-sync-review`,
+`rebase-bot-agent`, `engine-params-review`, `agent-fetch`, `issue-triage`, `issue-implement`) gets the
+same rule through the `bot-unattended` skill every leg preloads; that is the intended seam, not a
+missed call site. `make check-agent-skills` fails when that skill loses the rule, so a leg cannot be
+written that omits it.
 
 Tests: `tests/test_bot_preflight.py` (real git: a bare `origin` and a clone, so the fetch,
 fast-forward and divergence check are the real ones), the `AGENTS:` cases in

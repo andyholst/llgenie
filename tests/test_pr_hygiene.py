@@ -453,6 +453,39 @@ def test_a_pr_body_whose_agents_counts_are_wrong_is_a_violation(tmp_path: Path):
     assert f"{len(AGENTS_OK.encode())}b" in found[0]["evidence"]
 
 
+def test_a_non_bot_merge_commit_does_not_hide_a_bot_range(tmp_path: Path):
+    """CI checks out `refs/pull/N/merge`, whose merge commit the merger authored — not the bot.
+
+    Counting that merge commit as an author made `is_bot_pr()` false on every `pull_request` run,
+    so `check_agents_line()` returned no finding and a bot PR with no `AGENTS:` line went green.
+    """
+
+    # Given a bot branch, a moved main, and a human-authored merge of main into the branch
+    root, base, _ = _history(tmp_path)
+    _git(root, "checkout", "-q", "main")
+    (root / "later.py").write_text("print('main moves on')\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "feat: main moves on")
+    _git(root, "checkout", "-q", "feat/x")
+    subprocess.run(
+        ["git", "-c", "user.name=Andy Holst", "-c", "user.email=andy.holst@protonmail.com",
+         "-c", "commit.gpgsign=false", "merge", "--no-ff", "-m", "Merge main into feat/x", "main"],
+        cwd=str(root), check=True, capture_output=True, text=True,
+    )
+    merge_head = _git(root, "rev-parse", "HEAD").strip()
+    authors = _git(root, "log", "--format=%ae", f"origin/main..{merge_head}").split()
+
+    # When  the guard reads a body with no AGENTS: line against that merge commit
+    keys = [f["key"].split("/")[0] for f in cph.findings(root, "origin/main", merge_head, _body(None))]
+
+    # Then  the human merge commit is in the range, yet the range is still the bot's and the
+    #       missing line is still a finding
+    assert "andy.holst@protonmail.com" in authors
+    assert cph.is_bot_pr(root, "origin/main", merge_head) is True
+    assert "pr-agents-line-missing" in keys
+    assert base != merge_head
+
+
 def test_the_pr_body_is_read_from_the_github_event_without_network(tmp_path: Path, monkeypatch):
     """`ci-unit` gets the body from the event JSON it was already given — no `gh`, no network."""
 

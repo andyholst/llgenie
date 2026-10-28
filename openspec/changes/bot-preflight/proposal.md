@@ -31,10 +31,14 @@ so it hides the two states a leg must actually be told about: a **diverged** tre
   sha, the tree's state and the profile. `--check` re-reads it against live values and prints the
   first difference, so a leg that reused a stale file is caught before it writes anything.
 - **`make check-pr-hygiene`** gains the `AGENTS:` rule: a PR body must carry that line, its sha must
-  equal `git merge-base origin/main HEAD`, and its counts must be those of `AGENTS.md` **at that
-  sha**. The body is read without network: `--pr-body-file` / `$PR_BODY_FILE` (the implementer's
-  `pr-body.md`, so a missing line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s
-  `pull_request.body` in `ci-unit`, or an explicit `PR=<n> REPO=<slug>` through `gh`.
+  be a `main` commit the PR contains — an **ancestor of both `HEAD` and the base**, not necessarily
+  the merge base, because `rebase-bot` moves the merge base while the `AGENTS.md` the leg read stays
+  reachable — and its counts must be those of `AGENTS.md` **at that sha**. A range is a bot range
+  when every **non-merge** commit it adds is bot-authored (`--no-merges`, so the `refs/pull/N/merge`
+  commit GitHub writes never makes a bot PR look human). The body is read without network:
+  `--pr-body-file` / `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing line is caught
+  before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` in `ci-unit`, or an explicit
+  `PR=<n> REPO=<slug>` through `gh`.
 - **`bot-unattended`** states the preflight as a rule every leg obeys, and `make check-agent-skills`
   fails when the shared skill loses it, so a leg cannot be written that omits it.
 - The legs that already synced (`issue-bot`, `architecture-bot`) call the preflight instead, and the

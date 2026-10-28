@@ -119,21 +119,24 @@ and a stale file is named by `--check` with the field that disagrees.
 ### Requirement: a PR body cites the `AGENTS.md` the work obeyed
 
 `make check-pr-hygiene` MUST reject a bot PR body that does not carry the `AGENTS:` line, whose sha
-is not a `main` commit the PR contains (an ancestor of both `HEAD` and the base), or whose byte and
+is not a `main` commit the PR contains (an ancestor of both `HEAD` and the base — never equality with
+`git merge-base origin/main HEAD`, which `rebase-bot` moves), or whose byte and
 line counts are not those of `AGENTS.md` at **that** sha. A PR is a **bot PR** when every commit it adds is authored by the bot identity
-(`Asimov Agent <support@docondee.com>`); a human-authored PR MUST NOT be failed for a rule stated
+(`Asimov Agent <support@docondee.com>`), **merge commits excluded** — on a `pull_request` checkout
+`HEAD` is `refs/pull/N/merge`, whose merge commit is authored by the merger, and counting it would
+silently disable the rule; a human-authored PR MUST NOT be failed for a rule stated
 nowhere a person reads. It MUST read the body without network when one is available — `--pr-body-file`,
 `$PR_BODY_FILE`, `$GITHUB_EVENT_PATH`'s `pull_request.body` — and MUST read it through `gh` only when
 `PR=`/`REPO=` are passed explicitly. On a push to `main`, where no PR body exists, the rule MUST
 report that it read no body and MUST NOT fail.
 
 WHEN the hygiene gate reads a PR body
-THEN the `AGENTS:` line matches the merge-base sha and that sha's `AGENTS.md`, or the gate fails
-naming the field that disagrees.
+THEN the `AGENTS:` line cites an ancestor of both `HEAD` and the base, and its counts are those of
+`AGENTS.md` at that sha, or the gate fails naming the field that disagrees.
 
 #### Scenario: a body with the matching line passes
 
-- **Given** a PR body whose `AGENTS:` line names the merge-base sha and that sha's `AGENTS.md`
+- **Given** a PR body whose `AGENTS:` line names a `main` commit the PR contains and that sha's `AGENTS.md`
 - **When** `check-pr-hygiene` reads it
 - **Then** no `pr-agents-line` finding is reported
 - **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_with_the_matching_agents_line_passes`
@@ -158,6 +161,15 @@ naming the field that disagrees.
 - **When** `check-pr-hygiene` reads it after `rebase-bot` moved the merge base
 - **Then** no `pr-agents-line` finding is reported, and the counts are checked at the cited sha
 - **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_whose_agents_sha_is_an_older_main_passes`
+
+#### Scenario: a non-bot merge commit does not hide a bot range
+
+- **Given** a bot branch merged with `main` through a merge commit authored by a person — the shape
+  `actions/checkout` produces for `refs/pull/N/merge` on a `pull_request` run
+- **When** `check-pr-hygiene` reads that merge commit as `HEAD`
+- **Then** the range is still a bot range (merge commits are skipped) and a body without the
+  `AGENTS:` line is still a finding
+- **Test:** `tests/test_pr_hygiene.py::test_a_non_bot_merge_commit_does_not_hide_a_bot_range`
 
 #### Scenario: counts that do not match that sha's AGENTS.md are rejected
 

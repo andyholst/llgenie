@@ -24,8 +24,9 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
 - **`preflight.txt`** (gitignored run input): `AGENTS: <main sha> <bytes>b <lines>l` first, then a
   `sha256` of the `## ` heading list, `MAIN`, `TREE`, `PROFILE`, `WHEN`. `CHECK=1` names the first
   field that disagrees with a reused file.
-- **`make check-pr-hygiene`** rejects a body whose `AGENTS:` line is missing, whose sha is not
-  `git merge-base origin/main HEAD`, or whose counts are not `AGENTS.md` at that sha. The body comes
+- **`make check-pr-hygiene`** rejects a body whose `AGENTS:` line is missing, whose sha is not an
+  ancestor of both `HEAD` and the base (`git merge-base --is-ancestor`, never equality with the
+  merge base — `rebase-bot` moves it), or whose counts are not `AGENTS.md` at that sha. The body comes
   from `--pr-body` / `--pr-body-file` / `$PR_BODY_FILE` / `$GITHUB_EVENT_PATH` — `gh` only when
   `PR=`+`REPO=` are passed. No body (a push to `main`) is a note, not a failure.
 - **`bot-unattended`** states the preflight; `make check-agent-skills` fails when it is gone.
@@ -66,11 +67,26 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
   own `check-pr-hygiene` accepts (found as #865 while implementing this). Only an absent object
   falls back to the working tree, and the printed output names the source.
 - **The `AGENTS:` rule is scoped to a bot range.** A PR is a bot PR when every commit it adds is
-  authored by `Asimov Agent <support@docondee.com>` (`check_pr_hygiene.is_bot_pr`). Without that
-  scope every PR a person opens would go red on `ci-unit` for a line stated nowhere they read — 7 of
+  authored by `Asimov Agent <support@docondee.com>` (`check_pr_hygiene.is_bot_pr`), **merge commits
+  excluded** (`git log --no-merges`). Without that scope every PR a person opens would go red on
+  `ci-unit` for a line stated nowhere they read — 7 of
   the 8 PRs open when this was written carry no `AGENTS:` line — and `auto-merge` would hold them
   all. The human identity is `andy.holst@protonmail.com` (`check_pr_authors.ALLOWED`); the bot's own
   implementer branch is all bot commits, so the check still fires where the contract applies.
+- **The merge exclusion is what makes the rule fire in CI at all.** On a `pull_request` run
+  `actions/checkout` hands the job `refs/pull/N/merge`, whose merge commit is authored by the merger;
+  counting it made `is_bot_pr()` false on every bot PR, so the rule passed silently and nothing said
+  so. Measured on this PR's own merge ref (`refs/pull/856/merge`, merge commit by
+  `andy.holst@protonmail.com`): the previous code exits 0 on a body without the line, the fix exits 1
+  naming the missing line; `undecidable_note()` now prints a NOTE when a range holds only merge
+  commits. Pinned by
+  `tests/test_pr_hygiene.py::test_a_non_bot_merge_commit_does_not_hide_a_bot_range`, which fails on
+  the previous code.
+- **The cited sha is an ancestor, not the merge base.** `git merge-base origin/main HEAD` moves
+  every time `main` does, so a `rebase-bot` rebase invalidated a line whose `AGENTS.md` the leg
+  really read and whose commit the branch still contains. The rule is now
+  `git merge-base --is-ancestor <sha> <ref>` for both the head and the base; issue #792 AC3,
+  `proposal.md`, the spec's `WHEN/THEN` and this note state that same rule.
 
 ## Status
 
