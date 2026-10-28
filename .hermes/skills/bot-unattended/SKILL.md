@@ -65,3 +65,9 @@ dropped silently.
   nothing there. Where the two meet, AGENTS.md wins.
 - **A failing tool is reported, never worked around.** If a command you need fails, say what failed
   in the output and stop; never fake the result the output is supposed to carry.
+- **Never prune a worktree.** `make worktree-prune`, `git worktree prune` and `git worktree remove`
+  delete directories and cannot see uncommitted work — a tree mid-flight whose branch tip is already
+  an ancestor of `main` looks identical to a finished one, and the prune has destroyed in-flight
+  work. Report stale trees with `make worktree-report` (it lists every worktree and mutates nothing)
+  and leave deletion to the owner; run one of those three commands only when the owner explicitly
+  tells you to (issue #794).

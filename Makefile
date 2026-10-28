@@ -69,7 +69,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	sync-quant-catalog check-quant-catalog render-trend-list-matrix check-trend-list-matrix render-engine-skill-gap check-engine-skill-gap \
 	engine-gate-report engine-skill-gap engine-skill-gap-md spawn-engine-skill-issues engine-skill-scaffold registry-change-report sync-change-issue registry-review-brief registry-sync-review registry-review-publish sync-strata-models check-strata-models check-wiring wiring-report check-secret-output secret-output-report \
 	secret-scan secret-scan-history secret-scan-self-test \
-	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
+	queued-alarm issue-cleaner-scan issue-cleaner-apply worktree-report worktree-prune fix-loop fix-loop-image fix-bot-sweep fix-bot-report agent-image-ref issue-bot-dispatch issue-bot-open-pr issue-bot-image \
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight jev-preflight-required nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
@@ -809,7 +809,10 @@ issue-cleaner-scan: ## Which OPEN issue a merged PR already implemented (the lin
 	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)" --dry
 issue-cleaner-apply: ## Close the issues a merged PR implemented but left open, each with a comment citing the PR and its merge commit (issue #325; REPO= picks the repo)
 	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)"
-worktree-prune: ## Remove the worktrees and local branches whose PR already merged, proven by the PR's merge commit (squash merges defeat ancestry, issue #431); DRY=1 prints the plan, BASE= picks the base ref, SLUG= the owner/name gh reads
+worktree-report: ## Report every worktree with its branch, merged-into-main, open PR and dirty state; mutates nothing and deletes nothing (issue #794); SLUG= picks the repo gh reads, BASE= the base ref
+	python3 scripts/worktree_report.py --repo $(if $(SLUG),$(SLUG),asimov-agent/llgenie) --base $(if $(BASE),$(BASE),origin/main)
+worktree-prune: ## Remove the worktrees and local branches whose PR already merged, proven by the PR's merge commit (squash merges defeat ancestry, issue #431); DRY=1 prints the plan, BASE= picks the base ref, SLUG= the owner/name gh reads; a bot run — the CI or BOT variable set — is REFUSED unless CONFIRM=1 (issue #794)
+	@python3 scripts/worktree_prune_guard.py
 	python3 scripts/worktree_prune.py --repo $(if $(SLUG),$(SLUG),asimov-agent/llgenie) --base $(if $(BASE),$(BASE),origin/main) $(if $(DRY),--dry,)
 queued-alarm: ## Report jobs stuck in `queued` far too long (a runner that never picks them up, issue #254); COMMENT=1 delivers the report, DRY=1 previews it
 	python3 scripts/queued_run_alarm.py --repo $(GH_REPO) --minutes $(if $(MINUTES),$(MINUTES),30) $(if $(COMMENT),--comment,) $(if $(DRY),--dry,)
