@@ -18,6 +18,11 @@
 - **`tests/test_agent_profiles.py`**: one case per rejection, plus sync→check agreement, the
   live-only-file rule, the unknown-profile exit code, the make-target wiring, and the repository's own
   profiles passing the gate.
+- `agents/llgenie-issse-implementer/skills/containerized-repo-verification/SKILL.md` (15,653 bytes) is the
+  implementer's own skill, copied from the live profile — including the two lessons written to it hours
+  before this rule existed (a shared host's test containers must never be cleaned up by image; a red gate
+  must be proven against a pristine base before it is believed). It is the first proof of the rule's
+  purpose: behaviour that used to exist only on one machine now has a diff.
 - `.hermes/skills/README.md` states the three-tree split; `docs/BOTS.md` documents the targets.
 
 ## Why
