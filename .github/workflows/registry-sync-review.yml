@@ -79,6 +79,11 @@ jobs:
     timeout-minutes: 60
     env:
       NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+      # `make agent-jev-preflight NERVE_REQUIRE=1` (step below) runs the JEV/TypeSafe provider and
+      # its own guard (`scripts/require_env.py TYPESAFE_API_KEY`) refuses to start without this one.
+      # The hole was latent here — the preflight's `if:` only fires when the sync PR is green, so a
+      # skipped run looked healthy — and it is the same defect issue #802 fixed in issue-dedupe.yml.
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:

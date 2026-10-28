@@ -347,3 +347,95 @@ def test_the_detector_actually_detects():
     job_env = ("  implement:\n    env:\n      GH_TOKEN: ${{ github.token }}\n    steps:\n"
                "      - run: make implement-issue\n")
     assert _step_sets_key(job_env, "make implement-issue", "GH_TOKEN")
+
+
+# ---------------------------------------------------------------------------
+# every workflow that calls an agent leg sets the keys that leg's GUARD demands (#802)
+# ---------------------------------------------------------------------------
+# The #364 rule above closes the forwarding half on a hand-kept roster of four workflows. It could
+# not see issue #802, because a leg can also die on a key it never forwards: `make
+# agent-jev-preflight NERVE_REQUIRE=1` opens with `scripts/require_env.py TYPESAFE_API_KEY`, so a job
+# that calls it without that key dies at the guard — `[require-env] FATAL: TYPESAFE_API_KEY is
+# missing or empty`, run 40702295009 job 122867360526 — while the preflight's `if:` makes most runs
+# skip it, so the bot looked healthy and retired nothing. This rule derives BOTH rosters (which
+# targets are legs and what each of them requires, from the Makefile; which job calls which leg,
+# from every workflow file) and reuses the SAME scope test as #364: the job env or that step's env.
+#: A `require_env.py` call in a leg's recipe and the names it demands.
+GUARD_CALL = re.compile(r"python3 scripts/require_env\.py ((?:[A-Z_][A-Z0-9_]*[ \t]*)+)")
+#: A `make <target>` call in a step's `run:` (leading flags such as `-C tools` allowed).
+MAKE_CALL = re.compile(r"(?<![\w-])make\s+(?:-[^\s]+\s+)*([A-Za-z0-9][\w.-]*)")
+
+
+def _guard_keys(target: str) -> set[str]:
+    """The credential NAMEs a leg's own `require_env.py` guard refuses to start without."""
+    body = _agent_legs_body((ROOT / "Makefile").read_text(), target)
+    return {k for m in GUARD_CALL.finditer(body) for k in m.group(1).split()}
+
+
+def _guarded_legs() -> dict[str, set[str]]:
+    """{target: keys its guard requires} for every agent leg whose recipe guards on a key."""
+    out: dict[str, set[str]] = {}
+    for target, body in _agent_legs():          # the existing derivation: the recipe starts the image
+        names = {k for m in GUARD_CALL.finditer(body) for k in m.group(1).split()}
+        if names:
+            out[target] = names
+    return out
+
+
+def test_every_workflow_that_calls_an_agent_leg_sets_the_keys_its_guard_requires():
+    """The #802 defect: the leg was wired and the job that called it never received its key."""
+
+    # Given every agent leg and the keys its own guard demands (derived from the Makefile)
+    legs = _guarded_legs()
+    assert "agent-jev-preflight" in legs, "no guarded agent leg found — the Makefile changed shape"
+    assert "TYPESAFE_API_KEY" in legs["agent-jev-preflight"]
+
+    findings, called = [], 0
+    # When  every workflow's calling step is read
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text()
+        for job_name, job_text in _jobs(text).items():
+            for leg, keys in legs.items():
+                trigger = f"make {leg}"
+                if trigger not in job_text:
+                    continue
+                called += 1
+                for key in sorted(keys):
+                    if not _step_sets_key(job_text, trigger, key):
+                        findings.append(
+                            f"{path.name}:{job_name} runs `{trigger}`, whose guard requires {key}, "
+                            f"but neither the job nor that step sets it — the run dies at the guard")
+
+    # Then  the roster is real (a checkout that calls no leg would pass this vacuously): measured
+    #       29 leg calls across 9 workflows on main@464fee5, so a floor of 20 is a shape check
+    assert called >= 20, f"only {called} leg call(s) found — the parser, not the tree, changed"
+    # And   no job asks a leg to start without the key its own guard demands
+    assert findings == [], "\n".join(findings)
+
+
+def test_the_guard_scope_detector_catches_the_802_shape():
+    """Prove the rule catches #802 by planting it — a rule only run on a fixed tree proves nothing."""
+
+    # Given the `dedup` job as `issue-dedupe.yml` shipped it: the preflight step, no TypeSafe key
+    planted = ("  dedup:\n    env:\n      NOUS_API_KEY: ${{ secrets.NOUS_API_TOKEN }}\n    steps:\n"
+               "      - name: Prove the JEV engine is active\n"
+               "        run: make agent-jev-preflight NERVE_REQUIRE=1\n")
+
+    # When  the scope test the rule uses reads that step
+    guard = _guard_keys("agent-jev-preflight")
+
+    # Then  the missing key is exactly the one the run died on, and it is reported
+    assert guard == {"TYPESAFE_API_KEY"}, guard
+    assert not _step_sets_key(planted, "make agent-jev-preflight", "TYPESAFE_API_KEY")
+
+    # And   the same job WITH the key on the job env, or on that step's own env, passes
+    with_job_env = planted.replace("      NOUS_API_KEY:",
+                                   "      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}\n      NOUS_API_KEY:")
+    assert _step_sets_key(with_job_env, "make agent-jev-preflight", "TYPESAFE_API_KEY")
+    with_step_env = planted.replace("        run: make agent-jev-preflight",
+                                    "        env:\n          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}\n"
+                                    "        run: make agent-jev-preflight")
+    assert _step_sets_key(with_step_env, "make agent-jev-preflight", "TYPESAFE_API_KEY")
+
+    # And   a key the leg's guard does NOT require is not demanded (the rule reads the guard)
+    assert _guard_keys("issue-dedup-pick") == set(), "issue-dedup-pick must not gain a phantom requirement"

@@ -1019,6 +1019,18 @@ leg without one fails `make test-unit` instead of costing a run. That includes t
 (`agent-fetch` keys on `NOUS_API_KEY` + `FIRECRAWL_API_KEY`, `search-smoke` on `FIRECRAWL_API_KEY`),
 which landed while this change was open (#362/#369).
 
+**The other end of the same guard: the JOB must carry the key** (issue #802). A guard proves the leg
+*refuses* a missing key; it cannot prove the run *has* it. `issue-dedupe.yml`'s `dedup` job ran
+`make agent-jev-preflight NERVE_REQUIRE=1` with only `NOUS_API_KEY` in the job env, so every run that
+PICKED a pair died in its own preflight — `[require-env] FATAL: TYPESAFE_API_KEY is missing or empty`,
+run `40702295009` job `122867360526` — and because the preflight's `if:` skips a run with no pair, the
+bot looked healthy on most runs while it retired nothing. `registry-sync-review.yml` carried the same
+hole, one green-PR `if:` away from firing. The suite now derives BOTH rosters — which targets are agent
+legs and the keys each one's `require_env.py` line demands (from the Makefile), and which job calls
+which leg (from every workflow file) — and fails a job that runs a leg without the keys its guard
+demands. The scope rule is #364's: the job's `env:` or that step's own `env:` counts, a sibling step's
+does not.
+
 ## The implementer's step exports `GH_TOKEN` (#364)
 
 `make implement-issue` forwards `-e GH_TOKEN`, and the issue-bot job now exports it on the step that

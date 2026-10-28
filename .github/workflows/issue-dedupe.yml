@@ -76,6 +76,15 @@ jobs:
     timeout-minutes: 60
     env:
       NOUS_API_KEY: ${{ secrets.NOUS_PORTAL_API_TOKEN }}
+      # The dedup leg itself needs only the model key, but `make agent-jev-preflight
+      # NERVE_REQUIRE=1` runs the JEV/TypeSafe provider before it (issue #238) and that leg's own
+      # guard (`scripts/require_env.py TYPESAFE_API_KEY`) refuses to start without this one. Without
+      # it every run that PICKED a pair died at the preflight and retired nothing — issue #802, run
+      # 40702295009, job 122867360526: `[require-env] FATAL: TYPESAFE_API_KEY is missing or empty`.
+      # The preflight's `if:` skips a run with no pair, which is why the hole looked like a healthy
+      # bot on most runs; `tests/test_require_env.py` now compares every workflow's env against the
+      # keys its legs' guards demand, so this cannot come back quietly.
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       REPO: ${{ github.repository }}
     steps:
       - name: "Checkout main (read-only for this bot - it pushes nothing)"
