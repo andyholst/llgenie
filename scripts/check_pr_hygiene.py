@@ -22,8 +22,9 @@ helper) — extracts every commit and every PR open they run, and reports:
 * `agents-closing-rule` an `AGENTS.md` that no longer states that a PR closes the issue it
                         implements, so the closing rule cannot be deleted silently either;
 * `pr-agents-line`      a PR body whose `AGENTS: <sha> <bytes>b <lines>l` line is missing, names a
-                        sha that is not `git merge-base origin/main HEAD`, or carries counts that
-                        are not those of `AGENTS.md` at that sha.
+                        sha that is not a `main` commit the PR contains (an ancestor of both the
+                        head and the base — never equality with the merge base, which `rebase-bot`
+                        moves), or carries counts that are not those of `AGENTS.md` at that sha.
 
 The `AGENTS:` line is how a reviewer reads which rulebook the work obeyed, so a body without it (or
 with a line taken from an older `main`) is the same defect as a body that states no benefit. The
@@ -413,7 +414,8 @@ def undecidable_note(root: Path, base: str, head: str) -> str | None:
 
 def check_agents_line(body: str, root: Path = REPO_ROOT,
                       base: str = "origin/main", head: str = "HEAD") -> list[dict]:
-    """A bot PR body carries `AGENTS:` with the merge-base sha and that sha's `AGENTS.md` counts."""
+    """A bot PR body carries `AGENTS:` with a `main` sha the PR contains (an ancestor of both the
+    head and the base — never merge-base equality) and that sha's `AGENTS.md` counts."""
     if not is_bot_pr(root, base, head):
         return []
     out: list[dict] = []

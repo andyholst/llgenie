@@ -931,7 +931,7 @@ verify-closure: ## Prove a merged PR closed what its body claims: prints every c
 # pr-body.md, so a missing `AGENTS:` line is caught before the PR opens) or `$GITHUB_EVENT_PATH` in
 # ci-unit. `PR=<n> REPO=<owner/name>` is the one path that asks `gh`; a push to `main` has no body,
 # and the static half still decides the exit code (issue #792).
-check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is empty/placeholder, when AGENTS.md lost the mandate, or when the PR body's `AGENTS:` line is not the merge base's (issues #313, #792; PR= REPO= PR_BODY_FILE= BASE=)
+check-pr-hygiene: ## CI: fail when a producer's commit message or PR body is empty/placeholder, when AGENTS.md lost the mandate, or when the PR body's `AGENTS:` line names a sha the PR does not contain (an ancestor of the head and the base; never merge-base equality) (issues #313, #792; PR= REPO= PR_BODY_FILE= BASE=)
 	python3 scripts/check_pr_hygiene.py check --base "$(if $(BASE),$(BASE),origin/main)" $(if $(PR_BODY_FILE),--pr-body-file "$(PR_BODY_FILE)",) $(if $(PR),--pr "$(PR)" --repo "$(GH_REPO)",)
 pr-hygiene-report: ## Show every producer the PR/commit-message guard reads, the `AGENTS:` line it found and its verdict (PR= REPO= PR_BODY_FILE= BASE=)
 	python3 scripts/check_pr_hygiene.py report --base "$(if $(BASE),$(BASE),origin/main)" $(if $(PR_BODY_FILE),--pr-body-file "$(PR_BODY_FILE)",) $(if $(PR),--pr "$(PR)" --repo "$(GH_REPO)",)
