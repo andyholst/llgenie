@@ -4,6 +4,13 @@ Scope: update each engine skill's upstream pin to the latest commit for its
 `ref`, derive the build parameters from the upstream tree (no LLM), apply the
 derived params into the skill, and regenerate the params/Dockerfiles.
 
+One engine's release archive is handled too (issue #830): `_native_archives`,
+`_release_assets` and `release_archive_install` list a PINNED release's assets,
+classify the one that is native for this machine's arch, checksum it and install
+it. The pinned version is always read from the engine's params at run time
+(`_pinned_ref`), never passed as a literal, so a bump moves the archive path
+with the pin.
+
 Commands (stdlib only):
   plan [--engine ID]        git ls-remote -> which engines moved (JSON list)
   pin  ENGINE NEW_REF NEW_SHA   targeted frontmatter edit (pinned/ref/version/verified)
