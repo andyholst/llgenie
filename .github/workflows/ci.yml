@@ -17,11 +17,11 @@ on:
     # a path that can change what any gate proves re-includes the whole matrix (`AGENTS.md` is a `*.md`).
     # `tests/test_ci_scope.py` asserts the two agree, so the YAML cannot drift from the classifier.
     paths-ignore:
-      - "*.md"
-      - "!AGENTS.md"
       - "docs/**"
       - "agent-wiki/**"
       - "openspec/**"
+      - "README.md"
+      - "CHANGES.md"
   push:
     branches: ["main"]    # merges: run the PR gate suite (engine build/publish lives in engine-build)
 

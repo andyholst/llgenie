@@ -169,6 +169,27 @@ def test_the_docs_trigger_list_matches_the_docs_class_minus_its_wildcards():
     assert wildcard_docs <= set(negations), (wildcard_docs, negations)
 
 
+def test_a_markdown_file_outside_a_docs_directory_is_not_docs():
+    """A path is `docs` because of its DIRECTORY, never because its extension is `.md` (#824 review)."""
+    classes, _, _wide = cs.classify(["tests/fixtures/notes.md"])
+    assert classes == ["tests"], classes
+
+    classes, _, _wide = cs.classify(["docs/ARCHITECTURE.md", "agent-wiki/n.md", "openspec/changes/x/p.md",
+                                     "README.md", "CHANGES.md"])
+    assert classes == ["docs"], classes
+
+
+def test_the_trigger_list_is_the_docs_class_and_nothing_else():
+    assert set(cs.DOCS_TRIGGER_IGNORE) == set(cs.CLASSES["docs"])
+    assert not any(g.startswith("!") for g in cs.DOCS_TRIGGER_IGNORE)
+    assert "*" not in " ".join(cs.DOCS_TRIGGER_IGNORE).replace("**", ""), cs.DOCS_TRIGGER_IGNORE
+
+
+def test_a_blank_path_entry_is_the_empty_diff_not_an_unclassifiable_one():
+    classes, unmatched, wide = cs.classify([""])
+    assert unmatched == [] and set(classes) == set(cs.CLASSES) and "empty diff" in wide
+
+
 def test_ci_yml_ignores_exactly_the_docs_trigger_list():
     """The YAML and the classifier are the same decision, so they cannot drift (issue #824)."""
     workflow = yaml.safe_load(CI.read_text())

@@ -48,7 +48,7 @@ EXIT_UNCLASSIFIED = 1
 
 #: class -> the globs it owns. Order is the order the report prints them in.
 CLASSES: dict[str, tuple[str, ...]] = {
-    "docs": ("*.md", "docs/**", "agent-wiki/**", "openspec/**"),
+    "docs": ("docs/**", "agent-wiki/**", "openspec/**", "README.md", "CHANGES.md"),
     "skills": (".hermes/**", "agents/**"),
     "workflows": (".github/**",),
     "scripts": ("scripts/**", "tools/**"),
@@ -79,13 +79,7 @@ _NON_DOCS = tuple(name for name in CLASSES if name != "docs")
 #: The `docs` class as a GitHub `paths-ignore` list — the globs a docs-only diff must match, MINUS the
 #: wildcards (`AGENTS.md` is a `*.md`, and editing it must re-include the full matrix). `ci.yml` and this
 #: constant are compared by `tests/test_ci_scope.py`, so the YAML cannot drift from the classifier.
-DOCS_TRIGGER_IGNORE: tuple[str, ...] = (
-    "*.md",
-    "!AGENTS.md",
-    "docs/**",
-    "agent-wiki/**",
-    "openspec/**",
-)
+DOCS_TRIGGER_IGNORE: tuple[str, ...] = CLASSES["docs"]
 
 #: job -> the classes that select it (`None` = always runs). The 28 jobs of `ci.yml`, in file order
 #: (issue #824's table). Two rows are families: `engine-image` / `test-published` are matrix rows and
@@ -167,6 +161,7 @@ def classify(paths: list[str]) -> tuple[list[str], list[str], str | None]:
     still reports the unmatched paths, because the CLI exits non-zero for it — the widening is about
     what gets selected, never about hiding a defect.
     """
+    paths = [p for p in paths if p.strip()]        # `--paths ''` is an empty diff, not a bad path
     wildcards = matched_wildcards(paths)
     if wildcards:
         return list(CLASSES), [], f"wildcard path {', '.join(wildcards)} — every class is selected"
