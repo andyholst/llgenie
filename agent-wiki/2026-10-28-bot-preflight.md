@@ -1,6 +1,7 @@
 # 2026-10-28 — the bot preflight: prove the base, read the rulebook, cite it in the PR
 
-Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · OpenSpec change:
+Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
+[#856](https://github.com/asimov-agent/llgenie/pull/856) · OpenSpec change:
 `openspec/changes/bot-preflight`
 
 ## What was measured
