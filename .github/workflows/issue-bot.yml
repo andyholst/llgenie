@@ -119,7 +119,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BUMP_TOKEN }}
 
-      - name: Preflight — prove the tree is at main and record the AGENTS.md this run obeys (issues #303, #792)
+      - name: Sync with latest upstream main (the branch must start from its tip - issue #303)
+        run: make bot-sync-main
+
+      # The sync above is the WRITE (reset to main); this is the READ that proves the result and
+      # records the AGENTS.md the run obeys (issue #792). A sync that could not reach main already
+      # failed the step above, so a preflight refusal here means the tree moved under us.
+      - name: Preflight — prove the tree is at main and record the AGENTS.md this run obeys (issue #792)
         run: make bot-preflight PROFILE=issue-bot
 
       - name: Dispatch (cap -> pick one -> claim -> issue.md + branch)

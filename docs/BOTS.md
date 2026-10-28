@@ -108,7 +108,8 @@ line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` 
 still decides the exit code there.
 
 **Wired legs:** `issue-bot.yml` (triage, refiner, dedup, implement) and `architecture-bot.yml` call
-`make bot-preflight` in place of `make bot-sync-main`, and `fix-bot.yml` calls it after
+`make bot-preflight` right after `make bot-sync-main` — the sync is the WRITE that resets to main, the
+preflight the READ that proves the result and records it — and `fix-bot.yml` calls it after
 `make bot-sync-branch`. Every leg preloads the `bot-unattended` skill, which states the preflight as
 a rule; `make check-agent-skills` fails when that skill loses it, so a leg cannot be written that
 omits it.

@@ -30,8 +30,10 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
   `PR=`+`REPO=` are passed. No body (a push to `main`) is a note, not a failure.
 - **`bot-unattended`** states the preflight; `make check-agent-skills` fails when it is gone.
   `issue-implement` requires the line in `pr-body.md`.
-- **Wired legs:** `issue-bot.yml` and `architecture-bot.yml` preflight instead of `bot-sync-main`;
-  `fix-bot.yml` preflights after `bot-sync-branch`.
+- **Wired legs:** `issue-bot.yml` and `architecture-bot.yml` preflight right after `bot-sync-main`
+  (sync = write, preflight = read that proves and records it); `fix-bot.yml` preflights after
+  `bot-sync-branch`. `bot-sync-main` stays wired because an existing contract test pins it and the
+  two answer different questions.
 
 ## Decisions
 
