@@ -331,7 +331,34 @@ def check_agents_mandate(root: Path) -> list[dict]:
     return out
 
 
+#: Every identity the bot lanes commit as. One email, several names: `check_pr_authors.py` allows
+#: `Asimov Agent <support@docondee.com>` and `Mr. Asimov <support@docondee.com>`.
+BOT_EMAILS = frozenset({"support@docondee.com"})
+
 AGENTS_LINE = re.compile(r"^AGENTS:\s+([0-9a-f]{7,40})\s+(\d+)b\s+(\d+)l\s*$", re.M)
+
+
+def range_authors(root: Path, base: str, head: str) -> list[str]:
+    """The author emails of the commits this PR adds, `--no-merges` so `refs/pull/N/merge` cannot hide them."""
+    out = _git(root, "log", "--no-merges", "--format=%ae", f"{base}..{head}")
+    return [line.strip() for line in (out or "").splitlines() if line.strip()]
+
+
+def is_bot_pr(root: Path, base: str, head: str) -> bool:
+    """Whether this PR carries a bot leg's work — **any** bot-authored commit, not every one.
+
+    `all()` was the hole: a branch where a human commit sits beside a bot commit reported False, so a
+    bot PR body with no `AGENTS:` line passed this gate — including the PR that introduced it. A human
+    PR with no bot commit is still skipped, because the rule is stated nowhere a person reads.
+    """
+    return any(author in BOT_EMAILS for author in range_authors(root, base, head))
+
+
+def pr_agents_line_findings(root: Path, head: str, base: str, body: str) -> list[dict]:
+    """`agents_line_findings`, but only for a range that carries bot work — the gate's real entry point."""
+    if not is_bot_pr(root, base, head):
+        return []
+    return agents_line_findings(root, head, base, body)
 
 
 def agents_line_findings(root: Path, head: str, base: str, body: str) -> list[dict]:
@@ -444,7 +471,7 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "agents-line":
         body = Path(args.body_file).read_text()
-        items = agents_line_findings(root, args.head, args.base, body)
+        items = pr_agents_line_findings(root, args.head, args.base, body)
         if items:
             for it in items:
                 print(f"[check-pr-hygiene] {it['where']}: {it['detail']}", file=sys.stderr)

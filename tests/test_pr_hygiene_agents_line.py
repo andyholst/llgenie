@@ -78,12 +78,39 @@ def test_a_sha_that_is_not_a_commit_is_refused(repo: Path):
     assert items and "not a commit in this clone" in items[0]["detail"]
 
 
+def test_a_range_with_one_bot_commit_is_a_bot_pr_even_beside_a_human_commit(repo: Path):
+    """The hole: `all()` made a mixed range look human, so a bot body with no `AGENTS:` line passed."""
+    (repo / "human.txt").write_text("human work\n")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=Andy", "-c", "user.email=andy.holst@protonmail.com", "commit", "-q", "-m", "human")
+    (repo / "bot.txt").write_text("bot work\n")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=Asimov Agent", "-c", "user.email=support@docondee.com", "commit", "-q", "-m", "bot")
+
+    authors = hy.range_authors(repo, "main", "feature")          # newest first, and the fixture's own commit is here
+    assert "support@docondee.com" in authors and "andy.holst@protonmail.com" in authors, authors
+    assert hy.is_bot_pr(repo, "main", "feature") is True
+    items = hy.pr_agents_line_findings(repo, "feature", "main", "Closes #792.\n\nNo citation here.\n")
+    assert items, "a mixed range must still be gated"
+
+
+def test_a_human_only_range_is_skipped_not_failed(repo: Path):
+    git(repo, "checkout", "-q", "-b", "human-only", "main")
+    (repo / "h.txt").write_text("human\n")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=Andy", "-c", "user.email=andy.holst@protonmail.com", "commit", "-q", "-m", "human only")
+    assert hy.is_bot_pr(repo, "main", "human-only") is False
+    assert hy.pr_agents_line_findings(repo, "human-only", "main", "no citation, and that is fine\n") == []
+
+
 def test_the_cli_exits_non_zero_for_an_unreachable_citation(repo: Path, tmp_path: Path):
     git(repo, "checkout", "-q", "-b", "scratch", "main")     # never commit onto main: it must stay put
     elsewhere = commit(repo, "d.txt", "somewhere else")
     git(repo, "checkout", "-q", "feature")
     f = tmp_path / "body.md"
     f.write_text(body(elsewhere))
+    git(repo, "-c", "user.name=Asimov Agent", "-c", "user.email=support@docondee.com",
+        "commit", "-q", "--allow-empty", "-m", "a bot leg commits here")     # the gate only holds bot PRs
     rc = hy.main(["agents-line", "--root", str(repo), "--head", "feature", "--base", "main",
                   "--body-file", str(f)])
     assert rc == 1
