@@ -1,4 +1,4 @@
-name: CI requeue (cancelled runs)
+name: ci-requeue — re-runs only the cancelled runs no later run superseded, every 30 minutes
 
 # Issue #843: 56% of the runs in a 300-run window are `cancelled`, and a bulk cancel to free runner
 # capacity costs every killed PR its verdict - `gh pr checks` renders `completed/cancelled` as fail,
@@ -6,6 +6,15 @@ name: CI requeue (cancelled runs)
 # `run-failure-reactor` no longer treats a cancellation as "nothing to do". This is the scheduled half
 # of the healer; `make ci-requeue-cancelled` is the manual half and takes WINDOW/DRY.
 
+# Trigger surface: the 30-minute schedule (`23,53 * * * *`) and `workflow_dispatch` - never a
+#   `pull_request` or a `push`: this workflow heals runs, it does not gate a change.
+# Flow: `make ci-requeue-cancelled` reads the completed runs in the window, re-runs ONLY a cancelled
+#   run with no later run of the same workflow on its branch, and reports every superseded one.
+# Never: never cancels a run (a sweep that kills a 20-minute matrix is what it exists to undo), never
+#   re-runs a superseded one, and never touches a `push` to main.
+# dispatch: no inputs — the healer takes no target: it re-runs every cancelled run in the window that
+# no later run of the same workflow superseded. The window is a make variable (WINDOW=2h), not
+# a dispatch input.
 on:
   schedule:
     - cron: "23,53 * * * *" # every 30 minutes, off the hour and off the other bots' minutes

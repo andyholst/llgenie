@@ -115,6 +115,44 @@ def plan(repo: str, window: dt.timedelta, now: dt.datetime | None = None) -> tup
     return requeue, skipped
 
 
+#: A cancelled run that had already been in flight this long is a STALL, not a supersede (#846,
+#: incident #767: a macOS row sat inside `make ci-unit` for 105 minutes and the PR owner cancelled to
+#: escape it). The distinction matters because a stall is a fact about the JOB, and it is invisible to
+#: an alarm that only sees `queued` rows - the run had a runner and was working.
+STALL_MIN_MINUTES = 30
+
+
+def _minutes(run: dict) -> float:
+    """How long the run was in flight: `run_started_at` (or `created_at`) to `updated_at`."""
+    def _at(value: str | None) -> "dt.datetime | None":
+        if not value:
+            return None
+        return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    start = _at(run.get("run_started_at")) or _at(run.get("created_at"))
+    end = _at(run.get("updated_at"))
+    if not start or not end:
+        return 0.0
+    return max(0.0, (end - start).total_seconds() / 60.0)
+
+
+def stalls(runs: list[dict], minimum_minutes: float = STALL_MIN_MINUTES) -> list[dict]:
+    """The cancelled runs that had been RUNNING a long time - candidates for a hung job, not a supersede.
+
+    `gh pr checks` renders these as `fail` and a queue alarm cannot see them at all, so a single job that
+    hangs is read either as broken code or as nothing. Reporting the shape separately is what turns
+    incident #767 into a comment instead of a cancel.
+    """
+    out: list[dict] = []
+    for run in runs:
+        if run.get("conclusion") != "cancelled":
+            continue
+        minutes = _minutes(run)
+        if minutes >= minimum_minutes:
+            out.append({**run, "minutes": round(minutes, 1)})
+    return sorted(out, key=lambda r: r["minutes"], reverse=True)
+
+
 def rerun(repo: str, run: dict, dry: bool) -> bool:
     """Re-run one cancelled run's jobs; True when something was dispatched (or would be, for `dry`)."""
     if dry:

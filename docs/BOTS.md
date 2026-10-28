@@ -1413,6 +1413,7 @@ from the pipeline that will run.
 | workflow | what the run does | dispatch inputs |
 |---|---|---|
 | `architecture-bot.yml` | rewrites docs/ARCHITECTURE.md from the tree and opens a linked issue + PR (never merges) | `dry` (optional, default `false`) — Preview the issue and PR bodies this run would file, filing nothing<br>`doc` (optional, default `docs/ARCHITECTURE.md`) — Repository-relative markdown document to refresh |
+| `ci-requeue.yml` | re-runs only the cancelled runs no later run superseded, every 30 minutes | none — the healer takes no target: it re-runs every cancelled run in the window that |
 | `code-review-bot.yml` | reviews the tree and the pipelines and files one issue per finding (never edits code) | `dry` (optional, default `false`) — Preview the issues it would file (owner only) |
 | `engine-build.yml` | builds and verifies EVERY engine at its committed pin, in parallel (never merges) | `engine` (optional) — Engine id to sweep (e.g. llama.cpp); empty = every engine in the committed params<br>`arch` (optional) — One backend to sweep (cpu|cuda|rocm|vulkan); empty = every variant of each engine<br>`push` (optional, default `false`) — Publish the built images to GHCR (true) or build and verify only (false)<br>`force` (optional, default `false`) — Rebuild from scratch, ignoring the layer cache (true) or reuse a cached/available image (false) |
 | `engine-bump-rebase.yml` | rebases every open engine-bump PR onto the latest main | `dry` (optional, default `false`) — print the PRs it would rebase and push nothing (no branch is touched) |

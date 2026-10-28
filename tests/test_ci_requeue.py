@@ -224,3 +224,43 @@ def test_the_scheduled_healer_is_wired_to_the_manual_target():
     for step in steps:
         if "uses" in step:
             assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", step["uses"]), step["uses"]
+
+
+# ---------------------------------------------------------------------------------------------------
+# issue #846 / incident #767: a cancelled run that had been RUNNING a long time is a STALL, and that
+# shape is invisible to both `gh pr checks` (it renders cancelled as fail) and a queue alarm (it only
+# sees rows that never got a runner).
+def _run(conclusion, started, updated, database_id=1):
+    return {"database_id": database_id, "conclusion": conclusion, "created_at": started,
+            "run_started_at": started, "updated_at": updated}
+
+
+def test_a_long_cancelled_run_is_reported_as_a_stall():
+    """The #767 shape: 30 minutes in flight, then killed with the matrix otherwise green."""
+
+    # Given a run cancelled after 105 minutes and one cancelled after 2
+    runs = [_run("cancelled", "2026-10-28T16:00:00Z", "2026-10-28T17:45:00Z", 1),
+            _run("cancelled", "2026-10-28T16:00:00Z", "2026-10-28T16:02:00Z", 2)]
+
+    # Then  only the long one is a stall, and its minutes are reported
+    out = rq.stalls(runs, minimum_minutes=30)
+    assert [r["database_id"] for r in out] == [1], out
+    assert out[0]["minutes"] == 105.0, out
+
+
+def test_a_successful_or_failed_run_is_never_a_stall():
+    """A stall is about a run that was WORKING when it was killed."""
+
+    runs = [_run("success", "2026-10-28T16:00:00Z", "2026-10-28T17:00:00Z", 1),
+            _run("failure", "2026-10-28T16:00:00Z", "2026-10-28T17:00:00Z", 2)]
+
+    assert rq.stalls(runs, minimum_minutes=30) == []
+
+
+def test_stalls_are_ordered_by_how_long_they_ran():
+    """The longest is the one that most likely hung, so it is the one to read first."""
+
+    runs = [_run("cancelled", "2026-10-28T16:00:00Z", "2026-10-28T16:40:00Z", 1),
+            _run("cancelled", "2026-10-28T16:00:00Z", "2026-10-28T17:45:00Z", 2)]
+
+    assert [r["database_id"] for r in rq.stalls(runs, minimum_minutes=30)] == [2, 1]
