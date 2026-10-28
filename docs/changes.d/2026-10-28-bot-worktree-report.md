@@ -1,0 +1,1 @@
+| 2026-10-28 | worktree-prune reports what it would delete and refuses the destructive half unless a lane asks for it | [2026-10-28-bot-worktree-report.md](agent-wiki/2026-10-28-bot-worktree-report.md) | #794 |

@@ -30,9 +30,15 @@ staged changes not committed). On 2026-10-28 a prune did exactly that to the #79
   It **mutates nothing**: no `git worktree remove`, no `git worktree prune`, no `git branch -D`.
   Exit 0 even when nothing is stale.
 - **`scripts/worktree_prune_guard.py`** (new, stdlib only) — the seam `make worktree-prune` runs
-  first. When the run is a bot (`CI` or `BOT` set in the environment) and `CONFIRM=1` is absent, it
-  refuses with a non-zero exit naming `make worktree-report` and the re-run spelling. For the owner
-  (no `CI`/`BOT`) it is a no-op, so the owner's cleanup path is unchanged.
+  first. When the run is unattended and `CONFIRM=1` is absent, it refuses with a non-zero exit naming
+  the marker that said "unattended", `make worktree-report` and the re-run spelling. "Unattended" is
+  every lane a bot actually takes, because a marker a leg cannot receive is a gate that never fires
+  (the first review's finding): `CI` (set by GitHub in every workflow step), `BOT` (forwarded by the
+  Makefile's `AGENT_BOT_MARKER` as `-e BOT=1` on **every** agent-image `docker run`, since docker
+  inherits no host environment and the image sets no such `ENV`), and the dispatcher's
+  `HERMES_KANBAN_TASK` / `HERMES_KANBAN_WORKSPACE` / `HERMES_KANBAN_BRANCH` /
+  `HERMES_KANBAN_WORKSPACES_ROOT` (a lane spawned on the host). For the owner (no marker set) it is a
+  no-op, so the owner's cleanup path is unchanged.
 - **`make worktree-report`** — new target, `##` help line, `.PHONY`, documented in `docs/BOTS.md`.
 - **`make worktree-prune`** — same recipe, prefixed by the guard. No change to
   `scripts/worktree_prune.py`'s logic (issue #759 owns that half).
@@ -52,5 +58,6 @@ staged changes not committed). On 2026-10-28 a prune did exactly that to the #79
 - The root-owned-debris half of the prune (it unregisters a worktree but cannot delete the directory,
   exiting 2) — that is #759.
 - Deleting the 37 existing worktrees: an owner action, not a bot's.
-- The two `agents/<profile>/SOUL.md` edits (criterion 5): they are OWED until #791's tree is on
-  `main`; tracked as a follow-up work item rather than folded into this change.
+- The two `agents/<profile>/SOUL.md` edits (criterion 5): they need #791's `agents/` tree on `main`,
+  so they are **filed as their own linked work item — [#876](https://github.com/asimov-agent/llgenie/issues/876)** —
+  and named as OWED in the PR body; #876 in turn names #794 and PR #847.

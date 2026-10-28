@@ -48,14 +48,19 @@ set and branch set on disk are byte-identical afterwards.
 
 ### Requirement: a bot cannot run the destructive target without saying so
 
-`make worktree-prune` MUST run a guard before `scripts/worktree_prune.py`. When `CI` or `BOT` is set
-in the environment and `CONFIRM=1` is not given, the guard MUST exit non-zero with a message naming
-`make worktree-report` and the `CONFIRM=1` re-run spelling, and the prune MUST NOT run. When neither
-`CI` nor `BOT` is set, the guard MUST be a no-op so the owner's cleanup path is unchanged, and
-`CONFIRM=1` MUST let a bot run the prune exactly as today.
+`make worktree-prune` MUST run a guard before `scripts/worktree_prune.py`. When the run is unattended
+and `CONFIRM=1` is not given, the guard MUST exit non-zero with a message naming the marker that said
+"unattended", `make worktree-report` and the `CONFIRM=1` re-run spelling, and the prune MUST NOT run.
+"Unattended" MUST be true for every lane a bot actually takes: `CI` (a GitHub workflow step), `BOT`
+(forwarded into the agent image on every run) and the host dispatcher's Kanban markers
+(`HERMES_KANBAN_TASK`, `HERMES_KANBAN_WORKSPACE`, `HERMES_KANBAN_BRANCH`,
+`HERMES_KANBAN_WORKSPACES_ROOT`). Every `docker run` in the `Makefile` that boots the agent image MUST
+forward that `BOT` marker, because `docker run` inherits no host environment. When no marker is set, the
+guard MUST be a no-op so the owner's cleanup path is unchanged, and `CONFIRM=1` MUST let a bot run the
+prune exactly as today.
 
 WHEN a bot leg asks for `make worktree-prune` without `CONFIRM=1`
-THEN the guard refuses, names the report target, and deletes nothing.
+THEN the guard refuses, names the report target and the marker, and deletes nothing.
 
 #### Scenario: a bot run without CONFIRM is refused
 
@@ -71,9 +76,30 @@ THEN the guard refuses, names the report target, and deletes nothing.
 - **Then** it exits non-zero and deletes nothing
 - **Test:** `tests/test_worktree_report.py::test_the_guard_refuses_a_ci_run_without_confirm`
 
+#### Scenario: a host-dispatched lane is refused and names its marker
+
+- **Given** no `CI` and no `BOT`, but the dispatcher's `HERMES_KANBAN_WORKSPACE` set
+- **When** the guard runs
+- **Then** it exits non-zero, names `make worktree-report` and the `HERMES_KANBAN_WORKSPACE` marker
+- **Test:** `tests/test_worktree_report.py::test_the_guard_refuses_a_host_dispatched_lane`
+
+#### Scenario: every agent-image leg forwards the marker
+
+- **Given** the `Makefile`, with its backslash continuations joined into one line per command
+- **When** every command that boots the agent image is read
+- **Then** each one carries `$(AGENT_BOT_MARKER)`, and that variable is declared as `-e BOT=1`
+- **Test:** `tests/test_worktree_report.py::test_every_agent_leg_forwards_the_bot_marker`
+
+#### Scenario: the guard reads every marker a lane can carry
+
+- **Given** the guard's marker list and the `Makefile`'s forwarded marker
+- **When** both are read
+- **Then** the forwarded name is one the guard recognises, and `CI`, `HERMES_KANBAN_TASK` and `HERMES_KANBAN_WORKSPACE` are all in the list
+- **Test:** `tests/test_worktree_report.py::test_the_guard_reads_every_marker_a_lane_can_carry`
+
 #### Scenario: the owner's own cleanup is unchanged
 
-- **Given** neither `CI` nor `BOT` in the environment and no `CONFIRM`
+- **Given** no marker in the environment and no `CONFIRM`
 - **When** the guard runs
 - **Then** it exits 0, so `make worktree-prune` behaves exactly as it did before this change
 - **Test:** `tests/test_worktree_report.py::test_the_guard_is_a_no_op_for_the_owner`
@@ -100,7 +126,10 @@ naming `make worktree-prune`, `git worktree prune` and `git worktree remove` as 
 never runs unless the owner explicitly says so. (`AGENTS.md:483` carries the same defect and the same
 replacement text; because this session's write gate refuses edits to a protected agent-instruction
 file with no user present, that edit is recorded as OWED in the PR body, exactly as criterion 4
-allows, and is not asserted by a test that cannot be satisfied.)
+allows, and is not asserted by a test that cannot be satisfied. The two `agents/<profile>/SOUL.md`
+files of criterion 5 do not exist until #791's tree lands on `main`, so that half is filed as its own
+linked work item, [#876](https://github.com/asimov-agent/llgenie/issues/876), and named as OWED in the
+PR body.)
 
 WHEN a bot leg preloads `bot-unattended` and its own skill
 THEN it finds the report-and-leave-deletion rule and the three prohibited commands, and no

@@ -1570,8 +1570,13 @@ make worktree-prune    # remove the worktrees and local branches whose PR alread
                        # DRY=1 prints the plan and mutates nothing; SLUG= picks the owner/name
                        # gh reads (default asimov-agent/llgenie — REPO is the checkout path, which gh rejects).
                        # A BOT RUN IS REFUSED (issue #794): `scripts/worktree_prune_guard.py` runs first and,
-                       # when CI or BOT is set and CONFIRM=1 is absent, exits 3 naming `make worktree-report`
-                       # and the re-run spelling. The owner's own run (neither variable set) is unchanged, and
+                       # when the run is unattended and CONFIRM=1 is absent, exits 3 naming the marker that
+                       # said so, `make worktree-report`, and the re-run spelling. "Unattended" covers every
+                       # lane a bot takes: `CI` (a GitHub step sets it), `BOT` (the Makefile's
+                       # AGENT_BOT_MARKER, forwarded as `-e BOT=1` on every agent-image run — docker does not
+                       # inherit the host env) and the dispatcher's `HERMES_KANBAN_TASK`,
+                       # `HERMES_KANBAN_WORKSPACE`, `HERMES_KANBAN_BRANCH`, `HERMES_KANBAN_WORKSPACES_ROOT`
+                       # (a lane spawned on the host). The owner's own run (no marker set) is unchanged, and
                        # CONFIRM=1 lets a bot proceed once a human has read the report.
 make test-clean        # prune stopped orphaned test containers (always)
 ```

@@ -119,19 +119,42 @@ def _row(stdout: str, path: Path) -> str:
     return rows[0]
 
 
-def _run_guard(*, ci: str | None, bot: str | None, confirm: str | None) -> subprocess.CompletedProcess:
-    """Run the guard with exactly the CI/BOT/CONFIRM the case wants (the host's own are stripped)."""
-    env = {k: v for k, v in os.environ.items() if k not in {"CI", "BOT", "CONFIRM"}}
+GUARD_MARKERS = ("CI", "BOT", "HERMES_KANBAN_TASK", "HERMES_KANBAN_WORKSPACE",
+                 "HERMES_KANBAN_BRANCH", "HERMES_KANBAN_WORKSPACES_ROOT")
+
+
+def _run_guard(*, ci: str | None, bot: str | None, confirm: str | None,
+               markers: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run the guard with exactly the markers the case wants (the host's own are stripped)."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in {*GUARD_MARKERS, "CONFIRM"}}
     if ci is not None:
         env["CI"] = ci
     if bot is not None:
         env["BOT"] = bot
     if confirm is not None:
         env["CONFIRM"] = confirm
+    env.update(markers or {})
     return subprocess.run(
         ["python3", str(REPO / "scripts" / "worktree_prune_guard.py")],
         cwd=REPO, capture_output=True, text=True, env=env,
     )
+
+
+def _logical_lines(text: str) -> list[str]:
+    """The Makefile's recipes, with backslash continuations joined — one entry per command."""
+    joined: list[str] = []
+    buffer = ""
+    for raw in text.splitlines():
+        if raw.endswith("\\"):
+            buffer += raw[:-1] + " "
+            continue
+        joined.append(buffer + raw)
+        buffer = ""
+    if buffer:
+        joined.append(buffer)
+    return joined
+
 
 
 def test_report_lists_every_worktree_with_its_four_measured_facts(tmp_path):
@@ -253,6 +276,20 @@ def test_the_guard_refuses_a_ci_run_without_confirm(tmp_path):
     assert "make worktree-report" in result.stderr
 
 
+def test_the_guard_refuses_a_host_dispatched_lane(tmp_path):
+    """A lane the dispatcher spawned on the host has CI/BOT absent but the dispatcher's own markers set."""
+
+    # Given a host-dispatched lane: no CI and no BOT, but the Kanban dispatcher's workspace marker
+    result = _run_guard(ci=None, bot=None, confirm=None,
+                        markers={"HERMES_KANBAN_WORKSPACE": "/repo/.worktrees/t_abc"})
+
+    # When  the guard decides
+    # Then  it refuses, and the message names the marker that said "unattended"
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "make worktree-report" in result.stderr
+    assert "HERMES_KANBAN_WORKSPACE" in result.stderr
+
+
 def test_the_guard_is_a_no_op_for_the_owner(tmp_path):
     """The owner's own `make worktree-prune` behaves exactly as it did before this change."""
 
@@ -301,6 +338,40 @@ def test_the_makefile_wires_the_report_and_guards_the_prune(tmp_path):
     assert "worktree_prune_guard.py" in prune_block
     assert "worktree_prune.py" in prune_block
     assert prune_block.index("worktree_prune_guard.py") < prune_block.index("worktree_prune.py")
+
+
+def test_every_agent_leg_forwards_the_bot_marker(tmp_path):
+    """The guard is only real if a bot leg can receive a marker: every agent-image run forwards BOT=1."""
+
+    # Given the repository's Makefile, one logical line per command
+    text = (REPO / "Makefile").read_text()
+    lines = _logical_lines(text)
+
+    # When  every command that boots the agent image is collected
+    legs = [l for l in lines if "$(AGENT_IMAGE)" in l or '"$$img"' in l]
+
+    # Then  the marker is declared once, and no leg is left without it
+    assert re.search(r"^AGENT_BOT_MARKER := -e BOT=1$", text, re.M)
+    assert len(legs) >= 10, f"only {len(legs)} agent-image runs found; the roster parse is wrong"
+    missing = [l.strip()[:160] for l in legs if "$(AGENT_BOT_MARKER)" not in l]
+    assert not missing, "agent-image run(s) without $(AGENT_BOT_MARKER):\n" + "\n".join(missing)
+
+
+def test_the_guard_reads_every_marker_a_lane_can_carry(tmp_path):
+    """The guard's marker list and the Makefile's forwarded marker cannot drift apart."""
+
+    # Given the guard's source and the Makefile's marker
+    guard = (REPO / "scripts" / "worktree_prune_guard.py").read_text()
+    makefile = (REPO / "Makefile").read_text()
+
+    # When  both are read
+    forwarded = re.search(r"^AGENT_BOT_MARKER := -e (\w+)=1$", makefile, re.M)
+
+    # Then  the forwarded name is one the guard recognises, and both bot lanes are named
+    assert forwarded, "AGENT_BOT_MARKER is not declared as `-e <NAME>=1`"
+    assert f'"{forwarded.group(1)}"' in guard
+    for lane_marker in ("CI", "HERMES_KANBAN_TASK", "HERMES_KANBAN_WORKSPACE"):
+        assert f'"{lane_marker}"' in guard, lane_marker
 
 
 def test_both_bot_skills_carry_the_prohibition(tmp_path):

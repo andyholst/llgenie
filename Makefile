@@ -122,6 +122,13 @@ AGENT_SHELL_FORWARD := $(foreach k,$(AGENT_SHELL_KEYS),-e $(AGENT_FORCE_PREFIX)$
 # a key it was explicitly given (the check needs it set in the container to prove anything).
 AGENT_SHELL_FORWARD_PLAIN := $(foreach k,$(AGENT_SHELL_KEYS),-e $(k))
 
+# The MARKER every unattended run carries, so `make worktree-prune` refuses it (issue #794).
+# `docker run` does not inherit the host environment and the agent image sets no such `ENV`, so a
+# bot leg has no `CI`/`BOT` unless the Makefile forwards one. `BOT=1` is deliberately not a
+# credential: it is a fact about the run, safe to show on a command line and in a log.
+# `tests/test_worktree_report.py` derives the leg roster from this file and fails a run that omits it.
+AGENT_BOT_MARKER := -e BOT=1
+
 all: bash-check install
 
 # ---- full install: engine images + venv + launcher + start scripts ---------
@@ -341,7 +348,7 @@ registry-sync-review: ## Hermes reviews the green store (reads registry-review-i
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
 	  -e NOUS_API_KEY -e HERMES_REASONING \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _registry-sync-review')
 _registry-sync-review: # (internal) the host recipe the agent image runs: the review, not the code
 	hermes -z "Follow the preloaded skill registry-sync-review. Its Input is $(REGISTRY_REVIEW_BRIEF) and its Output is $(REGISTRY_REVIEW_OUT), in the shape the skill prints." -s registry-sync-review,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
@@ -416,7 +423,7 @@ rebase-bot-agent: ## Ask Hermes to resolve a stopped rebase (the conflict prompt
 	  -e NOUS_API_KEY -e HERMES_REASONING \
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'hermes -z "$$(cat) Follow the preloaded skill rebase-conflict; the prompt above carries the conflicted files." -s $(REBASE_BOT_SKILLS) $(nous-alias) --reasoning medium --yolo')
 # Hermes runs directly there, NOT through `make _rebase-bot-agent`: the container's /repo/Makefile
 # is the conflicted file the agent was asked to resolve, and make cannot parse it (issue #460).
@@ -442,7 +449,7 @@ issue-refiner: ## Hermes REVIEWS the picked issue (reads refine-in.md: the threa
 	  -e NOUS_API_KEY -e HERMES_REASONING -e REPO \
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _issue-refiner')
 _issue-refiner: # (internal) the host recipe the agent image runs: the review, not the code
 	hermes -z "Follow the preloaded skill issue-refiner. Its Input is refine-in.md (with fetched/index.md as the pre-fetched evidence) and its Output is refine.md, in the shape the skill prints." -s issue-refiner,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
@@ -459,7 +466,7 @@ issue-dedup: ## Hermes decides whether the picked pair is the SAME defect (reads
 	  -e NOUS_API_KEY -e HERMES_REASONING -e REPO \
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _issue-dedup')
 _issue-dedup: # (internal) the host recipe the agent image runs: the decision, not the change
 	hermes -z "Follow the preloaded skill issue-dedup. Its Input is dedup-in.md and its Output is dedup.md, in the shape the skill prints." -s issue-dedup,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
@@ -480,7 +487,7 @@ engine-params-review: ## Issue #583: Hermes reviews the derived params against t
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
 	  -e NOUS_API_KEY -e HERMES_REASONING \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _engine-params-review')
 _engine-params-review: # (internal) the host recipe the agent image runs: the review, not the change
 	hermes -z "Follow the preloaded skill engine-params-review. Its Input is params-review-in.md and its Output is params-review.md, in the PROPOSE/NO REVIEW shape the skill prints. Propose only parameters whose flag AND quoted evidence appear in the named upstream file; the host drops anything else." -s engine-params-review,bot-unattended $(nous-alias) --reasoning $(HERMES_REASONING) --yolo
@@ -554,7 +561,7 @@ issue-bot-triage: ## Hermes REVIEWS the issue (issue.md: body + the whole commen
 	python3 scripts/ci_images.py ensure agent
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
 	  -e NOUS_API_KEY -e HERMES_REASONING -e REPO \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _issue-bot-triage')
 
 _issue-bot-triage: # (internal) the host recipe the agent image runs: the decision, not the code
@@ -621,7 +628,7 @@ agent-shell-keys-check: ## Prove every credential a container receives is visibl
 	@python3 scripts/require_env.py NOUS_API_KEY
 	python3 scripts/ci_images.py ensure agent
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
-	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  -e AGENT_SHELL_CHECK_KEYS="$(AGENT_SHELL_CHECK_KEYS)" \
 	  $(AGENT_IMAGE) bash -lc 'make _agent-shell-keys-check AGENT_SHELL_CHECK_KEYS="$(AGENT_SHELL_CHECK_KEYS)"')
 
@@ -637,7 +644,7 @@ agent-fetch: ## Fetch one URL with the masked Firecrawl key and write its text t
 	@python3 scripts/require_env.py NOUS_API_KEY FIRECRAWL_API_KEY
 	@python3 scripts/ci_images.py ensure agent
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
-	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  -e URL -e OUT \
 	  $(AGENT_IMAGE) bash -lc 'make _agent-fetch URL="$$URL" OUT="$$OUT"')
 
@@ -648,7 +655,7 @@ search-smoke: ## Prove the masked web reach works: one real Firecrawl request wi
 	@python3 scripts/require_env.py FIRECRAWL_API_KEY
 	@python3 scripts/ci_images.py ensure agent
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
-	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD_PLAIN) $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  -e BUDGET \
 	  $(AGENT_IMAGE) bash -lc 'python3 scripts/fetch_smoke.py --budget "$${BUDGET:-4000}"')
 
@@ -671,7 +678,7 @@ agent-jev-preflight: ## Prove the JEV engine is active in the agent image; every
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE -e NERVE_GATE_SKIP_PROVIDER \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _agent-jev-preflight')
 # The JEV preflight as a bot STEP depends on it (issue #802). `agent-jev-preflight NERVE_REQUIRE=1`
 # is a bot job's first step, and when the engine is off the step failed with a step name only: an
@@ -724,7 +731,7 @@ architecture-bot-doc: ## Rewrite the architecture doc with Hermes INSIDE the age
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo \
 	  -e NOUS_API_KEY -e HERMES_REASONING \
 	  -e TYPESAFE_API_KEY -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _architecture-bot-doc DOC="$(DOC)" ARCH_BRIEF="$(ARCH_BRIEF)"')
 
 _architecture-bot-doc: # (internal) the host recipe the agent image runs: only the doc is writable
@@ -766,7 +773,7 @@ implement-issue: ## Implement issue.md with Hermes INSIDE the agent image (AGENT
 	  -e NOUS_API_KEY -e GH_TOKEN -e HERMES_REASONING -e REPO \
 	  -e TYPESAFE_API_KEY \
 	  -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _implement-issue')
 
 hermes-smoke: ## Prove the alias the bots use can CALL A TOOL, inside the agent image: a terminal call that prints a per-run nonce, asserted from the session transcript (die in seconds, not after 20 min); the transcript is REDACTED before it prints (issues #359, #407)
@@ -774,7 +781,7 @@ hermes-smoke: ## Prove the alias the bots use can CALL A TOOL, inside the agent 
 	python3 scripts/ci_images.py ensure agent
 	$(call scrubbed_run,$(RUNTIME) run --rm --init -v "$(CURDIR):/repo" -w /repo -e NOUS_API_KEY \
 	  -e TYPESAFE_API_KEY -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE \
-	  $(AGENT_SHELL_FORWARD) \
+	  $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) \
 	  $(AGENT_IMAGE) bash -lc 'make _hermes-smoke')
 
 # Inside the image: the JEV preflight first, so the run knows whether the decision layer is
@@ -811,7 +818,7 @@ issue-cleaner-apply: ## Close the issues a merged PR implemented but left open, 
 	python3 scripts/issue_cleaner.py --repo "$(GH_REPO)"
 worktree-report: ## Report every worktree with its branch, merged-into-main, open PR and dirty state; mutates nothing and deletes nothing (issue #794); SLUG= picks the repo gh reads, BASE= the base ref
 	python3 scripts/worktree_report.py --repo $(if $(SLUG),$(SLUG),asimov-agent/llgenie) --base $(if $(BASE),$(BASE),origin/main)
-worktree-prune: ## Remove the worktrees and local branches whose PR already merged, proven by the PR's merge commit (squash merges defeat ancestry, issue #431); DRY=1 prints the plan, BASE= picks the base ref, SLUG= the owner/name gh reads; a bot run — the CI or BOT variable set — is REFUSED unless CONFIRM=1 (issue #794)
+worktree-prune: ## Remove the worktrees and local branches whose PR already merged, proven by the PR's merge commit (squash merges defeat ancestry, issue #431); DRY=1 prints the plan, BASE= picks the base ref, SLUG= the owner/name gh reads; an UNATTENDED run — CI, BOT, or the dispatcher's HERMES_KANBAN_* — is REFUSED unless CONFIRM=1 (issue #794)
 	@python3 scripts/worktree_prune_guard.py
 	python3 scripts/worktree_prune.py --repo $(if $(SLUG),$(SLUG),asimov-agent/llgenie) --base $(if $(BASE),$(BASE),origin/main) $(if $(DRY),--dry,)
 queued-alarm: ## Report jobs stuck in `queued` far too long (a runner that never picks them up, issue #254); COMMENT=1 delivers the report, DRY=1 previews it
@@ -821,7 +828,7 @@ sweep-concurrency-report: ## Report every scheduled workflow whose runs stack in
 
 fix-loop-image: ## Run the fix-bot loop inside the agent image (the same image the workflow uses); AGENT_IMAGE overrides the resolved ref, LOG=path also receives the REDACTED log (issue #359)
 	@python3 scripts/require_env.py NOUS_API_KEY
-	$(call scrubbed_run,img=$$(if [ -n "$(AGENT_IMAGE)" ]; then echo "$(AGENT_IMAGE)"; else python3 scripts/ci_images.py ref agent; fi); echo "agent image: $$img"; $(RUNTIME) run --rm --init -v "$$PWD:/repo" -w /repo -e NOUS_API_KEY -e GH_TOKEN -e FIX_CHECK -e FIX_ROUNDS -e TYPESAFE_API_KEY -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE $(AGENT_SHELL_FORWARD) "$$img" bash -lc 'scripts/agent_jev_preflight.sh && FIX_REPORT_FILE="$(REPORT_FILE)" scripts/fix_loop.sh'; $(if $(LOG),cp -f $(HERMES_LOG_SCRUBBED) $(LOG),true))
+	$(call scrubbed_run,img=$$(if [ -n "$(AGENT_IMAGE)" ]; then echo "$(AGENT_IMAGE)"; else python3 scripts/ci_images.py ref agent; fi); echo "agent image: $$img"; $(RUNTIME) run --rm --init -v "$$PWD:/repo" -w /repo -e NOUS_API_KEY -e GH_TOKEN -e FIX_CHECK -e FIX_ROUNDS -e TYPESAFE_API_KEY -e HERMES_NERVE_PROVIDER -e NERVE_REQUIRE $(AGENT_SHELL_FORWARD) $(AGENT_BOT_MARKER) "$$img" bash -lc 'scripts/agent_jev_preflight.sh && FIX_REPORT_FILE="$(REPORT_FILE)" scripts/fix_loop.sh'; $(if $(LOG),cp -f $(HERMES_LOG_SCRUBBED) $(LOG),true))
 
 fix-bot-sweep: ## Which red PR the fix-bot should repair, and dispatch it (DRY=1 previews; needs gh)
 	python3 scripts/fix_bot_sweep.py --repo $(GH_REPO) --check "$(if $(CHECK),$(CHECK),make ci-unit)" --max-attempts $(if $(ATTEMPTS),$(ATTEMPTS),5) $(if $(OWN_FORK),--own-fork $(OWN_FORK),) $(if $(PR),--pr $(PR),) $(if $(REPORT_FILE),--report-file "$(REPORT_FILE)",)$(if $(DRY),--dry,)

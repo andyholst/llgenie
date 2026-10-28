@@ -23,11 +23,15 @@ uncommitted work in it. `AGENTS.md:483` told an unattended agent to run that tar
   `total`, `stale` (merged, no open PR, not the main checkout), `off-main-no-pr` and `dirty`. No
   `git worktree remove`, no `git worktree prune`, no `git branch -D`. Exit 0 when nothing is stale;
   exit 2 naming the step when a measurement fails, because an unreadable state is not a clean state.
-- `scripts/worktree_prune_guard.py`, run as the first recipe line of `make worktree-prune` — a bot run
-  (`CI` or `BOT` set, a falsey value does not count) is REFUSED with exit 3 unless `CONFIRM=1`,
-  naming `make worktree-report` and the re-run spelling. The owner's run (neither variable set) is
-  unchanged, and `CONFIRM=1` lets a bot proceed exactly as today. `scripts/worktree_prune.py`'s own
-  eligibility logic is untouched (the root-owned-debris half is #759).
+- `scripts/worktree_prune_guard.py`, run as the first recipe line of `make worktree-prune` — an
+  UNATTENDED run is REFUSED with exit 3 unless `CONFIRM=1`, naming the marker that said so,
+  `make worktree-report` and the re-run spelling. "Unattended" covers every lane a bot takes: `CI`
+  (GitHub sets it in a workflow step), `BOT` (the Makefile's `AGENT_BOT_MARKER`, `-e BOT=1`, forwarded
+  on every agent-image `docker run`) and the dispatcher's `HERMES_KANBAN_TASK` /
+  `HERMES_KANBAN_WORKSPACE` / `HERMES_KANBAN_BRANCH` / `HERMES_KANBAN_WORKSPACES_ROOT` (a lane spawned
+  on the host). The owner's shell (no marker) is unchanged, and `CONFIRM=1` lets a bot proceed exactly
+  as today. `scripts/worktree_prune.py`'s own eligibility logic is untouched (the root-owned-debris
+  half is #759).
 - `.hermes/skills/bot-unattended/SKILL.md` and `.hermes/skills/issue-implement/SKILL.md` — the
   prohibition in both Rules sections: report with `make worktree-report`, and never run
   `make worktree-prune` / `git worktree prune` / `git worktree remove` unless the owner says so.
@@ -51,15 +55,35 @@ uncommitted work in it. `AGENTS.md:483` told an unattended agent to run that tar
   protected agent-instruction file with no user present, so the exact intended replacement is in the
   PR body (issue #794's criterion 4 escape hatch).
 - **`agents/llgenie-planner/SOUL.md` and `agents/llgenie-issse-implementer/SOUL.md`** (criterion 5) —
-  those paths arrive with #791 (PR #834), which is still open; the edit is owed to the run that sees
-  them on `main`.
+  those paths arrive with #791 (PR #834), which is still open; filed as its own linked work item,
+  [#876](https://github.com/asimov-agent/llgenie/issues/876), which names #794 and this PR.
+
+## Review round 1 — the gate was inert, and that is fixed
+
+The first version keyed "unattended" on `CI`/`BOT` alone. Neither reaches a bot: no leg recipe
+forwarded either, the agent image sets no such `ENV`, and a host-dispatched lane has neither — so
+`make worktree-prune` ran its plan, exit 0, in the very lane it was written for. The fix is one marker
+per lane, each proven live:
+
+| lane | marker | proof |
+|---|---|---|
+| a GitHub workflow step | `CI=true` (GitHub) | guard exits 3 |
+| a leg inside the agent image | `BOT=1`, `AGENT_BOT_MARKER` on every agent-image `docker run` (14 continuations + `fix-loop-image`) | `docker run -e BOT=1 … worktree_prune_guard.py` → exit 3; without it → exit 0 |
+| a host-dispatched lane | `HERMES_KANBAN_TASK` / `_WORKSPACE` / `_BRANCH` / `_WORKSPACES_ROOT` | this session: `make worktree-prune DRY=1` → exit 3 naming `HERMES_KANBAN_WORKSPACE` |
+| the owner's shell | none | plan printed, exit 0 |
+
+Two tests keep it true: `test_every_agent_leg_forwards_the_bot_marker` derives the leg roster from the
+`Makefile` (joined continuations, every command that boots the agent image) and fails one that omits
+the marker; `test_the_guard_reads_every_marker_a_lane_can_carry` ties the forwarded name to the guard's
+list so the two cannot drift.
 
 ## Verified
 
-- `tests/test_worktree_report.py` — 10 passed in the test image: the four measured facts against a
+- `tests/test_worktree_report.py` — **13 passed** in the test image: the four measured facts against a
   real repository with real worktrees, `git worktree list` and the branch set byte-identical before
-  and after the report, a clean checkout exiting 0, a failing `gh` exiting 2, the guard's four
-  directions, the Makefile wiring, and both skills' prohibition.
+  and after the report, a clean checkout exiting 0, a failing `gh` exiting 2, the guard's directions
+  (bot, CI, host-dispatched lane, owner, CONFIRM), the Makefile wiring, both skills' prohibition, the
+  leg roster and the marker-list drift check.
 - `make test-unit` in `llgenie/test:latest`: **14562 passed, 6 deselected in 3508 s**, exit 0 (two
   earlier attempts were killed by the host with Error 137 — the suite is memory-heavy here).
 - On this host: `make worktree-report` printed 48 worktrees, `summary total=48 stale=13
