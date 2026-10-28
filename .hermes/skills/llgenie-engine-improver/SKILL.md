@@ -59,6 +59,10 @@ the bottom.
 ## Rules
 
 - Never merge, squash, auto-merge or push to `main`. Stop at the reviewable PR.
+- **Never build an inference-server engine image locally.** CI builds and publishes every
+  engine x arch cell; this host pulls and RUNS. No `make build-engine*`, no `docker build`, no
+  source compile. A locally built image proves nothing about the artifact users pull, and a
+  missing tag means CI has not published yet — not that you should build it.
 - Never write a number, a flag, a pin or a version that did not come from real output. Report the
   blocking step and the alternative instead of a plausible guess.
 - A generated artifact edited by hand is reverted by its `check-*` gate: land the change in the
@@ -118,24 +122,25 @@ make check-engine-params check-engine-coverage check-engine-source
   so it silently never enters the build matrix. After adding a skill, assert a Dockerfile exists for
   every declared backend.
 
-## Step 3 — rebuild locally and prove the pinned sha
+## Step 3 — never build an engine image locally; pull the published one
 
-Host: RTX 4090 Laptop GPU (AD103M, 16 GiB, driver 615.78.08), docker 29.9.1, NVIDIA CDI present
-(`nvidia.com/gpu=all`) — so `cuda` variants run here.
+**The engine BUILD belongs to CI.** `engine-build.yml` builds every engine x arch cell from the
+committed params and publishes `ghcr.io/asimov-agent/llgenie/<id>:<hash>-<arch>`. This host does NOT
+compile an engine: no `make build-engine` / `build-engine-base` / `build-engines`, no `docker build`,
+no source checkout, no toolchain bake here. Local GPU time and disk are for RUNNING.
 
-```bash
-make build-engine-base ARCH=cuda           # once per toolchain change
-make build-engine ENGINE=<id> ARCH=cuda VERIFY=1
-make build-engine ENGINE=<id> ARCH=cpu     # cheap correctness cell
-make build-engines ENGINE=<id> JOBS=<n>    # every backend the params declare
-```
-
-- Proof is the image printing the PINNED version, not "an image exists": read the image's own `detect`
-  output and match a version shape (semver, or `pin <sha7+>`). A timestamped log line with digits is
-  not a version.
-- A GPU-less runner cannot answer a `--version` that probes the device (`libcuda.so.1` ImportError);
-  package metadata proves the wheels are installed, not that the binary runs — a weaker verdict,
-  counted separately.
+- After a params change, the local action is to wait for that CI cell and PULL:
+  `docker pull ghcr.io/asimov-agent/llgenie/<id>:<hash>-<arch>`, or `make engine-launchers ENGINES=<id>`
+  which resolves the exact tag the launcher will use.
+- A missing tag means the CI cell has not published yet — check the workflow run. Never fall back to
+  building it here: a locally built image is unverifiable against the pinned sha and diverges from
+  what every user pulls, so a "pass" would prove nothing about the artifact that ships.
+- Proof of an engine is the PUBLISHED image answering its own `detect` command with the pinned
+  version — match a version shape (semver, or `pin <sha7+>`), never merely digits; a timestamped log
+  line satisfies `\d+\.\d+`.
+- A GPU-less CI runner cannot answer a `--version` that probes the device (`libcuda.so.1`
+  ImportError); package metadata proves the wheels are installed, not that the binary runs — a weaker
+  verdict, counted separately.
 - The image TAG is derived from the params: edit a start/`pre_launch` step and the launcher resolves a
   tag that does not exist locally or in GHCR yet. Check `docker images` and the
   `engine-image-<id>-<arch>` job before saying "test it now".
@@ -160,7 +165,7 @@ make build-engines ENGINE=<id> JOBS=<n>    # every backend the params declare
      quant/shards; the runtime args are the engine's own.
 4. **A tuning claim needs a number from a real run** — `llama-bench` or the server's own reported
    timings, old vs new params on the SAME image, model and quant. No output, no number.
-5. **Land the tuned value in the SKILL, then regenerate**; re-run step 3 so the image matches.
+5. **Land the tuned value in the SKILL, then regenerate**; let the CI image cell rebuild and publish the new tag and PULL it (step 3) before running, so the proof is the shipped artifact.
 
 ## Step 5 — improve the picker and the trend selection
 
