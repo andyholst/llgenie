@@ -138,6 +138,20 @@ def serve_plan(p: dict, model: str, host: str, port: int, drafter: str = "",
                 print(open(log, errors="replace").read()[-3000:], file=sys.stderr)
             return 1
         time.sleep(1)
+    if proc.poll() is not None:
+        # The server died before it answered. Its output went to a log file inside a
+        # container the caller is about to remove, so without this the user sees a bare
+        # exit code and no reason (a ternary GGUF on stock llama.cpp: "invalid ggml type
+        # 142", printed nowhere).
+        print(f"[engine-runner] FAIL {p['id']}/{p['backend']}: server exited {proc.returncode} "
+              f"before it was ready on {host}:{port}", file=sys.stderr)
+        try:
+            tail = open(serve_log, errors="replace").read()[-3000:]
+        except OSError:
+            tail = ""
+        if tail.strip():
+            print(tail, file=sys.stderr)
+        return proc.returncode
     if proc.poll() is None:
         if p.get("post_launch"):
             _bash(pre + r(p["post_launch"]), check=True)
