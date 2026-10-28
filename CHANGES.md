@@ -11,6 +11,7 @@ index, or when a row here names a note that does not exist.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-28 | the two host agents' `SOUL.md` and skills have a home in the tree (`agents/<profile>/`), a `make sync-agent-profile` seam into `~/.hermes/profiles/<p>/` and `make check-agent-profiles` in `ci-unit` | [2026-10-28-agent-profiles-tree.md](agent-wiki/2026-10-28-agent-profiles-tree.md) | #791 |
 | 2026-10-28 | a shipped engine the CI matrix never builds (disabled cell, non-CI variant, no linux image) is now red in `ci-unit`: `make check-engine-coverage` + the ordered new-engine flow | [2026-10-28-engine-ci-coverage.md](agent-wiki/2026-10-28-engine-ci-coverage.md) | #771 |
 | 2026-10-27 | a new registry engine's tracking issue is queued for the bots (`agent:implement`, set explicitly and read back), and `make engine-skill-scaffold` writes its skill with every unprovable key left empty | [2026-10-27-engine-skill-automation.md](agent-wiki/2026-10-27-engine-skill-automation.md) | #757 |
 | 2026-10-27 | the per-engine spawn runs on `always()` with a change guard, and its recipe re-checks the diff, so a red sync still files the work item that explains it | [2026-10-27-registry-sync-spawn-always.md](agent-wiki/2026-10-27-registry-sync-spawn-always.md) | #758 |
