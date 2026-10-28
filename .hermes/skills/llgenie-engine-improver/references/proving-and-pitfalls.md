@@ -3,6 +3,24 @@
 Extracted from SKILL.md to keep the always-on body small; load it when you are about to
 prove a fix, hit one of these traps, or touch `.hermes/skills`.
 
+## Reading a CI failure without the runner's log stream
+
+`gh run view --log-failed` answers "still in progress; logs will be available when it completes" and
+`gh run view --job <id>` returns 0 bytes with the pinned token — a CLI guard, **not** an API limit.
+The API serves the log:
+
+```bash
+gh api repos/<owner>/<repo>/actions/jobs/<job-id>/logs --allow-escape-sequences \
+  | sed 's/\x1b\[[0-9;]*m//g' > /tmp/job.log
+grep -m1 'not published yet' /tmp/job.log | cut -c1-30     # first poll
+grep 'not published yet' /tmp/job.log | tail -1 | cut -c1-30   # last poll -> budget actually spent
+grep -c 'not published yet' /tmp/job.log                  # 90 polls x 20 s = 30 min, confirmed
+```
+
+That timing is what separates "the wait gave up too early" from "nothing ever produced the
+artifact": 90 polls across exactly 30 minutes means the documented budget was honoured and the
+producer job never ran — an ordering/capacity defect (#893), not a bad tag.
+
 ## Proving a fix, and cutting the branch it ships on
 
 **Work in a worktree, never in the primary checkout.** `/home/asimov/repository/git/llgenie` is the
@@ -77,6 +95,18 @@ you inherit is usually sitting on somebody else's PR branch. Both have a recipe.
 - **A long backoff with no output is indistinguishable from a hang.** Any wait loop over the
   network (a Hub 429, a retry ladder) must print what it is waiting for and for how long, on
   stderr. A silent multi-minute park gets reported to the user as a broken tool.
+- **"That branch was never pushed" is a claim about ONE remote.** Ask each remote before you accept
+  it: `git ls-remote origin <ref>` and `git ls-remote fork <ref>`. A branch pushed only to the fork
+  looks absent from `origin` and gets reported as a single copy on one disk; re-pushing "for
+  insurance" then starts publish-capable CI nobody wanted. Check both, quote the one that answered.
+- **A test failure that reproduces on `main` is not your regression.** Before attributing it, run the
+  same file on the untouched checkout. Some files are host-only by design and refuse a bare run —
+  their own assert names the make target that runs them
+  (`…assert BACKEND …, "run through make <target> BACKEND=…"`). Report it as pre-existing with both
+  runs quoted, never as "my change broke the suite".
+- **A commit message or PR body must not invent an issue number.** If the work has no issue, or the
+  number arrived later, drop the reference and write the summary — a wrong `#NNN` sends reviewers to
+  unrelated context and cannot be retracted once quoted.
 
 ## Versioning this skill in the repo (the `.hermes/skills` gate)
 
