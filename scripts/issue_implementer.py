@@ -302,6 +302,42 @@ def _pick_free(gh: str, repo: str, cands: list[dict]) -> dict | None:
     return None
 
 
+#: The title `engine_skill_gap.issue_title()` gives a tracking issue for a registry engine llgenie
+#: does not ship (#229). The engine name is captured, because picking that issue means WRITING the
+#: skill — and the image is generated from it, so a blank page is the one thing the run cannot afford.
+ENGINE_ISSUE_RE = re.compile(
+    r"^engine: (?P<engine>.+) has no llgenie skill \(unskilled registry engine from the weekly sync\)$")
+
+
+def engine_scaffold_line(title: str, out_dir: Path | None = None) -> str:
+    """For an engine-skill tracking issue: write the skill file, return the line issue.md carries.
+
+    A plain implementation issue gets `""` back and nothing is written. This is deterministic on
+    purpose — the agent is told the file exists and what is still empty, instead of being asked to
+    remember the required front-matter key set (`engine_skills.REQUIRED_KEYS`) from source.
+    """
+    m = ENGINE_ISSUE_RE.match((title or "").strip())
+    if not m:
+        return ""
+    engine = m.group("engine")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import engine_skill_scaffold as scaf
+    try:
+        r = scaf.scaffold(engine, out=out_dir or Path(os.environ.get("LLGENIE_SCAFFOLD_DIR")
+                                                      or scaf.SKILLS_DIR))
+    except SystemExit as e:
+        return (f"SCAFFOLD: `{engine}` could not be scaffolded — {e}\n\n"
+                f"Run `make engine-skill-scaffold ENGINE=\"{engine}\"` once `data/models.json` names it, "
+                "or record the dated decision in `data/unsupported-engines.json`.")
+    if r["written"]:
+        return (f"SCAFFOLD: `make engine-skill-scaffold ENGINE=\"{engine}\"` wrote `{r['path']}` "
+                f"(backends {', '.join(r['backends'])}). Every key it could not prove is EMPTY — fill "
+                "them from the pinned upstream repo, never from memory, then run "
+                f"`make generate-engine-params ENGINE={r['id']}`.")
+    return (f"SCAFFOLD: `{r['path']}` already exists ({r['reason']}) — keep it and fill what is empty "
+            f"rather than rewriting it; `make generate-engine-params ENGINE={r['id']}` is the next step.")
+
+
 def dispatch(gh: str, repo: str, bot: str, dry: bool = False, today: str | None = None,
              out_path: Path = Path("issue.md"), force_issue: int | None = None) -> dict:
     """Apply the cap, pick ONE issue, claim it, and emit the branch + issue.md."""
@@ -337,8 +373,15 @@ def dispatch(gh: str, repo: str, bot: str, dry: bool = False, today: str | None 
 
     branch = f"agent/issue-{num}-{_slug(title)}"
     comments = list(detail.get("comments") or [])
-    out_path.write_text(render_issue_md(detail | {"title": detail.get("title") or title}, comments))
+    # An engine-skill tracking issue is a WRITE-this-file issue: the scaffold runs HERE (deterministic,
+    # before the agent starts) and issue.md names the file it wrote and what is still empty. A dry run
+    # writes nothing, the same as the claim comment below.
+    scaffold = "" if dry else engine_scaffold_line(detail.get("title") or title)
+    text = render_issue_md(detail | {"title": detail.get("title") or title}, comments)
+    out_path.write_text(text + (f"\n\n## Scaffold\n\n{scaffold}\n" if scaffold else ""))
     print(f"[issue-implementer] issue.md: body + {len(comments)} comment(s) + the decision block")
+    if scaffold:
+        print(f"[issue-implementer] {scaffold.splitlines()[0]}")
 
     if not dry:
         _gh(gh, ["issue", "comment", str(num), "--repo", repo, "--body",

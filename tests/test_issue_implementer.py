@@ -808,3 +808,97 @@ def test_a_second_refine_of_an_already_refined_issue_is_refused(monkeypatch):
 
     # Then  nothing was posted and no label was added
     assert not [c for c in calls if c[:2] == ["issue", "comment"]], calls
+
+
+# ---------------------------------------------------------------------------
+# an engine-skill tracking issue is scaffolded BEFORE the agent starts (#757)
+# ---------------------------------------------------------------------------
+def _engine_issue_title(engine="BrandNewServer"):
+    return f"engine: {engine} has no llgenie skill (unskilled registry engine from the weekly sync)"
+
+
+def _engine_registry(tmp_path: Path) -> Path:
+    """A registry that names the engine, in the shape `model_engine_pick.load_registry` reads."""
+    reg = tmp_path / "models.json"
+    reg.write_text(json.dumps({"generated_utc": "2026-10-27T00:00:00Z",
+                               "engines": {"BrandNewServer": {
+                                   "backend": "CUDA / ROCm",
+                                   "url": "https://github.com/acme/brand-new-server"}},
+                               "models": []}))
+    return reg
+
+
+def test_dispatch_scaffolds_the_skill_of_an_engine_tracking_issue(tmp_path, monkeypatch):
+    """The skill file exists before the agent reads issue.md, and issue.md says so."""
+
+    # Given an engine tracking issue in the queue and an empty skills dir
+    title = _engine_issue_title()
+    gh, log = _fake_gh(tmp_path, {"labeled": [{"number": 77, "title": title,
+                                               "createdAt": "2026-10-01T00:00:00Z",
+                                               "labels": [{"name": "agent:implement"}]}],
+                                  "view": {"number": 77, "title": title, "body": "the engine is new",
+                                           "state": "open", "author": {"login": "asimov-agent"},
+                                           "labels": [{"name": "agent:implement"}], "comments": []}})
+    skills = tmp_path / "skills"
+    monkeypatch.setenv("LLGENIE_SCAFFOLD_DIR", str(skills))
+    monkeypatch.setenv("LLGENIE_REGISTRY_SRC", str(_engine_registry(tmp_path)))
+    out = tmp_path / "issue.md"
+
+    # When the dispatcher picks it
+    r = ii.dispatch(str(gh), f"{OWNER}/{REPO_NAME}", ii.BOT_AUTHOR, today="2026-10-27", out_path=out)
+
+    # Then the skill file was written from the registry's own entry…
+    written = skills / "brandnewserver" / "SKILL.md"
+    assert written.exists(), sorted(p.name for p in skills.iterdir()) if skills.exists() else []
+    body = written.read_text()
+    assert "https://github.com/acme/brand-new-server" in body and "backends: [cuda, rocm]" in body
+
+    # …and the agent's input names it, with what is still empty and the next command
+    text = out.read_text()
+    assert "## Scaffold" in text and "SCAFFOLD:" in text
+    assert str(written) in text
+    assert "generate-engine-params" in text and "EMPTY" in text
+    assert r["issue"] == 77
+
+
+def test_dispatch_scaffolds_nothing_for_a_plain_issue(tmp_path, monkeypatch):
+    """A normal issue is untouched: no file, no section, no noise."""
+
+    # Given a plain implementation issue
+    gh, _log = _fake_gh(tmp_path, {"labeled": [{"number": 11, "title": "Fix the thing #11",
+                                                "createdAt": "2026-10-01T00:00:00Z",
+                                                "labels": [{"name": "agent:implement"}]}],
+                                   "view": _thread_view()})
+    skills = tmp_path / "skills"
+    monkeypatch.setenv("LLGENIE_SCAFFOLD_DIR", str(skills))
+    out = tmp_path / "issue.md"
+
+    # When the dispatcher picks it
+    ii.dispatch(str(gh), f"{OWNER}/{REPO_NAME}", ii.BOT_AUTHOR, today="2026-10-27", out_path=out)
+
+    # Then nothing is scaffolded and issue.md carries no Scaffold section
+    assert not skills.exists()
+    assert "## Scaffold" not in out.read_text()
+
+
+def test_a_dry_dispatch_scaffolds_nothing(tmp_path, monkeypatch, capsys):
+    """A preview writes no file, exactly like the claim comment it also skips."""
+
+    # Given an engine tracking issue and a dry dispatch
+    title = _engine_issue_title()
+    gh, _log = _fake_gh(tmp_path, {"labeled": [{"number": 77, "title": title,
+                                                "createdAt": "2026-10-01T00:00:00Z",
+                                                "labels": [{"name": "agent:implement"}]}],
+                                   "view": {"number": 77, "title": title, "body": "b", "state": "open",
+                                            "author": {"login": "asimov-agent"},
+                                            "labels": [{"name": "agent:implement"}], "comments": []}})
+    skills = tmp_path / "skills"
+    monkeypatch.setenv("LLGENIE_SCAFFOLD_DIR", str(skills))
+    monkeypatch.setenv("LLGENIE_REGISTRY_SRC", str(_engine_registry(tmp_path)))
+
+    # When it runs with dry=True
+    ii.dispatch(str(gh), f"{OWNER}/{REPO_NAME}", ii.BOT_AUTHOR, dry=True, today="2026-10-27",
+                out_path=tmp_path / "issue.md")
+
+    # Then no skill file exists
+    assert not skills.exists()

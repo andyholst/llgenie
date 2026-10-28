@@ -91,7 +91,12 @@ previews). Nothing is published without drift, and the bot never merges.
    `make engine-skill-gap` / `make spawn-engine-skill-issues`
    (`data/engine-skill-gap.json`, `data/unsupported-engines.json`), and
    `make check-engine-skill-gap` (in `make ci-unit`) keeps a registry that names a new
-   engine red until it ships a skill or a dated decision (issue #683).
+   engine red until it ships a skill or a dated decision (issue #683). The tracking issue
+   the sync files is labelled `agent:implement` explicitly and read back (the create-flag
+   label is dropped on the CI token path, #724/#757), and it names
+   `make engine-skill-scaffold ENGINE="<registry name>"` — the target that writes the
+   skill from the registry's own entry and leaves every unprovable key EMPTY, so
+   `make skills-validate` names the remaining work rather than a guessed pin building.
 6. **Engine image** — `make build-engine ENGINE=<id> ARCH=<arch>` builds strictly from the
    generated params and Dockerfile with plain make; the shared toolchain layer under it is
    `make build-engine-base BACKEND=<cpu|cuda|rocm|vulkan>` (`PUSH=1` publishes it).

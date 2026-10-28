@@ -325,7 +325,14 @@ make check-engine-skill-gap    # CI gate: fail on a registry engine with no skil
 make engine-skill-gap          # show that gap (shipped / known-unsupported / NEW-unresolved)
 make engine-skill-gap-md       # the same gap as MARKDOWN, for a PR/issue body (the registry-sync
                                # workflow embeds it, so the step calls a make target - issue #296)
-make spawn-engine-skill-issues # open one tracking issue per NEW unskilled engine (the sync does this)
+make spawn-engine-skill-issues # open one tracking issue per NEW unskilled engine (the sync does this),
+                               # labelled `agent:implement` and read back — an unlabelled issue routes to
+                               # no bot, so the label is applied explicitly and verified (issue #724)
+make engine-skill-scaffold ENGINE="<registry name>"  # write skills/engines/<id>/SKILL.md from the
+                               # registry's own entry (engine, repo, backends); every key it cannot
+                               # prove is left EMPTY so `make skills-validate` names it (ID= overrides
+                               # the kebab, BACKENDS= when the registry names none, OUT=/REGISTRY= pick
+                               # another tree/store, DRY=1 previews, FORCE=1 overwrites a skill)
 make check-wiring              # CI: fail when a test/script is wired to no make target, or only to
                                # one CI never runs (tests/fixtures/host-only-wiring.json records the
                                # deliberate ones), a workflow calls a make target that does not exist,

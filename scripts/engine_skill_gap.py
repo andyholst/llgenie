@@ -46,6 +46,13 @@ GAP_FILE = REPO / "data" / "engine-skill-gap.json"
 UNSUPPORTED_FILE = REPO / "data" / "unsupported-engines.json"
 ARCHS = ("cuda", "rocm", "vulkan", "metal", "cpu")
 ISSUE_LABEL = "bug"
+# The label that puts the issue in the queue `scripts/issue_implementer.py` reads
+# (`agent:implement` first, then `agent:ready`). Without it a spawned tracking issue is
+# a dead end: the sync's only automation would be "file work" and the skill would still
+# wait for a human to notice (#757). It is set EXPLICITLY after the create and read back,
+# because `gh issue create --label` has been measured to be dropped on the CI token path
+# (#724) — the issue existing and the issue being labelled are two different facts.
+QUEUE_LABEL = "agent:implement"
 
 
 def _model_engines(model: dict) -> list[str]:
@@ -252,9 +259,16 @@ def issue_body(name: str, registry: dict, g: dict) -> str:
             "decision or a shipped skill, not a gap nobody sees."
         ),
         how=[
-            f"Ship the skill: add `skills/engines/<kebab>/SKILL.md` for `{name}` (README + build "
-            "docs at a pinned sha), run `make generate-engine-params ENGINE=<kebab>`, commit the "
-            "Dockerfile and params, and let CI build the engine image (`engine-image-*`).",
+            f"Scaffold the skill file: `make engine-skill-scaffold ENGINE=\"{name}\"` writes "
+            "`skills/engines/<kebab>/SKILL.md` from the registry's own entry (engine name, repo, "
+            "backend) with every key it cannot prove left EMPTY, so `make skills-validate` names "
+            "exactly what is still missing instead of a blank page.",
+            f"Fill the upstream facts from the pinned repo (never a guess): `ref`/`ref_kind`/"
+            "`pinned`, `license`, `install.<backend>` steps from its Dockerfile/README, and "
+            "`binary`/`detect`/`launch`/`health`/`alias_mode` for its OpenAI server. Run "
+            "`make generate-engine-params ENGINE=<kebab>` and commit the params + Dockerfiles.",
+            "Let CI build it: `engine-image-*` picks the new engine x backend up from "
+            "`containers/engines/params/` with no workflow edit.",
             "Or record the deliberate decision in `data/unsupported-engines.json` (`decision`, "
             "`decided`, `reason`) so the omission is a decision with a date and a reason.",
             "Either way the registry stays as upstream published it: llgenie never edits the "
@@ -292,6 +306,29 @@ def _gh(gh: str, args: list[str]) -> str:
     return r.stdout
 
 
+def _issue_labels(gh: str, repo: str, number: int) -> list[str]:
+    """The labels GitHub reports for one issue — the read-back, never an assumption."""
+    out = _gh(gh, ["issue", "view", str(number), "--repo", repo, "--json", "labels"])
+    return [l.get("name") for l in (json.loads(out or "{}").get("labels") or [])]
+
+
+def ensure_queue_label(gh: str, repo: str, number: int, dry: bool = False) -> bool:
+    """Put the issue in the bots' queue, then PROVE it: returns True when labelled.
+
+    `--label` on create is silently dropped on the CI token path (#724), so the label is
+    also applied explicitly to an issue that already exists and lost it, and read back.
+    A missing queue label is a loud failure naming the issue — an unlabelled tracking
+    issue routes the work to nobody, which looks exactly like a green run.
+    """
+    if QUEUE_LABEL in _issue_labels(gh, repo, number):
+        return True
+    if dry:
+        print(f"[engine-skill-gap] would label #{number} {QUEUE_LABEL}")
+        return True
+    _gh(gh, ["issue", "edit", str(number), "--repo", repo, "--add-label", QUEUE_LABEL])
+    return QUEUE_LABEL in _issue_labels(gh, repo, number)
+
+
 def open_issue(gh: str, repo: str, name: str, body: str, dry: bool = False) -> dict:
     """Open the tracking issue for one unresolved engine, or report the open one."""
     title = issue_title(name)
@@ -299,12 +336,22 @@ def open_issue(gh: str, repo: str, name: str, body: str, dry: bool = False) -> d
                                "--json", "number,title", "--search", f'in:title "{title}"']) or "[]")
     hit = next((i for i in have if i["title"] == title), None)
     if hit:
+        if not ensure_queue_label(gh, repo, hit["number"], dry):
+            raise SystemExit(f"[engine-skill-gap] #{hit['number']} ({name}) exists but does not carry "
+                             f"{QUEUE_LABEL}: no bot will pick it up. Add the label and re-run.")
         return {"engine": name, "action": "existing", "number": hit["number"], "url": ""}
     if dry:
         return {"engine": name, "action": "would-create", "number": None, "url": ""}
-    out = _gh(gh, ["issue", "create", "--repo", repo, "--title", title, "--body", body, "--label", ISSUE_LABEL])
+    out = _gh(gh, ["issue", "create", "--repo", repo, "--title", title, "--body", body,
+                   "--label", ISSUE_LABEL])
     url = out.strip().splitlines()[-1] if out.strip() else ""
     number = int(url.rstrip("/").rsplit("/", 1)[-1]) if url.rstrip("/").rsplit("/", 1)[-1].isdigit() else None
+    if number is None:
+        raise SystemExit(f"[engine-skill-gap] the created issue for {name} returned no number "
+                         f"(gh said {url!r}); cannot label or link it")
+    if not ensure_queue_label(gh, repo, number, dry):
+        raise SystemExit(f"[engine-skill-gap] #{number} ({name}) was created but does not carry "
+                         f"{QUEUE_LABEL}: no bot will pick it up. Add the label and re-run.")
     return {"engine": name, "action": "created", "number": number, "url": url}
 
 

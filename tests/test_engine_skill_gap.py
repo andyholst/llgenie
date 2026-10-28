@@ -272,17 +272,27 @@ def test_the_october_fixture_registry_validates_with_the_real_decisions():
 # ---------------------------------------------------------------------------
 # the visible artifact: one tracking issue per unresolved engine
 # ---------------------------------------------------------------------------
-def _fake_gh(tmp_path: Path, open_issues: list | None = None, create_fails: bool = False):
+def _fake_gh(tmp_path: Path, open_issues: list | None = None, create_fails: bool = False,
+             label_sticks: bool = True):
     """`gh` that records every argv as ONE JSON line and answers `issue list` with
-    `open_issues` and `issue create` with a URL. It is a real executable the product
-    starts as a subprocess — only the GitHub API is a stand-in, never the request the
-    product builds (`tests/test_ci_images.py` does the same for `docker`)."""
+    `open_issues`, `issue create` with a URL, and `issue view`/`issue edit` from a label
+    store. It is a real executable the product starts as a subprocess — only the GitHub
+    API is a stand-in, never the request the product builds (`tests/test_ci_images.py`
+    does the same for `docker`).
+
+    `issue create` stores NO label: that is the measured CI behaviour (#724), where the
+    issue exists and `--label` was silently dropped. `label_sticks=False` makes `issue
+    edit --add-label` a no-op as well — the case where the queue label cannot be applied
+    at all.
+    """
     tmp_path.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "gh.log"
     listing = tmp_path / "open.json"
     listing.write_text(json.dumps(open_issues or []))
     counter = tmp_path / "n"
     counter.write_text("500")
+    labels = tmp_path / "labels.json"
+    labels.write_text(json.dumps({}))
     gh = tmp_path / "gh"
     gh.write_text(f'''#!{sys.executable}
 import json, sys, pathlib
@@ -298,6 +308,19 @@ elif args[:2] == ["issue", "create"]:
     n = int(pathlib.Path({str(counter)!r}).read_text()) + 1
     pathlib.Path({str(counter)!r}).write_text(str(n))
     print(f"https://github.com/acme/llgenie/issues/{{n}}")
+elif args[:2] == ["issue", "view"]:
+    data = json.loads(pathlib.Path({str(labels)!r}).read_text())
+    print(json.dumps({{"labels": [{{"name": x}} for x in data.get(args[2], [])]}}))
+elif args[:2] == ["issue", "edit"]:
+    n = args[2]
+    want = args[args.index("--add-label") + 1] if "--add-label" in args else None
+    store = pathlib.Path({str(labels)!r})
+    data = json.loads(store.read_text())
+    if {bool(label_sticks)!r} and want:
+        data.setdefault(n, [])
+        if want not in data[n]:
+            data[n].append(want)
+        store.write_text(json.dumps(data))
 ''')
     gh.chmod(0o755)
     return gh, log
@@ -392,10 +415,13 @@ def test_spawn_is_idempotent_and_creates_nothing_for_a_decided_engine(tmp_path):
                          "--repo", "acme/llgenie", "--gh", str(gh2)],
                         capture_output=True, text=True, timeout=120)
 
-    # Then it reports the open issue and creates no duplicate
+    # Then it reports the open issue, creates no duplicate, and puts it in the bots' queue
     assert r2.returncode == 0, r2.stderr
     calls = _calls(log2)
-    assert [c[:2] for c in calls] == [["issue", "list"]]
+    assert not [c for c in calls if c[:2] == ["issue", "create"]]
+    assert [c[:2] for c in calls if c[:2] == ["issue", "edit"]] == [["issue", "edit"]]
+    edit = next(c for c in calls if c[:2] == ["issue", "edit"])
+    assert edit[edit.index("--add-label") + 1] == gap_mod.QUEUE_LABEL
     assert "existing: BrandNewServer" in r2.stdout and "#42" in r2.stdout
 
 
@@ -442,6 +468,65 @@ def test_spawn_dry_reports_the_issue_it_would_open(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "would-create: BrandNewServer" in r.stdout
     assert not [c for c in _calls(log) if c[:2] == ["issue", "create"]]
+
+
+# ---------------------------------------------------------------------------
+# the link the sync was missing: the tracking issue is QUEUED for the bots
+# ---------------------------------------------------------------------------
+def _unresolved_registry(tmp_path: Path) -> tuple[Path, Path]:
+    """A registry naming one engine llgenie does not ship, and the real decisions file."""
+    _registry, _skills, unsupported = gap_mod.inventories()
+    new = json.loads(REGISTRY.read_text())
+    new["engines"]["BrandNewServer"] = {"backend": "CUDA", "url": "https://example.invalid/new"}
+    return (_write(tmp_path / "models.json", new),
+            _write(tmp_path / "unsupported-engines.json", unsupported))
+
+
+def test_a_spawned_tracking_issue_lands_in_the_bots_queue(tmp_path):
+    """The issue the sync files is one the implementer bot actually reads."""
+
+    # Given an unresolved registry engine and a gh whose `issue create` DROPS the label,
+    # which is the measured CI behaviour (`gh issue create --label` is silently dropped)
+    reg_file, manifest = _unresolved_registry(tmp_path)
+    gh, log = _fake_gh(tmp_path)
+
+    # When spawn runs
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "engine_skill_gap.py"), "spawn",
+                        "--registry", str(reg_file), "--unsupported", str(manifest),
+                        "--repo", "acme/llgenie", "--gh", str(gh)],
+                       capture_output=True, text=True, timeout=120)
+
+    # Then the step is green and the queue label was applied EXPLICITLY after the create…
+    assert r.returncode == 0, r.stderr
+    calls = _calls(log)
+    edits = [c for c in calls if c[:2] == ["issue", "edit"]]
+    assert len(edits) == 1, calls
+    assert edits[0][edits[0].index("--add-label") + 1] == gap_mod.QUEUE_LABEL
+    assert edits[0][edits[0].index("--repo") + 1] == "acme/llgenie"
+
+    # …and READ BACK, so "the issue exists" and "the issue is queued" are both true
+    views = [c for c in calls if c[:2] == ["issue", "view"]]
+    assert views and "--json" in views[0] and "labels" in views[0]
+    state = json.loads((tmp_path / "labels.json").read_text())
+    assert gap_mod.QUEUE_LABEL in state["501"]
+
+
+def test_a_tracking_issue_that_cannot_be_labelled_fails_the_step_naming_it(tmp_path):
+    """An unlabelled issue routes to nobody: that is a red step, never a quiet pass."""
+
+    # Given the same sync, and a gh where the label never sticks
+    reg_file, manifest = _unresolved_registry(tmp_path)
+    gh, _log = _fake_gh(tmp_path, label_sticks=False)
+
+    # When spawn runs
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "engine_skill_gap.py"), "spawn",
+                        "--registry", str(reg_file), "--unsupported", str(manifest),
+                        "--repo", "acme/llgenie", "--gh", str(gh)],
+                       capture_output=True, text=True, timeout=120)
+
+    # Then it fails loudly, naming the issue and the label
+    assert r.returncode == 1
+    assert gap_mod.QUEUE_LABEL in r.stderr and "501" in r.stderr
 
 
 # ---------------------------------------------------------------------------
