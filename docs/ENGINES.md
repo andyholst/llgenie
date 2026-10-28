@@ -239,11 +239,31 @@ Every build (`make install`, `make build-variant`, `make build-engine`, `make ru
 `make test-engine`, CI) reads the generated, committed files under `containers/engines/`.
 A unit test builds from a copy of the repo with `skills/` deleted.
 
+**Order, for a new engine — what runs and what each step proves:**
+
+1. `registry-sync` vendors the engine into `data/models.json` and files its tracking issue
+   (`make spawn-engine-skill-issues`); `make check-engine-skill-gap` (ci-unit) keeps the sync PR
+   red until the engine has a skill or a dated decision in `data/unsupported-engines.json`.
+2. The skill lands as `skills/engines/<id>/SKILL.md`; `make skills-validate` refuses a malformed one
+   and a `servable: true` linux engine whose container spec is absent.
+3. `make generate-engine-params` writes the params, the binaries manifest and one Dockerfile per
+   arch; `make check-engine-params` fails when what is committed differs from the skills.
+4. `make check-engine-coverage` fails when the params exist but the matrix will never BUILD them — a
+   cell in `DISABLED`, a variant outside `CI_VARIANTS`, or no `linux` image — unless the engine is a
+   recorded `KNOWN_UNBUILT` exception. `make engine-coverage-report` prints the same census.
+5. CI's `engine-image-*` matrix (`make list-engine-images CI=1`) builds each cell, `make
+   test-engine-stage` runs its probe, `make push-engine` publishes it after that passes, and
+   `engine-published-test` pulls it back and chats with it (`make test-published-engine`).
+
+Steps 2–4 are one `make ci-unit` run on every PR; step 5 runs on the same PR and again on `main`.
+
 Two steps that are never mixed:
 
 ```
 make generate-engine-params          # skills -> params/<engine>.json + dockerfiles/<engine>/Dockerfile.<arch> (commit them)
 make check-engine-params             # CI: fail if the committed params are stale
+make check-engine-coverage           # CI: fail if a shipped servable engine has no buildable CI cell (disabled / no linux / no params) and no recorded exception
+make engine-coverage-report          # the census: every shipped engine -> built | not-an-image | unbuilt (with its #103 reason)
 make check-engine-source             # CI: fail if a cell says prebuilt=false but its install steps only download a wheel/archive
 make engine-source-report            # the census: source-built vs prebuilt cells, and every tracked exception
 make build-engine ENGINE=llama.cpp-prism                 # image for THIS machine's backend (cuda here)

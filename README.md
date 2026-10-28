@@ -325,6 +325,11 @@ make check-engine-skill-gap    # CI gate: fail on a registry engine with no skil
 make engine-skill-gap          # show that gap (shipped / known-unsupported / NEW-unresolved)
 make engine-skill-gap-md       # the same gap as MARKDOWN, for a PR/issue body (the registry-sync
                                # workflow embeds it, so the step calls a make target - issue #296)
+make check-engine-coverage      # CI gate: fail when a shipped servable engine has no buildable CI
+                               # image cell (a cell in DISABLED, a variant outside cpu|cuda|rocm|vulkan,
+                               # or no linux image) and no recorded exception (issue #771)
+make engine-coverage-report     # every shipped engine -> built | not-an-image | unbuilt, with the
+                               # reason; a KNOWN_UNBUILT entry that is now built fails as stale
 make spawn-engine-skill-issues # open one tracking issue per NEW unskilled engine (the sync does this),
                                # labelled `agent:implement` and read back — an unlabelled issue routes to
                                # no bot, so the label is applied explicitly and verified (issue #724)
