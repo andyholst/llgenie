@@ -2037,3 +2037,7 @@ in stderr, retried within the same bound, and named at the bound instead of esca
 38-minute macOS stage.
 
 ---
+
+### Import roots
+
+`make check-import-roots` refuses a test file that carries its own `sys.path` entry (only `tests/conftest.py` may) or imports a `scripts/` module bare, and it **ratchets** against `tests/fixtures/import-roots-baseline.json`: the count may fall as the migration batches land and may never rise, so the guard can ship before the migration finishes (issue #796).
