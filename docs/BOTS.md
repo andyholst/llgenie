@@ -102,8 +102,8 @@ re-reads an existing file against the live tree and prints the FIRST field that 
 that reused a stale record is caught before it writes anything.
 
 **The PR carries the line.** `make check-pr-hygiene` rejects a bot PR whose body has no `AGENTS:`
-line, whose sha is not `git merge-base origin/main HEAD`, or whose counts are not `AGENTS.md` at that
-sha. A PR is a **bot PR** when every commit it adds is authored by `Asimov Agent
+line, whose sha is not a `main` commit the PR contains (an ancestor of both the branch and the base),
+or whose counts are not `AGENTS.md` at that sha. A PR is a **bot PR** when every commit it adds is authored by `Asimov Agent
 <support@docondee.com>` — the repository's bot identity; a human-authored PR is skipped, because a
 rule a person never reads must not turn their PR red. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
 line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` in `ci-unit`, or

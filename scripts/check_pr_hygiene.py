@@ -63,7 +63,7 @@ AGENTS = "AGENTS.md"
 #: The line a bot PR body carries, verbatim: `AGENTS: <main sha> <bytes>b <lines>l` (issue #792).
 AGENTS_LINE = re.compile(r"(?m)^AGENTS: (?P<sha>[0-9a-f]{40}) (?P<bytes>\d+)b (?P<lines>\d+)l$")
 #: What that line must look like, quoted in a finding so a reader can fix it without the spec.
-AGENTS_LINE_SHAPE = "AGENTS: <sha of git merge-base origin/main HEAD> <bytes of AGENTS.md>b <lines>l"
+AGENTS_LINE_SHAPE = "AGENTS: <sha of a main this branch contains> <bytes of AGENTS.md at that sha>b <lines>l"
 #: The identity this repository's bots commit as. A PR is a BOT PR when every commit it adds is
 #: authored by it — the human identity is `andy.holst@protonmail.com` (see `check_pr_authors.py`).
 BOT_EMAIL = "support@docondee.com"
@@ -405,25 +405,22 @@ def check_agents_line(body: str, root: Path = REPO_ROOT,
         )]
     sha, claimed_bytes, claimed_lines = m.group("sha"), int(m.group("bytes")), int(m.group("lines"))
 
-    want = merge_base(root, base, head)
-    if want is None:
-        return [_agents_line_finding(
-            "pr-agents-line-base/pull-request",
-            f"ci: the merge base of {base} and {head} could not be read",
-            f"The body's `AGENTS:` line cannot be checked against `{base}`: "
-            f"`git merge-base {base} {head}` failed in {root}. The rule needs the base the PR was "
-            f"cut from, so an unreadable base is a failure, not a pass.",
-            where,
-        )]
-    if sha != want:
-        out.append(_agents_line_finding(
-            "pr-agents-line-sha/pull-request",
-            "ci: the PR body cites an `AGENTS.md` that is not the merge base's",
-            f"The body's `AGENTS:` line names `{sha}`, but `git merge-base {base} {head}` is "
-            f"`{want}`. The work was measured against a rulebook that is not the current base — "
-            f"re-run `make bot-preflight` and copy its line (issue #792).",
-            where,
-        ))
+    # The cited sha must be a `main` the work actually contains: an ancestor of BOTH the PR head and
+    # the base. Comparing against the merge base alone made every `rebase-bot` rebase red the PR —
+    # the merge base moves whenever `main` does, while the `AGENTS.md` the leg read is still a
+    # perfectly good (and still reachable) rulebook. An ancestor is the rule the evidence supports.
+    for label, ref in (("the PR head", head), (f"{base}", base)):
+        if _git(root, "merge-base", "--is-ancestor", sha, ref).returncode != 0:
+            want = merge_base(root, base, head) or "(unreadable)"
+            return [_agents_line_finding(
+                "pr-agents-line-sha/pull-request",
+                "ci: the PR body cites an `AGENTS.md` the PR does not contain",
+                f"The body's `AGENTS:` line names `{sha}`, but that commit is not an ancestor of "
+                f"{label} (`git merge-base --is-ancestor {sha} {ref}` failed), so the rulebook it "
+                f"cites is not one this branch contains. The current `git merge-base {base} {head}` "
+                f"is `{want}` — re-run `make bot-preflight` and copy its line (issue #792).",
+                where,
+            )]
 
     text = agents_at(root, sha)
     if text is None:

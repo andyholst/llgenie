@@ -392,21 +392,49 @@ def test_a_pr_body_without_the_agents_line_is_a_violation(tmp_path: Path):
     assert "AGENTS:" in found[0]["evidence"]
 
 
-def test_a_pr_body_whose_agents_sha_is_not_the_merge_base_is_a_violation(tmp_path: Path):
-    """A line copied from an older main is exactly the drift this rule exists to catch."""
+def test_a_pr_body_whose_agents_sha_the_pr_does_not_contain_is_a_violation(tmp_path: Path):
+    """A sha the branch does not contain is the drift this rule exists to catch."""
 
-    # Given a body whose AGENTS: sha is the commit main was cut from two commits ago
+    # Given a body whose AGENTS: sha is a commit this branch does not contain
     root, base, head = _history(tmp_path)
     body = _body(_line("0" * 40))
 
     # When  the guard reads it
     found = cph.check_agents_line(body, root)
 
-    # Then  it names both shas
+    # Then  it names the sha and says it is not an ancestor of the branch
     assert "pr-agents-line-sha/pull-request" in [f["key"] for f in found]
     evidence = next(f["evidence"] for f in found if f["key"].startswith("pr-agents-line-sha"))
     assert "0" * 40 in evidence and base in evidence
     assert head != base
+
+
+def test_a_pr_body_whose_agents_sha_is_an_older_main_passes(tmp_path: Path):
+    """`rebase-bot` moves the merge base; the rulebook the leg read is still one main contained."""
+
+    # Given a repo whose history has an older main commit, and a branch cut from a later one
+    root = tmp_path / "gitrepo"
+    root.mkdir()
+    _git(tmp_path, "init", "-q", "-b", "main", str(root))
+    (root / cph.AGENTS).write_text(AGENTS_OK, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "chore: the earlier rulebook")
+    older = _git(root, "rev-parse", "HEAD").strip()
+    (root / cph.AGENTS).write_text(AGENTS_OK + "\n## A later rule\n\nText.\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "docs: the later rulebook")
+    _git(root, "update-ref", "refs/remotes/origin/main", _git(root, "rev-parse", "HEAD").strip())
+    _git(root, "checkout", "-qb", "feat/x")
+    (root / "change.py").write_text("print('the change')\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "feat: the change")
+
+    # When  the body cites the older main commit, whose AGENTS.md the leg really read
+    body = _body(_line(older))
+
+    # Then  it passes: that commit is an ancestor of both the branch and origin/main
+    assert [f["key"] for f in cph.check_agents_line(body, root)] == []
+    assert cph.is_bot_pr(root, "origin/main", "HEAD") is True
 
 
 def test_a_pr_body_whose_agents_counts_are_wrong_is_a_violation(tmp_path: Path):

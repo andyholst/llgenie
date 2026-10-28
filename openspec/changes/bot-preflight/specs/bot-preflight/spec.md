@@ -119,8 +119,8 @@ and a stale file is named by `--check` with the field that disagrees.
 ### Requirement: a PR body cites the `AGENTS.md` the work obeyed
 
 `make check-pr-hygiene` MUST reject a bot PR body that does not carry the `AGENTS:` line, whose sha
-is not `git merge-base origin/main HEAD`, or whose byte and line counts are not those of `AGENTS.md`
-at **that** sha. A PR is a **bot PR** when every commit it adds is authored by the bot identity
+is not a `main` commit the PR contains (an ancestor of both `HEAD` and the base), or whose byte and
+line counts are not those of `AGENTS.md` at **that** sha. A PR is a **bot PR** when every commit it adds is authored by the bot identity
 (`Asimov Agent <support@docondee.com>`); a human-authored PR MUST NOT be failed for a rule stated
 nowhere a person reads. It MUST read the body without network when one is available — `--pr-body-file`,
 `$PR_BODY_FILE`, `$GITHUB_EVENT_PATH`'s `pull_request.body` — and MUST read it through `gh` only when
@@ -145,12 +145,19 @@ naming the field that disagrees.
 - **Then** it reports a missing-line finding naming the expected shape
 - **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_without_the_agents_line_is_a_violation`
 
-#### Scenario: a sha that is not the merge base is rejected
+#### Scenario: a sha the PR does not contain is rejected
 
-- **Given** a PR body whose `AGENTS:` sha is an older `main`
+- **Given** a PR body whose `AGENTS:` sha is not an ancestor of the PR head or of the base
 - **When** `check-pr-hygiene` reads it
-- **Then** it reports a finding naming both shas
-- **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_whose_agents_sha_is_not_the_merge_base_is_a_violation`
+- **Then** it reports a finding naming the sha and the current merge base
+- **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_whose_agents_sha_the_pr_does_not_contain_is_a_violation`
+
+#### Scenario: a rebase that moved main does not invalidate the line
+
+- **Given** a PR body citing an older `main` commit that the branch and `origin/main` both contain
+- **When** `check-pr-hygiene` reads it after `rebase-bot` moved the merge base
+- **Then** no `pr-agents-line` finding is reported, and the counts are checked at the cited sha
+- **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_whose_agents_sha_is_an_older_main_passes`
 
 #### Scenario: counts that do not match that sha's AGENTS.md are rejected
 

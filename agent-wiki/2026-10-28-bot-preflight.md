@@ -55,6 +55,12 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
 - **`AGENTS.md` does not yet carry a preflight section.** An agent run may not edit that file
   (protected: the write needs a human's approval), so the standing rule lives in `bot-unattended`
   and `docs/BOTS.md`, and the `AGENTS.md` section is filed as its own follow-up.
+- **The cited sha must be a `main` the branch contains, not the merge base.** Comparing against
+  `git merge-base origin/main HEAD` red every PR `rebase-bot` rebased, because the merge base moves
+  whenever `main` does — measured on this very PR: the rebase moved `17cdcf3` → `0ddfda8` and the
+  body's line would have been rejected. The gate now accepts a sha that is an ancestor of both the
+  PR head and the base (the rulebook the leg really read is still reachable), and still checks the
+  counts at that sha.
 - **The counts come from the recorded sha, not the working tree.** `verify()` reads
   `AGENTS.md` with `git show <sha>:AGENTS.md`, so a branch that edits the rulebook writes a line its
   own `check-pr-hygiene` accepts (found as #865 while implementing this). Only an absent object
