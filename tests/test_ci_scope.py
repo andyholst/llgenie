@@ -45,7 +45,7 @@ CI = REPO / ".github" / "workflows" / "ci.yml"
     ("renovate.json", "security"),
 ])
 def test_each_class_is_selected_by_a_path_it_owns(path, expected):
-    classes, unmatched = cs.classify([path])
+    classes, unmatched, _wide = cs.classify([path])
 
     assert unmatched == []
     assert expected in classes, (path, classes)
@@ -53,10 +53,10 @@ def test_each_class_is_selected_by_a_path_it_owns(path, expected):
 
 def test_containers_and_engines_are_distinct_but_overlap():
     # `containers/engines/...` belongs to both: a container change can break an engine image.
-    classes, _ = cs.classify(["containers/engines/params/llama.cpp.json"])
+    classes, _, _wide = cs.classify(["containers/engines/params/llama.cpp.json"])
     assert {"containers", "engines"} <= set(classes)
 
-    classes, _ = cs.classify(["containers/scanners/grype/Dockerfile"])
+    classes, _, _wide = cs.classify(["containers/scanners/grype/Dockerfile"])
     assert "containers" in classes and "engines" not in classes
 
 
@@ -75,7 +75,7 @@ def test_containers_and_engines_are_distinct_but_overlap():
     "AGENTS.md",
 ])
 def test_a_wildcard_path_selects_every_class(path):
-    classes, unmatched = cs.classify([path])
+    classes, unmatched, _wide = cs.classify([path])
 
     assert unmatched == []
     assert set(classes) == set(cs.CLASSES), (path, classes)
@@ -84,18 +84,20 @@ def test_a_wildcard_path_selects_every_class(path):
 
 def test_a_wildcard_wins_even_beside_a_docs_path():
     # The failure that would hurt most: "it is only a markdown change" next to an AGENTS.md edit.
-    classes, _ = cs.classify(["docs/ARCHITECTURE.md", "AGENTS.md"])
+    classes, _, _wide = cs.classify(["docs/ARCHITECTURE.md", "AGENTS.md"])
 
     assert set(classes) == set(cs.CLASSES)
 
 
 # ---- an unmatched path is a loud failure ----------------------------------------
 
-def test_a_path_no_class_claims_is_unmatched_not_silently_dropped():
-    classes, unmatched = cs.classify(["mystery/new-tree/file.txt"])
+def test_a_path_no_class_claims_is_reported_and_the_selection_widens():
+    """Issue #860: the path is still named (so the CLI can exit 1) and the selection fails OPEN."""
+    classes, unmatched, wide = cs.classify(["mystery/new-tree/file.txt"])
 
-    assert classes == []
     assert unmatched == ["mystery/new-tree/file.txt"]
+    assert set(classes) == set(cs.CLASSES)
+    assert wide and "matches no class" in wide
 
 
 def test_the_cli_exits_non_zero_and_names_the_unmatched_path(capsys):
@@ -109,7 +111,7 @@ def test_the_cli_exits_non_zero_and_names_the_unmatched_path(capsys):
 # ---- selection, and the docs-only win -------------------------------------------
 
 def test_a_docs_only_diff_selects_fewer_than_ten_jobs_and_names_what_it_skipped():
-    classes, _ = cs.classify(["docs/ARCHITECTURE.md", "CHANGES.md"])
+    classes, _, _wide = cs.classify(["docs/ARCHITECTURE.md", "CHANGES.md"])
     rows = cs.select(classes)
     selected = [job for job, runs, _ in rows if runs]
     skipped = [(job, why) for job, runs, why in rows if not runs]
@@ -123,7 +125,7 @@ def test_a_docs_only_diff_selects_fewer_than_ten_jobs_and_names_what_it_skipped(
 
 
 def test_an_engine_change_selects_the_engine_rows_and_the_install_proof():
-    classes, _ = cs.classify(["containers/engines/params/strata.json"])
+    classes, _, _wide = cs.classify(["containers/engines/params/strata.json"])
     rows = dict((job, runs) for job, runs, _ in cs.select(classes))
 
     assert rows["engine-matrix"] and rows["engine-base"] and rows["linux-published"]
@@ -136,9 +138,9 @@ def test_an_engine_change_selects_the_engine_rows_and_the_install_proof():
 
 
 def test_the_report_prints_one_class_line_per_class_and_one_verdict_per_job():
-    classes, _ = cs.classify(["tests/test_ci_scope.py"])
+    classes, _, _wide = cs.classify(["tests/test_ci_scope.py"])
     rows = cs.select(classes)
-    lines = cs.report(classes, rows, ["tests/test_ci_scope.py"], [])
+    lines = cs.report(classes, rows, ["tests/test_ci_scope.py"], None)
 
     assert "[ci-scope] class=tests" in lines
     assert sum(1 for line in lines if "[ci-scope] job=" in line) == len(cs.JOBS)
@@ -194,3 +196,39 @@ def test_the_scope_workflow_has_no_path_filter_and_runs_the_docs_gates():
     uses = [step["uses"] for step in workflow["jobs"]["scope"]["steps"] if "uses" in step]
     assert uses == ["actions/checkout@11d5960a326750d5838078e36cf38b85af677262"], uses
 
+
+
+# ---- issue #860: the fail-open decision lives in the library, not in main() -------
+
+def test_an_empty_diff_selects_every_class_with_a_wide_reason():
+    """A caller that imports `classify()` must get the safe answer, not a 3-job selection."""
+    classes, unmatched, wide = cs.classify([])
+
+    assert set(classes) == set(cs.CLASSES), classes
+    assert unmatched == []
+    assert wide and "empty diff" in wide, wide
+
+
+def test_an_unknown_path_selects_every_class_and_still_names_the_path():
+    classes, unmatched, wide = cs.classify(["random/unknown.xyz"])
+
+    assert set(classes) == set(cs.CLASSES)
+    assert unmatched == ["random/unknown.xyz"]
+    assert wide and "random/unknown.xyz" in wide
+
+
+def test_the_library_and_the_cli_agree_on_an_unreadable_diff():
+    """Negative control for #860: revert the widening inside `classify()` and this reds.
+
+    `main()` no longer substitutes anything, so the CLI's answer IS the library's answer — if someone
+    moves the widening back up into `main()`, the two diverge again and this assertion catches it.
+    """
+    classes, unmatched, wide = cs.classify(["random/unknown.xyz"])
+    rows = cs.select(classes)
+    selected = [job for job, runs, _ in rows if runs]
+
+    assert len(selected) == len(cs.JOBS), selected          # the CLI would print every job
+    assert unmatched, "the CLI must still exit non-zero for an owed glob"
+    assert wide, "the reason is what the log prints"
+    # And the empty case is exit 0, not a red: nothing to fix, but everything selected.
+    assert set(cs.classify([])[0]) == set(cs.CLASSES)

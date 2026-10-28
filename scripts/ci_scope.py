@@ -152,14 +152,26 @@ def matched_wildcards(paths: list[str]) -> list[str]:
     return [pattern for pattern in WILDCARDS if any(matches(pattern, p) for p in paths)]
 
 
-def classify(paths: list[str]) -> tuple[list[str], list[str]]:
-    """The classes the diff selects, and the paths no class claims.
+def classify(paths: list[str]) -> tuple[list[str], list[str], str | None]:
+    """The classes the diff selects, the paths no class claims, and WHY it was widened (issue #860).
 
-    A wildcard short-circuits: every class is selected, because such a path can change what any gate
-    proves. Otherwise a class is selected by the first of its globs that matches any path.
+    **An unreadable diff fails OPEN, and that decision lives HERE — not in `main()`.** The invariant
+    that makes a path-selected pipeline safe is "if the diff cannot be read, select every family": a
+    quiet empty set is the failure #824 exists to forbid. `main()` used to own that substitution, so
+    every other caller — a test, a script, a future workflow importing this module — reached the
+    narrow answer for an empty or unmatched diff while the CLI looked correct. The widening is now the
+    library's own behaviour and `main()` only renders it (issue #860).
+
+    Widened for: a wildcard path (it can change what any gate proves), an EMPTY path list (nothing to
+    read), and a diff where no path matches a class (the classifier is owed a glob). The third case
+    still reports the unmatched paths, because the CLI exits non-zero for it — the widening is about
+    what gets selected, never about hiding a defect.
     """
-    if matched_wildcards(paths):
-        return list(CLASSES), []
+    wildcards = matched_wildcards(paths)
+    if wildcards:
+        return list(CLASSES), [], f"wildcard path {', '.join(wildcards)} — every class is selected"
+    if not paths:
+        return list(CLASSES), [], "empty diff — nothing to read, every class is selected"
     selected: list[str] = []
     unmatched: list[str] = []
     for path in paths:
@@ -170,7 +182,9 @@ def classify(paths: list[str]) -> tuple[list[str], list[str]]:
         for name in hit:
             if name not in selected:
                 selected.append(name)
-    return [name for name in CLASSES if name in selected], unmatched
+    if unmatched:
+        return list(CLASSES), unmatched, f"path matches no class ({unmatched[0]}) — every class is selected until one is added"
+    return [name for name in CLASSES if name in selected], [], None
 
 
 def select(classes: list[str]) -> list[tuple[str, bool, str]]:
@@ -205,13 +219,13 @@ def changed_paths(*, base: str | None, before: str | None, cwd: str | None = Non
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def report(classes: list[str], rows: list[tuple[str, bool, str]], paths: list[str], wildcards: list[str]) -> list[str]:
+def report(classes: list[str], rows: list[tuple[str, bool, str]], paths: list[str], wide: str | None) -> list[str]:
     """The lines a run prints: what was read, the class per rule, then every job with its verdict."""
     lines = [f"{TAG} {len(paths)} file(s) changed"]
+    if wide:
+        lines.append(f"{TAG} WIDE: {wide}")
     for name in classes:
         lines.append(f"{TAG} class={name}")
-    for pattern in wildcards:
-        lines.append(f"{TAG} wildcard={pattern} — selects every class")
     for job, runs, why in rows:
         lines.append(f"{TAG} job={job} {'run' if runs else 'skip'} — {why}")
     selected = [job for job, runs, _ in rows if runs]
@@ -263,12 +277,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{TAG} FAILED: {exc}", file=sys.stderr)
         return EXIT_UNCLASSIFIED
 
-    wildcards = matched_wildcards(paths)
-    classes, unmatched = (list(CLASSES), []) if args.all else classify(paths)
     if args.all:
-        wildcards = ["--all"]
+        classes, unmatched, wide = list(CLASSES), [], "--all: a push keeps the full matrix"
+    else:
+        classes, unmatched, wide = classify(paths)
     rows = select(classes)
-    for line in report(classes, rows, paths, wildcards):
+    for line in report(classes, rows, paths, wide):
         print(line)
 
     if unmatched:
