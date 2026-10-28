@@ -833,3 +833,41 @@ def test_the_cli_reports_the_named_failure_on_stdout_and_exits_non_zero(tmp_path
     assert rc == 1
     assert "action=error" in out, out
     assert "error=#812" in out, out
+
+
+# ---- the four outcomes of one PR's merge state (issue #801) --------------------------------
+# Four, never three: `UNKNOWN` is its own answer (#453) and a crashed read is its own answer (#801).
+# The negative control in each case is the outcome it must NOT be — that is the assertion a future
+# refactor breaks first, and it is why each case asserts a pair rather than a single value.
+
+
+def test_a_conflicted_pr_is_a_rebase():
+    assert rb.outcome("DIRTY") is rb.REBASE
+    assert rb.outcome("BEHIND") is rb.REBASE
+    assert rb.outcome("dirty") is rb.REBASE, "the state is case-insensitive"
+
+
+def test_a_clean_pr_is_none_not_defer():
+    assert rb.outcome("MERGEABLE") is rb.NONE
+    assert rb.outcome("BLOCKED") is rb.NONE, "a required check pending is not a rebase"
+    assert rb.outcome("CLEAN") is rb.NONE
+    assert rb.outcome("MERGEABLE") is not rb.DEFER
+
+
+def test_an_uncomputed_state_is_defer_and_never_none():
+    assert rb.outcome("UNKNOWN") is rb.DEFER
+    assert rb.outcome("") is rb.NONE, "an absent field is not UNKNOWN — gh omitted it"
+    assert rb.outcome("UNKNOWN") is not rb.NONE, "collapsing this is what left #445-#447 stale"
+
+
+def test_a_crashed_read_is_error_even_with_a_rebasable_state():
+    assert rb.outcome("DIRTY", crashed=True) is rb.ERROR
+    assert rb.outcome("UNKNOWN", crashed=True) is rb.ERROR
+    assert rb.outcome("DIRTY", crashed=True) is not rb.REBASE, (
+        "a crashed read must never be read as 'this PR needs a rebase' — the sweep did not see it")
+
+
+def test_the_four_outcomes_are_distinct_values():
+    """The structural control: a refactor that collapses two outcomes cannot keep these four names."""
+    values = {rb.REBASE, rb.NONE, rb.DEFER, rb.ERROR}
+    assert len(values) == 4, values

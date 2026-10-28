@@ -49,6 +49,28 @@ REBASE_CLAIM_TTL = dt.timedelta(minutes=30)
 MAX_PER_DAY = 5
 #: Merge states that mean "this branch has to come back onto main".
 NEEDS = ("BEHIND", "DIRTY")
+
+#: The four outcomes of reading ONE PR's merge state, and there are exactly four (issue #801).
+#: Three would be the defect: collapsing `UNKNOWN` into "nothing to do" left #445-#447 stale with a
+#: green run behind them (issue #453), and collapsing a crashed read into "nothing to do" is what let a
+#: sweep report success while the conflicted PR it was dispatched for was never rebased (issue #801).
+REBASE, NONE, DEFER, ERROR = "rebase", "none", "defer", "error"
+
+
+def outcome(state: str, crashed: bool = False) -> str:
+    """Classify one PR's merge state into exactly one of the four outcomes.
+
+    `crashed` is an argument rather than a separate code path on purpose: a read that failed is an
+    outcome of the same decision, so it cannot be dropped by a caller that only remembers three.
+    """
+    if crashed:
+        return ERROR
+    value = (state or "").upper()
+    if value in NEEDS:
+        return REBASE
+    if value == "UNKNOWN":
+        return DEFER
+    return NONE
 #: GitHub computes mergeability lazily: a `pr list` right after a push/comment can report
 #: `UNKNOWN` for every PR. Treating that as "no rebase needed" is what left #445-#447 stale
 #: (issue #453), so a PR reported UNKNOWN is re-queried — bounded, never an unbounded poll.
@@ -248,7 +270,7 @@ def sweep(gh: str, repo: str, today: str | None = None, max_per_day: int = MAX_P
                              unknown_attempts, unknown_delay)
             if not isinstance(state, str):
                 continue
-        if state not in NEEDS:
+        if outcome(state) is not REBASE:
             if state == "UNKNOWN":
                 deferred.append(num)
                 reasons.append(f"#{num} has no computed merge state (UNKNOWN) after "
