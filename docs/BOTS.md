@@ -397,6 +397,12 @@ make issue-bot-dispatch REPO=asimov-agent/llgenie   # cap -> pick -> claim -> is
 make issue-bot-open-pr REPO=<repo> ISSUE=<n> BRANCH=agent/issue-<n>-<slug>  # draft-free PR, never merges
 make implement-issue      # the shared Hermes agent step: read issue.md + AGENTS.md, implement, run gates, push nothing
 make issue-bot-image      # build/pull the agent image the bot runs in (same image as the fix-bot)
+make sync-agent-profile PROFILE=llgenie-planner      # the repository is the source of truth for a HOST agent's
+                                                     # behaviour: copy agents/<profile>/ into the live profile;
+                                                     # CHECK=1 compares and exits 1 on drift (issue #791)
+make check-agent-profiles  # CI: every listed host agent has a SOUL.md that states the never-merge rule, and
+                           # every skill's frontmatter name matches its directory, with no secret-shaped value
+make agent-profiles-report # show each in-tree host agent: role, SOUL.md size, the skills the repo carries
 make hermes-smoke          # prove the alias can CALL A TOOL (a terminal call that prints a per-run nonce), die in seconds
 make agent-shell-keys-check  # prove the credential is visible in the AGENT's shell (issue #358)
 make issue-bot-triage     # step 1: Hermes REVIEWS the issue.md thread (body + every comment) and writes triage.md

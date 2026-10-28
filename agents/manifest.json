@@ -1,0 +1,15 @@
+{
+  "note": "The host agents' behaviour lives here, in the repository, so a change to it is an issue + a PR (issue #791). `make sync-agent-profile PROFILE=<name>` makes this tree the source of truth for the live profile; `make check-agent-profiles` gates completeness, names and secrets.",
+  "profiles": [
+    {
+      "name": "llgenie-planner",
+      "role": "orchestrator",
+      "mission": "triage the repository's issues, refine them, and keep every idle bot busy"
+    },
+    {
+      "name": "llgenie-issse-implementer",
+      "role": "implementer",
+      "mission": "implement one issue per branch as a reviewable PR, never merging"
+    }
+  ]
+}

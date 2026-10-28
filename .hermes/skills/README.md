@@ -8,6 +8,16 @@ leg may write, `Rules` says what it must not do.
 The repo's `skills/engines/` is a different thing: those describe inference servers and are read by
 `scripts/engine_skills.py` → `make generate-engine-params`, never by an agent.
 
+**A third tree, and the one to reach for when the agent is a person-shaped one:** the **host agents**
+(`llgenie-planner`, `llgenie-issse-implementer`) are not CI legs — they are persistent Hermes profiles on
+the owner's machine that hold the write credentials. Their behaviour lives in **`agents/<profile>/`**
+(`SOUL.md` plus `skills/<name>/SKILL.md`), is gated by `make check-agent-profiles`, and is copied into the
+live profile by `make sync-agent-profile PROFILE=<profile>` (issue #791). A change to it is an issue plus
+a PR carrying the same text — never an edit to `~/.hermes/profiles/<profile>/` alone, which is exactly the
+audit gap that tree closes. Rule of thumb: **`.hermes/skills/` = what a bot leg is told inside CI;
+`agents/` = what a credential-holding host agent is told; `skills/engines/` = how an inference server is
+built.**
+
 | skill | leg | what it decides |
 |---|---|---|
 | `bot-unattended` | every leg | the shared unattended contract (never ask, never wait) |

@@ -71,7 +71,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	issue-bot-triage issue-bot-changed issue-bot-verdict issue-bot-gates issue-bot-gates-check implement-issue hermes-smoke agent-jev-preflight nerve-profile-check code-review-scan code-review-file rebase-bot-sweep rebase-bot rebase-bot-abort \
 	engine-params-review-brief engine-params-review engine-params-review-apply \
 	architecture-bot-brief architecture-bot-doc architecture-bot-publish architecture-bot \
-	scrub-log \
+	scrub-log sync-agent-profile check-agent-profiles agent-profiles-report \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report check-issue-bodies issue-bodies-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report check-module-names issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report security-scan security-scan-all security-verdict security-issues security-issues-plan check-security-issues security-bot security-bot-pick check-security-bot sbom check-security-scan scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report scanner-image test-scanner-image scanner-digests scanner-ref publish-scanner-images ci-scanner-images check-scanner-images \
 	run-failure-reactor rebase-bot-agent check-docs docs-report check-pr-hygiene pr-hygiene-report auto-merge auto-merge-resolve fix-bot-resolve auto-merge-explain auto-merge-recheck verify-closure check-pr-authors pr-authors-report check-workflows workflows-report issue-refiner-pick issue-refiner issue-refiner-apply issue-dedup-pick issue-dedup issue-dedup-apply check-dispatch-forms dispatch-forms-report check-actions actions-report update-actions \
@@ -375,6 +375,13 @@ model-pin-report: ## Print the bots' pinned model snapshot, where each place dec
 # the leg preloads it with `hermes -s <name>`. The gate fails a leg that preloads nothing,
 # names a skill that does not exist, carries a name that disagrees with its directory, grows
 # past the pointer budget, or inlines the unattended contract again.
+sync-agent-profile: ## Make the repository the source of truth for a host agent's behaviour: copy agents/<PROFILE>/ into ~/.hermes/profiles/<PROFILE>/ (CHECK=1 compares and exits 1 on drift, never deleting a live-only file; issue #791)
+	@test -n "$(PROFILE)" || { echo "Usage: make sync-agent-profile PROFILE=<profile> [CHECK=1]"; exit 2; }
+	python3 scripts/agent_profile_sync.py $(if $(CHECK),check,sync) --profile "$(PROFILE)" $(if $(PROFILE_HOME),--home "$(PROFILE_HOME)",)
+check-agent-profiles: ## CI: fail when a listed host agent has no SOUL.md, a skill's frontmatter name differs from its directory, a profile carries a secret-shaped value, or a SOUL drops the never-merge rule (issue #791)
+	python3 scripts/check_agent_profiles.py check
+agent-profiles-report: ## Show every in-tree host agent: its role, SOUL.md size and the skills the repository carries (issue #791)
+	python3 scripts/check_agent_profiles.py report
 check-agent-skills: ## CI: fail when a bot leg does not preload its project skill, names a missing one, or carries a rulebook inline instead of a pointer (issue #577)
 	python3 scripts/check_agent_skills.py check
 
@@ -1510,6 +1517,7 @@ ci-unit: bash-check ## CI job unit: hermetic unit tests + registry / skill / Str
 	$(MAKE) check-actions
 	$(MAKE) check-renovate
 	$(MAKE) check-agent-skills
+	$(MAKE) check-agent-profiles
 	$(MAKE) check-agent-model
 	$(MAKE) issue-bot-gates
 	$(MAKE) issue-bot-gates-check
