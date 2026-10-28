@@ -5,6 +5,14 @@ prove a fix, hit one of these traps, or touch `.hermes/skills`.
 
 ## Proving a fix, and cutting the branch it ships on
 
+**Work in a worktree, never in the primary checkout.** `/home/asimov/repository/git/llgenie` is the
+shared builder workspace other lanes treat as `origin/main`; commits parked there on a feature branch
+make every other lane's tree ambiguous. Do:
+`git worktree add ../llgenie-wt/<slug> -b <slug> origin/main`, work there, and keep the primary
+directory on `main` and clean. **Push the branch as soon as it has one commit** (fork is fine for a
+branch that needs no publish): an unpushed branch is a single copy on one disk, and a reviewable one
+needs a remote to point at.
+
 The repo's standard is "the new test fails on the parent, passes on the fix", and the checkout
 you inherit is usually sitting on somebody else's PR branch. Both have a recipe.
 
