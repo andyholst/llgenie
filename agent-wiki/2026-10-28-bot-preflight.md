@@ -53,6 +53,12 @@ Issue: [#792](https://github.com/asimov-agent/llgenie/issues/792) · PR:
 - **`AGENTS.md` does not yet carry a preflight section.** An agent run may not edit that file
   (protected: the write needs a human's approval), so the standing rule lives in `bot-unattended`
   and `docs/BOTS.md`, and the `AGENTS.md` section is filed as its own follow-up.
+- **The `AGENTS:` rule is scoped to a bot range.** A PR is a bot PR when every commit it adds is
+  authored by `Asimov Agent <support@docondee.com>` (`check_pr_hygiene.is_bot_pr`). Without that
+  scope every PR a person opens would go red on `ci-unit` for a line stated nowhere they read — 7 of
+  the 8 PRs open when this was written carry no `AGENTS:` line — and `auto-merge` would hold them
+  all. The human identity is `andy.holst@protonmail.com` (`check_pr_authors.ALLOWED`); the bot's own
+  implementer branch is all bot commits, so the check still fires where the contract applies.
 
 ## Status
 

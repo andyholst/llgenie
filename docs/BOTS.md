@@ -100,7 +100,9 @@ that disagrees, so a leg that reused a stale record is caught before it writes a
 
 **The PR carries the line.** `make check-pr-hygiene` rejects a bot PR whose body has no `AGENTS:`
 line, whose sha is not `git merge-base origin/main HEAD`, or whose counts are not `AGENTS.md` at that
-sha. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
+sha. A PR is a **bot PR** when every commit it adds is authored by `Asimov Agent
+<support@docondee.com>` — the repository's bot identity; a human-authored PR is skipped, because a
+rule a person never reads must not turn their PR red. The body is read without network: `$PR_BODY_FILE` (the implementer's `pr-body.md`, so a missing
 line is caught before the PR opens), `$GITHUB_EVENT_PATH`'s `pull_request.body` in `ci-unit`, or
 `PR=<n> REPO=<owner/name>` through `gh`. A push to `main` has no PR body; the static half of the gate
 still decides the exit code there.

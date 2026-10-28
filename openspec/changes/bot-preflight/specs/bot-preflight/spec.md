@@ -109,7 +109,9 @@ and a stale file is named by `--check` with the field that disagrees.
 
 `make check-pr-hygiene` MUST reject a bot PR body that does not carry the `AGENTS:` line, whose sha
 is not `git merge-base origin/main HEAD`, or whose byte and line counts are not those of `AGENTS.md`
-at **that** sha. It MUST read the body without network when one is available — `--pr-body-file`,
+at **that** sha. A PR is a **bot PR** when every commit it adds is authored by the bot identity
+(`Asimov Agent <support@docondee.com>`); a human-authored PR MUST NOT be failed for a rule stated
+nowhere a person reads. It MUST read the body without network when one is available — `--pr-body-file`,
 `$PR_BODY_FILE`, `$GITHUB_EVENT_PATH`'s `pull_request.body` — and MUST read it through `gh` only when
 `PR=`/`REPO=` are passed explicitly. On a push to `main`, where no PR body exists, the rule MUST
 report that it read no body and MUST NOT fail.
@@ -145,6 +147,20 @@ naming the field that disagrees.
 - **When** `check-pr-hygiene` reads it
 - **Then** it reports a finding naming the field and the real value
 - **Test:** `tests/test_pr_hygiene.py::test_a_pr_body_whose_agents_counts_are_wrong_is_a_violation`
+
+#### Scenario: a human-authored PR is not held to the bot contract
+
+- **Given** a PR whose added commits are authored by a person, not `Asimov Agent`
+- **When** `check-pr-hygiene` reads its body with no `AGENTS:` line
+- **Then** no `pr-agents-line` finding is reported (every other rule still applies)
+- **Test:** `tests/test_pr_hygiene.py::test_a_human_authored_pr_is_not_held_to_the_agents_line`
+
+#### Scenario: a bot range is still held to the line
+
+- **Given** a PR whose added commits are all authored by `Asimov Agent <support@docondee.com>`
+- **When** `check-pr-hygiene` reads a body with no `AGENTS:` line
+- **Then** it reports the missing-line finding
+- **Test:** `tests/test_pr_hygiene.py::test_a_bot_range_is_held_to_the_agents_line`
 
 #### Scenario: the body is read from the event, not the network
 

@@ -309,6 +309,42 @@ def _history(tmp_path: Path) -> tuple[Path, str, str]:
     return root, base, _git(root, "rev-parse", "HEAD").strip()
 
 
+def test_a_human_authored_pr_is_not_held_to_the_agents_line(tmp_path: Path):
+    """The `AGENTS:` line is the BOT contract: a person's PR must not go red for it."""
+
+    # Given a branch whose added commits include one authored by Andy Holst
+    root, base, _ = _history(tmp_path)
+    (root / "human.py").write_text("print('a person edits this')\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    subprocess.run(
+        ["git", "-c", "user.name=Andy Holst", "-c", "user.email=andy.holst@protonmail.com",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "fix: a human commit"],
+        cwd=str(root), check=True, capture_output=True, text=True,
+    )
+
+    # When  the guard reads a body with no AGENTS: line
+    keys = _keys_with_body(root, _body(None))
+
+    # Then  no agents-line finding is reported (every other rule still applies)
+    assert [k for k in keys if k.startswith("pr-agents-line")] == []
+    assert cph.check_agents_line(_body(None), root) == []
+    assert cph.is_bot_pr(root, "origin/main", "HEAD") is False
+
+
+def test_a_bot_range_is_held_to_the_agents_line(tmp_path: Path):
+    """Every commit authored by the bot identity is a bot PR, and it must cite the rulebook."""
+
+    # Given a branch whose added commits are all authored by Asimov Agent
+    root, base, _ = _history(tmp_path)
+
+    # When  its body carries no AGENTS: line
+    keys = _keys_with_body(root, _body(None))
+
+    # Then  it is a bot range and the missing line is a finding
+    assert cph.is_bot_pr(root, "origin/main", "HEAD") is True
+    assert "pr-agents-line-missing" in keys
+
+
 def _line(sha: str, text: str = AGENTS_OK) -> str:
     return f"AGENTS: {sha} {len(text.encode())}b {text.count(chr(10))}l"
 

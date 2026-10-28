@@ -64,6 +64,9 @@ AGENTS = "AGENTS.md"
 AGENTS_LINE = re.compile(r"(?m)^AGENTS: (?P<sha>[0-9a-f]{40}) (?P<bytes>\d+)b (?P<lines>\d+)l$")
 #: What that line must look like, quoted in a finding so a reader can fix it without the spec.
 AGENTS_LINE_SHAPE = "AGENTS: <sha of git merge-base origin/main HEAD> <bytes of AGENTS.md>b <lines>l"
+#: The identity this repository's bots commit as. A PR is a BOT PR when every commit it adds is
+#: authored by it — the human identity is `andy.holst@protonmail.com` (see `check_pr_authors.py`).
+BOT_EMAIL = "support@docondee.com"
 #: The mandate heading AGENTS.md must carry. Deleting it is a violation, not an edit.
 AGENTS_MANDATE = "## Every PR body and commit message carries the issue, the fix and the benefit"
 #: The closing rule AGENTS.md must carry — a PR that implements an issue closes it. The loophole
@@ -368,9 +371,26 @@ def _agents_line_finding(key: str, title: str, evidence: str, where: str) -> dic
     return {"key": key, "title": title, "evidence": evidence, "where": where}
 
 
+def is_bot_pr(root: Path, base: str, head: str) -> bool:
+    """Whether the commits this PR adds are a bot leg's — every one authored by `BOT_EMAIL`.
+
+    The `AGENTS:` line is the BOT contract (issue #792): a leg cites the rulebook it obeyed. A
+    human PR is not held to it, so an all-human range is skipped rather than failed — otherwise
+    every PR a person opens would go red for a rule stated nowhere they read. An empty range (a
+    push to `main`, or `HEAD` == `base`) is not a bot PR.
+    """
+    proc = _git(root, "log", "--format=%ae", f"{base}..{head}")
+    if proc.returncode != 0:
+        return False
+    authors = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    return bool(authors) and all(author == BOT_EMAIL for author in authors)
+
+
 def check_agents_line(body: str, root: Path = REPO_ROOT,
                       base: str = "origin/main", head: str = "HEAD") -> list[dict]:
     """A bot PR body carries `AGENTS:` with the merge-base sha and that sha's `AGENTS.md` counts."""
+    if not is_bot_pr(root, base, head):
+        return []
     out: list[dict] = []
     where = "pull request body"
     m = AGENTS_LINE.search(body or "")
@@ -517,10 +537,14 @@ def report(root: Path = REPO_ROOT, base: str = "origin/main", head: str = "HEAD"
     lines += ["", f"[pr-hygiene] PR body source: {body_source}"]
     if body is not None:
         agents_found = check_agents_line(body, root, base, head)
-        verdict = "OK" if not agents_found else f"{len(agents_found)} finding(s)"
-        lines.append(f"[pr-hygiene] AGENTS: line: {verdict}")
-        for item in agents_found:
-            lines.append(f"  {item['key']}: {item['title']}")
+        if not is_bot_pr(root, base, head):
+            lines.append("[pr-hygiene] AGENTS: line: not a bot range — skipped (a human PR is not held "
+                         "to the bot contract)")
+        else:
+            verdict = "OK" if not agents_found else f"{len(agents_found)} finding(s)"
+            lines.append(f"[pr-hygiene] AGENTS: line: {verdict}")
+            for item in agents_found:
+                lines.append(f"  {item['key']}: {item['title']}")
     else:
         lines.append("[pr-hygiene] AGENTS: line: no body to read (the static half decides)")
     lines += ["", render(findings(root, base, head, body))]
