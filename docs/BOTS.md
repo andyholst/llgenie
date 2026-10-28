@@ -75,8 +75,8 @@ reported stale once the target is declared or gone.
 `make sync-registry` vendors a **normalised** copy of upstream's store (issue #687): `formats`
 restricted to the vocabulary, a non-format name restated from the row's repo/id, a duplicate id
 dropped — printed, one note per change — while every model row upstream lists is kept, because a
-name heuristic cannot tell a finetune from a run on one box. The `registry-sync` workflow runs `make sync-registry` weekly (cron `17 5 * * 1`,
-Monday 05:17 UTC), regenerates the quant catalog (`make sync-quant-catalog`), the
+name heuristic cannot tell a finetune from a run on one box. The `registry-sync` workflow runs `make sync-registry` weekly (cron `19 5 * * 1`,
+Monday 05:19 UTC), regenerates the quant catalog (`make sync-quant-catalog`), the
 trend-list matrix (`make render-trend-list-matrix`) and the per-engine gap
 (`make render-engine-skill-gap`), and opens a PR when any of those files changed.
 The matrix fixture is the review of the new list: one block per architecture, card
@@ -293,6 +293,16 @@ queues behind its scheduled run instead of overlapping it. The current slots:
 | `engine-bump` | `53 6 * * 1` | Monday 06:53 |
 | `architecture-bot` | `47 */6 * * *` | every 6 hours at :47 (issue #449) |
 | `auto-merge` (recheck sweep) | `3,33 * * * *` | twice hourly (:03, :33 — issue #560) |
+| `code-review-bot` | `31 7 * * 1` | Monday 07:31 |
+| `issue-dedupe` | `51 */6 * * *` | every 6 hours at :51 |
+| `issue-refiner` | `43 * * * *` | hourly at :43 |
+| `rebase-bot` | `29 */6 * * *` | every 6 hours at :29 |
+| `search-smoke` | `11 7 * * *` | daily 07:11 |
+| `security-bot` | `9 5 * * *` | daily 05:09 |
+| `security-scan` | `5 4 * * *` | daily 04:05 (`docs/SCANS.md`) |
+
+The table is the isolation map, not the full cadence record: every scheduled workflow's own file is the
+authority for its cron, and a bot missing here is still inside the guards below.
 
 `tests/test_bot_pipeline_isolation.py` (in `make test-unit`) expands every scheduled
 workflow's cron into its `(minute, weekday)` slots and fails if any two bots share one, or if
@@ -1331,6 +1341,15 @@ make run-failure-reactor REPO=asimov-agent/llgenie RUN_ID=<run> DRY=1   # previe
 commits, pushes or merges in the file-issue path — it files; the issue-bot owns implementation, the
 fix-bot owns PR repair. A run it cannot diagnose is reported loudly, never silently dropped.
 
+Its `workflows:` roster is TRUE, not a list someone remembered (issue #349): GitHub matches it against
+each workflow's top-level `name:` verbatim and takes no wildcard, so `make check-workflows` fails
+`ci-unit` when a name in it is no workflow's `name:` (a rename stops matching silently — measured on
+`rebase-bot.yml` after #463, whose failures then routed nowhere for a week), when a workflow's completion
+is routed nowhere, when the list names the reactor itself (a self-trigger loop), or when an entry in
+`tests/fixtures/workflow-run-exemptions.json` has no `reason` or names no workflow (a stale exemption).
+Two workflows are exempted there, each with its reason written down: `security-scan`, whose red is
+already a work item `make security-issues` and `security-bot` own, and the reactor itself.
+
 ### A scheduled sweep must not queue behind itself (issue #917)
 
 A `schedule:` workflow fires again on its slot whether or not the previous run finished. Two different
@@ -1495,7 +1514,7 @@ make check-pr-hygiene  # fail when a producer's commit message or PR body is emp
 make pr-hygiene-report # show every producer the PR/commit-message guard reads, and its verdict
 make check-pr-authors  # fail when a PR commit is authored by anyone but Andy Holst or Asimov Agent, when a Co-authored-by trailer names anyone else, or when a producer commits off the allowlist (issue #345)
 make pr-authors-report # show every commit in the range with its author verdict, and the identity each producer assigns
-make check-workflows   # fail when a YAML file's GitHub expression does not parse, a YAML file lacks a trailing newline, a workflow has no top-level name, or a `workflow_run` trigger names no workflows (issue #330)
+make check-workflows   # fail when a YAML file's GitHub expression does not parse, a YAML file lacks a trailing newline, a workflow has no top-level name, a `workflow_run` trigger names no workflows (issue #330), or a `workflow_run` roster names a workflow that does not exist / leaves one unwatched (issue #349)
 make check-module-names   # fail when a LIVE file spells the retired CLI module name instead of
                           # `scripts/llgenie_serve.py`; the one excluded file is the guard's own test, through the
                           # module-level `SELF_EXCLUDED` constant (issues #251, #573, #812)
@@ -1884,8 +1903,17 @@ no notion of `${{ }}` — which is why nothing caught it.
    present itself as a file path, indistinguishable from a startup failure in `gh run list`;
 4. an `on.workflow_run` trigger must carry a `workflows:` list. GitHub **requires** it and refuses the
    whole file without it (`Invalid workflow file: on.workflow_run does not reference any workflows`),
-   just as silently: a 0-job run whose `name` is the file path and with no log. Measured on
-   `run-failure-reactor.yml`, whose first two push runs were refused that way while this gate passed.
+   just as silent: a 0-job run whose `name` is the file path and with no log. Measured on
+   `run-failure-reactor.yml`, whose first two push runs were refused that way while this gate passed;
+5. the roster must be TRUE (issue #349). GitHub matches `workflow_run.workflows` against a workflow's
+   top-level `name:` **verbatim** and takes no wildcard, so the list is a hand-kept roster that rots
+   silently: a workflow added later is never watched, and one whose `name:` is edited stops matching.
+   So a listed name that is no workflow's `name:` is a violation, a workflow no roster names is a
+   violation unless `tests/fixtures/workflow-run-exemptions.json` records **why** (a `reason` is
+   required, and an entry naming no workflow is reported STALE), and a workflow may not name itself —
+   that would re-fire on its own completion. Measured on `rebase-bot.yml`: renamed by #463
+   (`…ONE PR per run…` -> `…every eligible PR per run…`), after which every rebase-bot failure routed
+   nowhere while the roster still looked complete.
 
 `make workflows-report` prints the file count, how many expressions were validated and the verdict, so
 the gate's scope is visible rather than assumed. `tests/test_workflows_valid.py` (in `make test-unit`, so

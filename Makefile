@@ -941,7 +941,7 @@ check-pr-authors: ## CI: fail when a PR's commit is authored by anyone but Andy 
 	python3 scripts/check_pr_authors.py check --base "$(PR_BASE)" --head "$(PR_HEAD)"
 pr-authors-report: ## Show every commit in the range with its author verdict, and the identity each producer assigns
 	python3 scripts/check_pr_authors.py report --base "$(PR_BASE)" --head "$(PR_HEAD)"
-check-workflows: ## CI: fail when a YAML file's GitHub expression does not parse, when a YAML file lacks a trailing newline, or when a workflow has no top-level name (issue #330)
+check-workflows: ## CI: fail when a YAML file's GitHub expression does not parse, when a YAML file lacks a trailing newline, when a workflow has no top-level name, or when a `workflow_run` roster names a workflow that does not exist or leaves one unwatched (issues #330, #349)
 	python3 scripts/check_workflows.py check
 workflows-report: ## Show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
 	python3 scripts/check_workflows.py report

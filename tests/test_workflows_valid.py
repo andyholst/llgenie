@@ -14,6 +14,7 @@ NO-SKIP POLICY: a missing prerequisite is a LOUD FAILURE, never a skip.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -75,6 +76,34 @@ def _tree(tmp_path: Path, **files: str) -> Path:
 
 def _keys(root: Path) -> list[str]:
     return [f["key"].split("/")[0] for f in cw.findings(root)]
+
+
+def _exempt(root: Path, *names: str) -> Path:
+    """Record a dated exemption for each workflow name, the way the repository does (#349)."""
+    path = root / cw.EXEMPTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "note": "fixture exemptions",
+        "decided_utc": "2026-10-28",
+        "workflows": {n: {"reason": "exempted by this fixture"} for n in names}}, indent=2) + "\n")
+    return path
+
+
+def _reactor_workflow(*names: str) -> str:
+    """A consumer whose `workflow_run.workflows:` block lists `names`, one per line."""
+    block = "".join(f"      - {n}\n" for n in names)
+    return (
+        "name: a-bot \u2014 reacts to a run\n"
+        "on:\n"
+        "  workflow_run:\n"
+        "    workflows:\n" + block +
+        "    types: [completed]\n"
+        "\n"
+        "jobs:\n"
+        "  go:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo hi\n")
 
 
 def test_a_malformed_expression_is_a_violation(tmp_path: Path):
@@ -202,10 +231,10 @@ def test_a_workflow_run_without_a_workflows_list_is_a_violation(tmp_path: Path):
     assert "workflow-run-refs" in keys
 
 
-def test_a_workflow_run_that_names_workflows_is_accepted(tmp_path: Path):
+def test_a_workflow_run_that_names_existing_workflows_is_accepted(tmp_path: Path):
     """The shape this repository ships must not be a false positive."""
 
-    # Given a workflow_run that names the workflows it reacts to
+    # Given a workflow_run that names workflows that exist, and a consumer nothing watches
     root = _tree(tmp_path, a_bot=(
         "name: a-bot — reacts to a run\n"
         "on:\n"
@@ -217,13 +246,115 @@ def test_a_workflow_run_that_names_workflows_is_accepted(tmp_path: Path):
         "  go:\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
-        "      - run: echo hi\n"))
+        "      - run: echo hi\n"),
+        ci_job=WORKFLOW_OK.replace("a-bot — does one thing", "CI"),
+        pipe=WORKFLOW_OK.replace("a-bot — does one thing", "pipeline"))
+    _exempt(root, "a-bot — reacts to a run")
 
     # When  the gate reads it
     keys = _keys(root)
 
-    # Then  nothing is reported
+    # Then  nothing is reported: every name exists and the consumer is an exempted decision
     assert keys == []
+
+
+def test_a_roster_naming_a_workflow_that_does_not_exist_is_a_violation(tmp_path: Path):
+    """The silent break #349 predicts: a workflow is renamed and its roster entry stops matching."""
+
+    # Given a roster that still carries the OLD name of a workflow that has since been renamed
+    root = _tree(tmp_path, a_bot=_reactor_workflow("a-bot — the OLD name"),
+                 renamed=WORKFLOW_OK.replace("a-bot — does one thing", "a-bot — the NEW name"))
+    _exempt(root, "a-bot — the NEW name")
+
+    # When  the gate reads it
+    items = cw.findings(root)
+
+    # Then  the stale entry is reported, naming the string that matches nothing
+    assert "workflow-run-unknown-name" in _keys(root)
+    assert any("the OLD name" in f["title"] for f in items), cw.render(items)
+
+
+def test_a_workflow_no_roster_names_is_a_violation(tmp_path: Path):
+    """A new workflow is a one-file change today; nothing used to notice it was never watched."""
+
+    # Given a consumer that watches one workflow while another exists unwatched
+    root = _tree(tmp_path, a_bot=_reactor_workflow("watched — a bot"),
+                 watched=WORKFLOW_OK.replace("a-bot — does one thing", "watched — a bot"),
+                 orphan=WORKFLOW_OK.replace("a-bot — does one thing", "orphan — a bot"))
+    _exempt(root, "a-bot — reacts to a run", "watched — a bot")
+
+    # When  the gate reads it
+    items = cw.findings(root)
+
+    # Then  the uncovered workflow is reported by file
+    assert "workflow-run-uncovered" in _keys(root)
+    assert any("orphan.yml" in f["title"] for f in items), cw.render(items)
+
+
+def test_a_reasoned_exemption_is_accepted_and_a_reasonless_one_is_not(tmp_path: Path):
+    """An omission has to be a dated decision with a reason, not an accident."""
+
+    # Given a coverage gap recorded WITH a reason
+    root = _tree(tmp_path, a_bot=_reactor_workflow("watched — a bot"),
+                 watched=WORKFLOW_OK.replace("a-bot — does one thing", "watched — a bot"),
+                 quiet=WORKFLOW_OK.replace("a-bot — does one thing", "quiet — a bot"))
+    _exempt(root, "a-bot — reacts to a run", "watched — a bot", "quiet — a bot")
+
+    # When  the gate reads it, and then the same entry loses its reason
+    with_reason = cw.findings(root)
+    (root / cw.EXEMPTIONS).write_text(json.dumps({"workflows": {
+        "a-bot — reacts to a run": {"reason": "a consumer cannot watch itself"},
+        "watched — a bot": {"reason": "covered by this fixture's roster"},
+        "quiet — a bot": {}}}))
+
+    # Then  the reasoned exemption is clean and the reasonless one is a violation
+    assert with_reason == [], cw.render(with_reason)
+    assert "workflow-run-exemption-no-reason" in _keys(root)
+
+
+def test_a_stale_exemption_is_a_violation(tmp_path: Path):
+    """The exemption file rots the same way the roster does, so it is checked the same way."""
+
+    # Given an exemption naming a workflow that no longer exists
+    root = _tree(tmp_path, a_bot=_reactor_workflow("watched — a bot"),
+                 watched=WORKFLOW_OK.replace("a-bot — does one thing", "watched — a bot"))
+    _exempt(root, "a-bot — reacts to a run", "watched — a bot", "gone — a bot that was renamed")
+
+    # When  the gate reads it
+    keys = _keys(root)
+
+    # Then  the stale entry is reported
+    assert "workflow-run-exemption-stale" in keys
+
+
+def test_a_workflow_may_not_watch_its_own_completion(tmp_path: Path):
+    """A self-reference re-fires on its own completion — a loop, not a route."""
+
+    # Given a workflow that lists itself
+    root = _tree(tmp_path, a_bot=_reactor_workflow("a-bot — reacts to a run"))
+
+    # When  the gate reads it
+    keys = _keys(root)
+
+    # Then  the self-reference is reported
+    assert "workflow-run-self" in keys
+
+
+def test_the_repository_roster_matches_the_workflows_on_disk():
+    """The repo passes its own gate: each workflow is watched by name or exempted with a reason."""
+
+    # Given this repository
+    names = cw.workflow_names(REPO)
+    exempt = cw._exemptions(REPO)
+    covered = {n for path in cw.workflow_files(REPO)
+               for _, listed in cw.workflow_run_lists(path) for n in listed}
+
+    # When  every workflow is looked for in the roster
+    unwatched = sorted(n for n in names if n not in covered and n not in exempt)
+
+    # Then  none is left unwatched, and the roster is not empty
+    assert covered, "no workflow_run roster was found — the reader is broken, not the repo"
+    assert unwatched == []
 
 
 def test_the_gate_reads_every_yaml_file_not_only_the_workflows(tmp_path: Path):
