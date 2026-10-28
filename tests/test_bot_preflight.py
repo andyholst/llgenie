@@ -113,6 +113,14 @@ def test_a_diverged_checkout_is_refused_and_the_preflight_never_rebases(repo: Pa
     assert git(repo, "rev-parse", "HEAD") == mine, "the leg's own commit must survive a refused preflight"
 
 
+def test_the_record_the_preflight_writes_does_not_make_the_next_run_refuse(repo: Path):
+    """Running it twice in a row must pass: `preflight.txt` is this target's own output, not the leg's dirt."""
+    bp.write_record(repo)
+    assert (repo / bp.RECORD).exists()
+    record = bp.preflight(repo)                      # a second run in the same tree
+    assert record["main"] == git(repo, "rev-parse", "origin/main")
+
+
 def test_check_mode_fails_when_the_record_is_missing_or_stale(repo: Path):
     assert bp.stale_record(repo) is not None
     bp.write_record(repo)

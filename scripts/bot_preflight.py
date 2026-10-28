@@ -96,7 +96,13 @@ def sync(root: Path = REPO_ROOT, base: str = BASE) -> str:
             f"HEAD diverged from {base}: {ahead} commit(s) ahead, {behind} behind; "
             f"rebase by hand, the preflight never does it for you:{shown}"
         )
-    dirty = [p for p in _ok(root, "status", "--porcelain").splitlines() if p.strip()]
+    # The record this target writes must not make the next run refuse its own output: a leg that runs
+    # the preflight twice would otherwise fail the second time ("behind main but dirty") because of a
+    # file the preflight itself created. Every other uncommitted path is still a refusal.
+    dirty = [
+        p for p in _ok(root, "status", "--porcelain").splitlines()
+        if p.strip() and not p.strip().endswith(RECORD)
+    ]
     if dirty:
         shown = ("\n  " + "\n  ".join(dirty[:20]))
         raise PreflightError(f"HEAD is behind {base} but the tree is dirty; commit or stash first:{shown}")
