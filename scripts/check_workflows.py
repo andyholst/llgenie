@@ -42,6 +42,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -58,6 +59,14 @@ TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_][\w.-]*):", re.M)
 WORKFLOW_RUN_KEY = re.compile(r"^(?P<indent>[ \t]*)workflow_run:\s*(?P<rest>.*)$")
 #: The `workflows:` list a `workflow_run` trigger must carry to be read at all.
 WORKFLOWS_KEY = re.compile(r"^(?P<indent>[ \t]*)workflows:\s*(?P<rest>.*)$")
+#: A top-level `name:` value, quoted or bare — the string GitHub matches `workflow_run.workflows` on.
+NAME_KEY = re.compile(r"^name:\s*(?P<value>.+?)\s*$", re.M)
+#: Workflows a `workflow_run` consumer deliberately does NOT watch (#349). An entry is a dated decision
+#: with a `reason`, never a literal in this guard: exempting a workflow takes an edit here that says
+#: why, and an entry naming no workflow (the workflow was renamed or deleted) is reported STALE so the
+#: roster cannot rot. Same shape as `tests/fixtures/host-only-wiring.json` (#237) and
+#: `tests/fixtures/docs-exceptions.json` (#257).
+EXEMPTIONS = "tests/fixtures/workflow-run-exemptions.json"
 
 _WS = " \t\r\n"
 _OPERATORS = ("==", "!=", "<=", ">=", "&&", "||", "<", ">", "!", "*", "/", "%", "+", "-",
@@ -376,15 +385,165 @@ def check_workflow_run_refs(root: Path = REPO_ROOT) -> list[dict]:
     return out
 
 
+def _unquote(value: str) -> str:
+    """A YAML scalar's value: GitHub matches the DECODED string, so quotes never count."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def workflow_names(root: Path = REPO_ROOT) -> dict[str, str]:
+    """Every workflow's top-level `name:` -> its file name. The roster is matched against these."""
+    out: dict[str, str] = {}
+    for path in workflow_files(root):
+        m = NAME_KEY.search(path.read_text())
+        if m is not None:
+            out[_unquote(m.group("value"))] = path.name
+    return out
+
+
+def workflow_run_lists(path: Path) -> list[tuple[int, list[str]]]:
+    """Each `workflow_run.workflows:` list in a file: (line number of the key, the names it lists).
+
+    Both shapes GitHub accepts are read: the block form (`- name` per line, this repo's) and the inline
+    form (`[CI, pipeline]`). A name is returned exactly as it is written minus YAML quoting, because
+    that is what GitHub compares against each workflow's `name:` — no globbing, no fuzzy match.
+    """
+    lines = path.read_text().splitlines()
+    out: list[tuple[int, list[str]]] = []
+    for i, line in enumerate(lines):
+        m = WORKFLOW_RUN_KEY.match(line)
+        if m is None:
+            continue
+        body = _indented_block(lines, i, len(m.group("indent")))
+        for j, item in enumerate(body):
+            w = WORKFLOWS_KEY.match(item)
+            if w is None:
+                continue
+            rest = w.group("rest").strip()
+            if rest.startswith("["):
+                out.append((i + 1, [_unquote(x) for x in rest.strip("[]").split(",") if x.strip()]))
+                continue
+            names = []
+            for entry in _indented_block(body, j, len(w.group("indent"))):
+                if entry.strip().startswith("-"):
+                    names.append(_unquote(entry.split("-", 1)[1]))
+            out.append((i + 1, names))
+    return out
+
+
+def _exemptions(root: Path = REPO_ROOT) -> dict[str, dict]:
+    """The dated decisions that exempt a workflow from being watched, keyed by its `name:`."""
+    path = root / EXEMPTIONS
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    return data.get("workflows") or {}
+
+
+def check_workflow_run_coverage(root: Path = REPO_ROOT) -> list[dict]:
+    """Every workflow's completion is routed somewhere, and every name in a roster exists (#349).
+
+    GitHub matches `workflow_run.workflows` against a workflow's top-level `name:` and takes no
+    wildcard, so the list is a roster a human keeps by hand. It rots two ways, both silent until this
+    rule existed: a workflow added later is never watched, and a workflow whose `name:` is edited stops
+    matching — measured on `rebase-bot.yml`, renamed by #463 (`…ONE PR per run…` -> `…every eligible PR
+    per run…`), after which its failures routed nowhere while the roster still carried the old string.
+    So: (a) a listed name that matches no workflow is a violation, (b) a workflow no roster names is a
+    violation unless an exemption with a reason covers it, (c) a workflow may not name itself (the
+    trigger would re-fire on its own completion), and (d) an exemption without a reason or naming no
+    workflow is a violation, so the exemption file cannot rot either.
+    """
+    out: list[dict] = []
+    names = workflow_names(root)
+    known = set(names)
+    covered: set[str] = set()
+    declared_any = False
+    for path in workflow_files(root):
+        where = str(path.relative_to(root))
+        own = next((n for n, f in names.items() if f == path.name), None)
+        for line, listed in workflow_run_lists(path):
+            declared_any = True
+            for name in listed:
+                covered.add(name)
+                if name == own:
+                    out.append({
+                        "key": f"workflow-run-self/{where}:{line}",
+                        "title": f"ci: {where}:{line} watches its own completion",
+                        "evidence": (
+                            f"`{where}` line {line} names itself in its `workflow_run.workflows:` "
+                            f"list. The trigger then re-fires on its own completion — a loop, not a "
+                            f"route. The reactor's own header records the same rule (#286)."
+                        ),
+                        "where": where,
+                    })
+                elif name not in known:
+                    out.append({
+                        "key": f"workflow-run-unknown-name/{where}:{line}:{name}",
+                        "title": f"ci: {where}:{line} watches a workflow that does not exist: {name!r}",
+                        "evidence": (
+                            f"`{where}` line {line} lists {name!r}, which is no workflow's `name:` in "
+                            f"this tree. GitHub matches that list VERBATIM and takes no wildcard, so a "
+                            f"renamed workflow's failures become invisible while the roster looks "
+                            f"complete — measured on `rebase-bot.yml` after #463, whose failures routed "
+                            f"nowhere for a week with this gate green. Fix the entry to the workflow's "
+                            f"current `name:`."
+                        ),
+                        "where": where,
+                    })
+    if not declared_any:
+        return out                          # nothing in this tree consumes runs; nothing to cover
+    exempt = _exemptions(root)
+    for name, filename in sorted(names.items(), key=lambda kv: kv[1]):
+        if name in covered or name in exempt:
+            continue
+        out.append({
+            "key": f"workflow-run-uncovered/{filename}",
+            "title": f"ci: no workflow routes {filename}'s failures ({name})",
+            "evidence": (
+                f"`{filename}` ({name}) completes and no `workflow_run.workflows:` list watches it, so "
+                f"a red run of it files nothing and dispatches nothing — the state the run-failure "
+                f"reactor exists to end (#286). Add its `name:` to the reactor's roster, or record why "
+                f"it is not watched in `{EXEMPTIONS}`."
+            ),
+            "where": f"{WORKFLOWS}/{filename}",
+        })
+    for name, decision in sorted(exempt.items()):
+        if name not in known:
+            out.append({
+                "key": f"workflow-run-exemption-stale/{name}",
+                "title": f"ci: {EXEMPTIONS} exempts a workflow that does not exist: {name!r}",
+                "evidence": (
+                    f"`{EXEMPTIONS}` exempts {name!r}, which is no workflow's `name:` in this tree. A "
+                    f"stale exemption is how a renamed workflow becomes unwatched a second time; delete "
+                    f"the entry or point it at the current `name:`."
+                ),
+                "where": EXEMPTIONS,
+            })
+        elif not str((decision or {}).get("reason") or "").strip():
+            out.append({
+                "key": f"workflow-run-exemption-no-reason/{name}",
+                "title": f"ci: {EXEMPTIONS} exempts {name!r} with no reason",
+                "evidence": (
+                    f"`{EXEMPTIONS}` exempts {name!r} without a `reason`. An omission has to be a dated "
+                    f"decision, not an accident: state what the workflow's red is already routed to."
+                ),
+                "where": EXEMPTIONS,
+            })
+    return out
+
+
 def findings(root: Path = REPO_ROOT) -> list[dict]:
     return (check_expressions(root) + check_newlines(root) + check_workflow_names(root)
-            + check_workflow_run_refs(root))
+            + check_workflow_run_refs(root) + check_workflow_run_coverage(root))
 
 
 def render(items: list[dict]) -> str:
     if not items:
         return ("[workflows] OK: every YAML file parses, ends with a newline, names its workflow, "
-                "and every `workflow_run` names the workflows it reacts to")
+                "every `workflow_run` names the workflows it reacts to, and every workflow's "
+                "completion is routed to a consumer")
     lines = [f"[workflows] {len(items)} violation(s)"]
     for f in items:
         lines += ["", f"- {f['title']}", f"  where: {f['where']}", f"  {f['evidence']}"]

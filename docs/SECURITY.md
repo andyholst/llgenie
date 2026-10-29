@@ -51,3 +51,31 @@ diff. Adding that manager later is a separate decision, not an accident.
 several releases behind still runs exactly the code that was reviewed, which is the property the
 gate exists to protect; freshness is `make update-actions`' job, and it is a deliberate,
 reviewed act.
+
+## A gate nobody watches is not a gate
+
+A security leg's red is only a control if something reads it. `security-scan` reds on purpose — its
+`fail_on` is critical/high **with a fix** (`data/security-policy.json`, `docs/SCANS.md`), and the
+floor it derives is what closes it — so the question "who consumes this run" is a design question,
+not a detail.
+
+`run-failure-reactor.yml` is the consumer: it routes any watched workflow's completed run to a repair
+(a PR this repo can push) or to ONE marker-deduped `agent:implement` issue. It can only do that for a
+workflow it **names**, because GitHub matches `workflow_run.workflows` against each workflow's
+top-level `name:` **verbatim** and takes no wildcard. A rename therefore breaks routing silently, and
+a new workflow is invisible until someone edits the list — measured on `rebase-bot.yml`, renamed by
+#463, whose failures routed nowhere for a week while the roster still looked complete (#349).
+
+`make check-workflows` holds the invariant (issue #349). It fails when a roster name is no workflow's
+`name:`, when a workflow's completion is routed nowhere, when a roster names the reactor itself (a
+self-trigger loop), or when an entry in `tests/fixtures/workflow-run-exemptions.json` has no `reason`
+or names no workflow (stale). A workflow whose red is *deliberately* a work item is exempted there
+with that reason written down — today exactly one is: `security-scan`, whose findings
+`make security-issues` files and `security-bot` repairs (`docs/SCANS.md`). Route B would file a
+second, head-sha-scoped issue per push to `main`, which is why the exemption exists instead of a
+citation in the roster.
+
+So a security change owes two things: a new or renamed security workflow passes
+`make check-workflows` (it is watched by name), and a run that is meant to red carries either a
+consumer or a `reason` in the exemption file. Adding the workflow without either is how a control
+becomes a log nobody reads.
