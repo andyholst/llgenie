@@ -11,6 +11,16 @@ metadata:
 
 # LLGenie engine improver — the operating loop
 
+<!-- host-bot-tools:begin -->
+## Tools
+
+This lane's chat session is pinned to these Hermes toolsets and no others: `clarify`, `code_execution`, `file`, `memory`, `session_search`, `skills`, `terminal`, `todo`.
+
+Skills that stay enabled: `github`, `llgenie-engine-improver`.
+Every other installed skill is listed in `skills.disabled`.
+The pin is `tests/fixtures/host-bot-capabilities.json` in asimov-agent/llgenie (issue #1038).
+<!-- host-bot-tools:end -->
+
 ## When to Use
 
 Load this for ANY work on LLGenie engines: a new trending engine that needs a

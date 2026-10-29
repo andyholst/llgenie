@@ -33,6 +33,12 @@ runs on demand (the engine loop needs a real GPU; the architecture pass needs a 
 CI leg preloads them. They are admitted by name in `HOST_SKILLS` (`scripts/check_agent_skills.py`) and
 are exempt from the unused-skill rule only — they still owe frontmatter and `Inputs`/`Output`/`Rules`.
 
+The ten desktop profiles (`llgenie-architect` through `llgenie-tester`) pin `platform_toolsets.cli`
+and `skills.disabled` from `tests/fixtures/host-bot-capabilities.json`
+(`scripts/host_bot_capabilities.py`, issue #1038). Each HOST skill repeats its lane's pin in a
+`host-bot-tools` block, so the file a reviewer reads and the file the profile loads name the same
+toolsets. A lane that is not the rebase profile does not keep the force-push command approval.
+
 Rules for adding one:
 
 - A leg's inline prompt in the `Makefile` is a **pointer plus its parameters** — the rules live in

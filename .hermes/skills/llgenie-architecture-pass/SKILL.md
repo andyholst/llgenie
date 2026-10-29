@@ -11,6 +11,16 @@ metadata:
 
 # Architecture pass
 
+<!-- host-bot-tools:begin -->
+## Tools
+
+This lane's chat session is pinned to these Hermes toolsets and no others: `clarify`, `file`, `memory`, `session_search`, `skills`, `terminal`, `todo`, `web`.
+
+Skills that stay enabled: `github`, `llgenie-architecture-issue-pass`.
+Every other installed skill is listed in `skills.disabled`.
+The pin is `tests/fixtures/host-bot-capabilities.json` in asimov-agent/llgenie (issue #1038).
+<!-- host-bot-tools:end -->
+
 A structural audit of this repository that ends in issues another bot implements. This is the contract a
 host agent runs when the owner says "go over the architecture and file the refactoring work". It is the
 HOST half of the fleet: no CI leg preloads it, and it is admitted by name in `HOST_SKILLS`
