@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""The ci-hf-live workflow obeys the owner's #1002 ask (merge-to-main live-HF pipeline).
+
+The owner (#1002): "the ci pipeline only runs the hf live tests as a separate pipeline that runs
+when merged to main branch". Complementing #1000's "they can't be part of ci unit anymore". This
+pins the workflow file so compliance can't decay:
+
+- Trigger is merge to `main` (push on branches: [main]) PLUS a nightly schedule + manual dispatch,
+  and NEVER a `pull_request:` trigger and never a non-main branch push — live-HF failures are caught
+  at main-merge time, never in a PR and never on a feature branch.
+- The job runs the bounded liveness gate (make check-model-links LIVE=1 LIMIT=25) BEFORE the seam
+  (make test-unit-network), and never the hermetic unit gate — a dead committed link is a named
+  message before any live test runs.
+- The schedule minute is odd / its own (issue #275).
+
+Hermetic: pure file reads, no network.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+WORKFLOW = REPO / ".github" / "workflows" / "ci-hf-live.yml"
+
+
+def _text() -> str:
+    assert WORKFLOW.exists(), f"ci-hf-live.yml missing at {WORKFLOW}"
+    return WORKFLOW.read_text()
+
+
+def test_ci_hf_live_triggers_on_merge_to_main_not_pr_or_feature_push():
+    """#1002: merge-to-main trigger; never a pull_request, never a non-main push."""
+
+    text = _text()
+
+    # It pushes on main (the merge) ...
+    assert re.search(r"^  push:\s*$", text, re.M), "ci-hf-live.yml must have a push trigger (merge)"
+    assert re.search(r"branches:\s*\[main\]", text, re.M), "push must be restricted to main only"
+    # ... is manually dispatchable and optionally scheduled
+    assert "workflow_dispatch" in text, "ci-hf-live.yml must be manually dispatchable"
+    assert re.search(r"^  schedule:", text, re.M), "ci-hf-live.yml may run nightly (owner-OK'd)"
+    # Never on a PR
+    assert re.search(r"^  pull_request:", text, re.M) is None, \
+        "a live-HF test must never gate a pull request (#1000: not in ci-unit/PR)"
+
+
+def test_ci_hf_live_runs_the_liveness_gate_then_the_seam():
+    """The dedicated pipeline first proves the links resolve, then runs the network-owned set."""
+
+    text = _text()
+    assert "make check-model-links LIVE=1 LIMIT=25" in text, \
+        "the bounded liveness gate must run first (#1000/#1002)"
+    assert "make test-unit-network" in text, \
+        "the @pytest.mark.network set must run via the seam (#1000)"
+    job = text.split("jobs:", 1)[1]
+    assert re.search(r"make test-unit(?!-network)", job) is None, \
+        "the hermetic unit gate must never run in the live pipeline (#1000)"
+    gate = job.index("make check-model-links LIVE=1 LIMIT=25")
+    seam = job.index("make test-unit-network")
+    assert gate < seam, "a dead link must fail before any live test (named message, not a 404)"
+
+
+def test_ci_hf_live_schedule_is_an_odd_own_minute():
+    """Issue #275: no bot shares a slot; GitHub drops top-of-hour runs, so the minute is odd."""
+
+    m = re.search(r"cron:\s*\"([0-9]+) ([0-9]+) \* \* \*\"", _text())
+    assert m, "ci-hf-live.yml must declare a nightly cron"
+    assert int(m.group(1)) % 2 == 1, f"ci-hf-live cron minute is not odd (issue #275)"
