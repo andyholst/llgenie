@@ -2,10 +2,10 @@
 
 Measured 2026-10-20 against https://inference-api.nousresearch.com/v1/models:
 
-    deepseek/deepseek-v4.1-flash         canonical_slug deepseek/deepseek-v4.1-flash-20260910
-    deepseek/deepseek-v4.1-flash-1017    canonical_slug deepseek/deepseek-v4.1-flash-20261017
+    deepseek/deepseek-v4-flash           canonical_slug deepseek/deepseek-v4-flash-20260423
+    deepseek/deepseek-v4-flash-0731      the July 31, 2026 V4 Flash snapshot
 
-Both answer 200, so no bot job could tell them apart. Every pin now names the `-1017` snapshot,
+Both answer 200, so no bot job could tell them apart. Every pin now names the `-0731` snapshot,
 and `scripts/agent_model_pin.py` compares the two files that carry it — the Dockerfile's
 `ARG HERMES_MODEL_ID` default and the install script's `MODEL_ID` default — with the single value
 the module declares. The old test asserted the PREFIX, which any newer id satisfies: that is how
@@ -55,9 +55,9 @@ def test_the_committed_pin_matches_the_one_declared_value():
     # When  the checker runs against this checkout
     bad = _PIN.findings(REPO) + _PIN.budget_findings(REPO)
 
-    # Then  every place agrees with the pin, and the declared pin is the 1017 snapshot
+    # Then  every place agrees with the pin, and the declared pin is the 0731 snapshot
     assert bad == [], bad
-    assert _PIN.MODEL_ID == "deepseek/deepseek-v4.1-flash-1017"
+    assert _PIN.MODEL_ID == "deepseek/deepseek-v4-flash-0731"
     assert _PIN.pin_in_dockerfile(REPO) == _PIN.MODEL_ID
     assert _PIN.pin_in_install_script(REPO) == _PIN.MODEL_ID
 

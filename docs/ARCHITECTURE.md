@@ -824,7 +824,7 @@ publishes an image it has not verified.
 
 Bots run inside the pinned agent image (`containers/agent`), call the model pinned once in
 `scripts/agent_model_pin.py` (alias `nous-deepseek`,
-`deepseek/deepseek-v4.1-flash-1017`) and are covered by
+`deepseek/deepseek-v4-flash-0731`) and are covered by
 `tests/test_bot_pipeline_isolation.py` (no shared cron slot, no shared concurrency group).
 
 Each leg's contract is a Hermes **project skill** (issue #577), not an inline rulebook:

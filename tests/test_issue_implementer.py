@@ -371,10 +371,10 @@ def test_the_image_wires_the_nous_token_as_a_custom_provider_alias():
     assert "model.aliases.${ALIAS}.base_url" in script and "inference-api.nousresearch.com/v1" in script
     assert "model.aliases.${ALIAS}.key_env" in script and "NOUS_API_KEY" in script
     assert "model.aliases.${ALIAS}.model" in script
-    # The EXACT snapshot, not the family prefix: `-1017` is the 2026-10-17 release, and the
-    # unsuffixed id is a different, older model that also answers 200 (issue #405). A prefix
-    # assert is what let the bots run the previous snapshot unnoticed.
-    assert "deepseek/deepseek-v4.1-flash-1017" in script, "the model id is the pinned snapshot"
+    # The EXACT snapshot, not the family prefix: `-0731` is the 2026-07-31 V4 Flash release,
+    # and the unsuffixed id is a different model (April 23) that also answers 200 (issue #405).
+    # A prefix assert is what let the bots run the previous snapshot unnoticed.
+    assert "deepseek/deepseek-v4-flash-0731" in script, "the model id is the pinned snapshot"
     assert "would fail at run time" in script, (
         "a bot whose alias is missing must fail loudly at build time, not at run time"
     )

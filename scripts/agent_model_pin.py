@@ -25,7 +25,7 @@ A DIFFERENT snapshot (older or newer) is drift, never "close enough".
 
 The values are the pinned snapshot's own: the catalogue at
 https://inference-api.nousresearch.com/v1/models publishes
-``context_length: 1048576`` and ``max_completion_tokens: 943718`` for this id, so a 16000-token
+``context_length: 1048576`` and ``max_completion_tokens: 65536`` for this id, so a 16000-token
 reply budget with the full 1M window is a deliberate, sub-limit choice (the host's alias uses the
 same pair). Leaving them unset makes Hermes budget the run from models.dev, which does not carry
 this snapshot id at all.
@@ -40,9 +40,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 # ---- the pin (the ONE declaration) ------------------------------------------------------
-# Provider-prefixed: the endpoint 404s a bare id. The `-1017` suffix is the SNAPSHOT
-# (2026-10-17) — dropping it silently selects the previous release.
-MODEL_ID = "deepseek/deepseek-v4.1-flash-1017"
+# Provider-prefixed: the endpoint 404s a bare id. The `-0731` suffix is the SNAPSHOT
+# (2026-07-31) of DeepSeek V4 Flash. There is no `deepseek-v4.1-flash-0731`. Dropping
+# the suffix selects `deepseek/deepseek-v4-flash`, the April 23 release, not this pin.
+MODEL_ID = "deepseek/deepseek-v4-flash-0731"
 ALIAS = "nous-deepseek"
 MAX_TOKENS = 16000
 CONTEXT_WINDOW = 1048576
@@ -50,9 +51,9 @@ CONTEXT_WINDOW = 1048576
 DOCKERFILE = "containers/agent/Dockerfile"
 INSTALL_SCRIPT = "scripts/install_hermes_ci.sh"
 
-# `ARG HERMES_MODEL_ID="deepseek/deepseek-v4.1-flash-1017"` (quote style tolerated)
+# `ARG HERMES_MODEL_ID="deepseek/deepseek-v4-flash-0731"` (quote style tolerated)
 _DOCKERFILE_ARG = re.compile(r'^ARG\s+HERMES_MODEL_ID="?(?P<value>[^"\s]+)"?\s*$', re.MULTILINE)
-# `MODEL_ID="${HERMES_MODEL_ID:-deepseek/deepseek-v4.1-flash-1017}"   # …`
+# `MODEL_ID="${HERMES_MODEL_ID:-deepseek/deepseek-v4-flash-0731}"   # …`
 _INSTALL_DEFAULT = re.compile(
     r'^MODEL_ID="\$\{HERMES_MODEL_ID:-(?P<value>[^}]+)\}"', re.MULTILINE
 )

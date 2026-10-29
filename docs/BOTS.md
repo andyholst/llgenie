@@ -471,17 +471,17 @@ Hermes CLI inside the agent image and calls **one pinned snapshot** through the 
 `nous-deepseek`:
 
 ```
-deepseek/deepseek-v4.1-flash-1017        (alias nous-deepseek, provider=custom,
+deepseek/deepseek-v4-flash-0731          (alias nous-deepseek, provider=custom,
                                           base_url=https://inference-api.nousresearch.com/v1,
                                           key_env=NOUS_API_KEY,
                                           max_tokens=16000, context_window=1048576)
 ```
 
-The `-1017` suffix is the **snapshot** (2026-10-17). Dropping it changes the model: the unsuffixed
-`deepseek/deepseek-v4.1-flash` resolves to `canonical_slug …-20260910` (the previous release, served
-by Impala), and it also answers `200` — so a bot job cannot tell the two apart. That is exactly what
-happened before #405: the bots ran the September snapshot while the host ran the October one, and the
-only test on the pin asserted the family *prefix*, which any newer id satisfies.
+The `-0731` suffix is the **snapshot** (2026-07-31) of DeepSeek V4 Flash. The endpoint has no
+`deepseek-v4.1-flash-0731`. Dropping the suffix changes the model: the unsuffixed
+`deepseek/deepseek-v4-flash` resolves to `canonical_slug …-20260423` (the April release), and it
+also answers `200` — so a bot job cannot tell the two apart. That is the same class of miss as
+#405, when a prefix assert let the bots run a different snapshot than the one the pin named.
 
 ```bash
 make model-pin-report     # the pinned snapshot, every place that declares it, and each finding

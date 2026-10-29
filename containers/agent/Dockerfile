@@ -19,11 +19,12 @@
 # ADDED: the Nous model wiring, as build args with the live defaults, so the pin is
 # visible here instead of buried in the install script:
 #     --build-arg HERMES_ALIAS=nous-deepseek
-#     --build-arg HERMES_MODEL_ID=deepseek/deepseek-v4.1-flash-1017   (provider-prefixed)
+#     --build-arg HERMES_MODEL_ID=deepseek/deepseek-v4-flash-0731   (provider-prefixed)
 #     --build-arg HERMES_BASE_URL=https://inference-api.nousresearch.com/v1
-# The `-1017` suffix is the SNAPSHOT (2026-10-17). The unsuffixed `deepseek/deepseek-v4.1-flash`
-# is a DIFFERENT, older model (`canonical_slug …-20260910`, served by Impala) that also answers
-# 200 — so dropping the suffix silently runs the bots on the previous release (issue #405).
+# The `-0731` suffix is the SNAPSHOT (2026-07-31) of DeepSeek V4 Flash. There is no
+# `deepseek-v4.1-flash-0731` on the endpoint. The unsuffixed `deepseek/deepseek-v4-flash`
+# is a DIFFERENT model (`canonical_slug …-20260423`) that also answers 200 — so dropping
+# the suffix silently runs the bots on the April release (issue #405).
 # The pin lives in ONE place too: scripts/agent_model_pin.py, gated by `make check-agent-model`.
 # Hermes's bundled `nous` provider is OAuth-only — a bare NOUS_API_KEY is IGNORED and
 # `--provider nous` fails with "not logged into Nous Portal" — so the install script writes
@@ -68,10 +69,10 @@ ARG HERMES_PACKAGE="hermes-agent"
 # The model pin and its provider alias (see the header). The model id must stay
 # provider-prefixed: the Nous endpoint 404s a bare id.
 ARG HERMES_ALIAS="nous-deepseek"
-ARG HERMES_MODEL_ID="deepseek/deepseek-v4.1-flash-1017"
+ARG HERMES_MODEL_ID="deepseek/deepseek-v4-flash-0731"
 ARG HERMES_BASE_URL="https://inference-api.nousresearch.com/v1"
 # The alias's budget: the pinned snapshot publishes context_length 1048576 and
-# max_completion_tokens 943718, so this is a deliberate sub-limit pair (the same one the host's
+# max_completion_tokens 65536, so this is a deliberate sub-limit pair (the same one the host's
 # alias uses). Left unset, Hermes budgets the bot run from models.dev, which has no entry for this
 # snapshot id (issue #405).
 ARG HERMES_MAX_TOKENS="16000"
