@@ -306,27 +306,66 @@ def _gh(gh: str, args: list[str]) -> str:
     return r.stdout
 
 
+def _gh_api(gh: str, args: list[str]) -> str:
+    """`gh api` takes no `--repo` — the full path carries the repository, so this runs bare."""
+    return _gh(gh, ["api", *args])
+
+
 def _issue_labels(gh: str, repo: str, number: int) -> list[str]:
-    """The labels GitHub reports for one issue — the read-back, never an assumption."""
-    out = _gh(gh, ["issue", "view", str(number), "--repo", repo, "--json", "labels"])
-    return [l.get("name") for l in (json.loads(out or "{}").get("labels") or [])]
+    """The labels the issue ACTUALLY carries, read back from the tracker.
+
+    Read through the REST endpoint the write uses (`repos/<repo>/issues/<n>/labels`), not
+    `gh issue view --json labels`: the write this module makes is REST, and a read over the
+    other transport can agree with a write that never happened (#724).
+    """
+    out = _gh_api(gh, [f"repos/{repo}/issues/{number}/labels", "--jq", ".[].name"])
+    return [line.strip() for line in (out or "").splitlines() if line.strip()]
+
+
+def set_labels(gh: str, repo: str, number: int, labels: list[str], dry: bool = False) -> None:
+    """Label the issue through the REST API, then PROVE it stuck — or fail the step.
+
+    Neither GitHub write this module used to make can be trusted on the runner's PAT:
+    `--label` on `gh issue create` is silently dropped after the issue exists, and
+    `gh issue edit --add-label` (GraphQL `addLabelsToLabelable`) is refused outright —
+    measured on registry-sync run 40682255828:
+
+        failed to update .../issues/774: GraphQL: Resource not accessible by personal
+        access token (addLabelsToLabelable)
+
+    So the POST to `repos/<repo>/issues/<n>/labels` IS the write (#786 does the same for the
+    security filer) and the read-back decides. An issue that exists but carries no queue
+    label routes the work to nobody — indistinguishable from a green run — hence SystemExit,
+    naming the issue and the missing label, instead of a warning.
+    """
+    if dry:
+        print(f"[engine-skill-gap] would label #{number}: {', '.join(labels)}")
+        return
+    args = ["-X", "POST", f"repos/{repo}/issues/{number}/labels"]
+    for label in labels:
+        args += ["-f", f"labels[]={label}"]
+    _gh_api(gh, args)
+    have = _issue_labels(gh, repo, number)
+    missing = [label for label in labels if label not in have]
+    if missing:
+        raise SystemExit(
+            f"[engine-skill-gap] #{number} is missing {', '.join(missing)} after the label "
+            f"write — an unlabelled tracking issue routes the work to nobody ({QUEUE_LABEL} is "
+            "what the implementer bot selects on), so the step fails")
+    print(f"[engine-skill-gap] labelled #{number}: {', '.join(labels)}")
 
 
 def ensure_queue_label(gh: str, repo: str, number: int, dry: bool = False) -> bool:
     """Put the issue in the bots' queue, then PROVE it: returns True when labelled.
 
-    `--label` on create is silently dropped on the CI token path (#724), so the label is
-    also applied explicitly to an issue that already exists and lost it, and read back.
-    A missing queue label is a loud failure naming the issue — an unlabelled tracking
-    issue routes the work to nobody, which looks exactly like a green run.
+    The label is applied through the API (never `--add-label`, #724) and read back, so an
+    issue that already exists and lost its queue label is repaired on the next sync instead
+    of staying invisible to the bot.
     """
     if QUEUE_LABEL in _issue_labels(gh, repo, number):
         return True
-    if dry:
-        print(f"[engine-skill-gap] would label #{number} {QUEUE_LABEL}")
-        return True
-    _gh(gh, ["issue", "edit", str(number), "--repo", repo, "--add-label", QUEUE_LABEL])
-    return QUEUE_LABEL in _issue_labels(gh, repo, number)
+    set_labels(gh, repo, number, [QUEUE_LABEL], dry)
+    return True if dry else QUEUE_LABEL in _issue_labels(gh, repo, number)
 
 
 def open_issue(gh: str, repo: str, name: str, body: str, dry: bool = False) -> dict:
@@ -342,16 +381,16 @@ def open_issue(gh: str, repo: str, name: str, body: str, dry: bool = False) -> d
         return {"engine": name, "action": "existing", "number": hit["number"], "url": ""}
     if dry:
         return {"engine": name, "action": "would-create", "number": None, "url": ""}
-    out = _gh(gh, ["issue", "create", "--repo", repo, "--title", title, "--body", body,
-                   "--label", ISSUE_LABEL])
+    # `--label` is NOT passed: on the runner path it is silently dropped, so the issue would
+    # exist unlabelled and be invisible to the implementer bot. The labels are applied by
+    # `set_labels` (one REST POST + a read-back) the moment the create returns a number (#724).
+    out = _gh(gh, ["issue", "create", "--repo", repo, "--title", title, "--body", body])
     url = out.strip().splitlines()[-1] if out.strip() else ""
     number = int(url.rstrip("/").rsplit("/", 1)[-1]) if url.rstrip("/").rsplit("/", 1)[-1].isdigit() else None
     if number is None:
         raise SystemExit(f"[engine-skill-gap] the created issue for {name} returned no number "
                          f"(gh said {url!r}); cannot label or link it")
-    if not ensure_queue_label(gh, repo, number, dry):
-        raise SystemExit(f"[engine-skill-gap] #{number} ({name}) was created but does not carry "
-                         f"{QUEUE_LABEL}: no bot will pick it up. Add the label and re-run.")
+    set_labels(gh, repo, number, [ISSUE_LABEL, QUEUE_LABEL], dry)
     return {"engine": name, "action": "created", "number": number, "url": url}
 
 

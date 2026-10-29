@@ -92,8 +92,10 @@ previews). Nothing is published without drift, and the bot never merges.
    (`data/engine-skill-gap.json`, `data/unsupported-engines.json`), and
    `make check-engine-skill-gap` (in `make ci-unit`) keeps a registry that names a new
    engine red until it ships a skill or a dated decision (issue #683). The tracking issue
-   the sync files is labelled `agent:implement` explicitly and read back (the create-flag
-   label is dropped on the CI token path, #724/#757), and it names
+   the sync files is labelled `agent:implement` through the REST label endpoint
+   (`POST repos/<repo>/issues/<n>/labels`) and read back, failing the step when the label is
+   absent — neither the create's `--label` (dropped) nor `gh issue edit --add-label`
+   (GraphQL, refused by the runner's PAT) is trusted (#724/#757). It names
    `make engine-skill-scaffold ENGINE="<registry name>"` — the target that writes the
    skill from the registry's own entry and leaves every unprovable key EMPTY, so
    `make skills-validate` names the remaining work rather than a guessed pin building.

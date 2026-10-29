@@ -93,65 +93,143 @@ def test_the_report_names_an_added_model_a_new_engine_and_an_added_contract_key(
     assert "`m2` — Model Two (VRAM 8GB)" in issue_body.section_body(body, "Technical")
 
 
+class _Gh:
+    """A `gh` stand-in: it records every argv and answers the endpoints the product calls.
+
+    `issue create` stores NO label — that is the measured runner behaviour (#724, issues #710
+    and #749), so the only write that makes an issue routable is the REST label endpoint. The
+    real `open_issue()`/`set_labels()`/`labels_of()` run against it; only `gh` is a stand-in.
+    """
+
+    def __init__(self, open_issues: list | None = None, label_sticks: bool = True):
+        self.calls: list[list[str]] = []
+        self.open_issues = open_issues or []
+        self.label_sticks = label_sticks
+        self.labels: dict[str, list[str]] = {}
+        self._next = 705
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args[:2] == ["issue", "list"]:
+            return json.dumps(self.open_issues)
+        if args[:2] == ["issue", "edit"]:
+            return ""
+        if args[:2] == ["issue", "create"]:
+            n, self._next = self._next, self._next + 1
+            return f"https://github.com/asimov-agent/llgenie/issues/{n}"
+        if args[:1] == ["api"]:
+            path = next(a for a in args if a.startswith("repos/"))
+            n = path.split("/issues/")[1].split("/")[0]
+            if "POST" in args and self.label_sticks:
+                for i, a in enumerate(args):
+                    if a == "-f" and args[i + 1].startswith("labels[]="):
+                        want = args[i + 1].split("=", 1)[1]
+                        self.labels.setdefault(n, [])
+                        if want not in self.labels[n]:
+                            self.labels[n].append(want)
+                return ""
+            return "\n".join(self.labels.get(n, []))
+        raise AssertionError(f"unexpected gh call: {args}")
+
+
 def test_a_second_open_for_the_same_store_updates_instead_of_duplicating(monkeypatch):
-    """One issue per store version: the marker is the identity, so a re-run edits it."""
-    # Given  gh answering with an open issue that already carries this store's marker
-    calls: list[list[str]] = []
+    """One issue per store version: the marker is the identity, so a re-run edits it — and
+    re-queues it, because the transport may have dropped the label the first time."""
+    # Given  gh answering with an open issue that already carries this store's marker,
+    #        and carrying no label (the measured #710/#749 state)
     utc = "2026-10-26T00:00:00Z"
     marker = RCI.MARKER.format(utc=utc)
-
-    def fake(args):
-        calls.append(args)
-        if args[:2] == ["issue", "list"]:
-            return json.dumps([{"number": 704, "body": f"old body\n\n{marker}\n"}])
-        return "https://github.com/asimov-agent/llgenie/issues/704"
-
-    monkeypatch.setattr(RCI, "run_gh", fake)
+    gh = _Gh(open_issues=[{"number": 704, "body": f"old body\n\n{marker}\n"}])
+    monkeypatch.setattr(RCI, "run_gh", gh)
 
     # When   the report is opened for that same store
     result = RCI.open_issue("new body", utc, "asimov-agent/llgenie")
 
     # Then   it edits issue 704 rather than creating a second one
     assert result == "updated #704"
-    assert ["issue", "edit", "704"] == calls[1][:3]
-    assert not any(c[:2] == ["issue", "create"] for c in calls)
+    assert ["issue", "edit", "704"] == gh.calls[1][:3]
+    assert not any(c[:2] == ["issue", "create"] for c in gh.calls)
+
+    # And    the unlabelled issue is labelled through the REST endpoint, not `--add-label`
+    posts = [c for c in gh.calls if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1 and "repos/asimov-agent/llgenie/issues/704/labels" in posts[0]
+    assert f"labels[]={RCI.LABEL}" in posts[0]
+    assert gh.labels["704"] == [RCI.LABEL]
 
 
 def test_a_store_with_no_open_issue_creates_exactly_one(monkeypatch):
-    """The first sync of a store version files one issue, labelled for the agent."""
+    """The first sync of a store version files one issue, and the label is PROVED."""
     # Given  gh answering with no matching issue
-    calls: list[list[str]] = []
-
-    def fake(args):
-        calls.append(args)
-        if args[:2] == ["issue", "list"]:
-            return "[]"
-        return "https://github.com/asimov-agent/llgenie/issues/705"
-
-    monkeypatch.setattr(RCI, "run_gh", fake)
+    gh = _Gh()
+    monkeypatch.setattr(RCI, "run_gh", gh)
 
     # When   the report is opened
     result = RCI.open_issue("body", "2026-10-27T00:00:00Z", "asimov-agent/llgenie")
 
-    # Then   exactly one issue is created, carrying the agent label
+    # Then   exactly one issue is created, and it carries no --label (dropped on the runner)
     assert result.endswith("/issues/705")
-    creates = [c for c in calls if c[:2] == ["issue", "create"]]
+    creates = [c for c in gh.calls if c[:2] == ["issue", "create"]]
     assert len(creates) == 1
-    assert "--label" in creates[0] and RCI.LABEL in creates[0]
+    assert "--label" not in creates[0]
+
+    # And    the label was written through the API and read back from the tracker
+    posts = [c for c in gh.calls if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1 and "repos/asimov-agent/llgenie/issues/705/labels" in posts[0]
+    assert f"labels[]={RCI.LABEL}" in posts[0]
+    reads = [c for c in gh.calls if c[:1] == ["api"] and "--jq" in c]
+    assert reads and "repos/asimov-agent/llgenie/issues/705/labels" in reads[-1]
+    assert gh.labels["705"] == [RCI.LABEL]
+
+
+def test_a_change_issue_that_cannot_be_labelled_fails_the_step(monkeypatch):
+    """An unlabelled change issue routes the store review to nobody: a red step, never a pass."""
+    # Given  a tracker whose label write is accepted but never stored
+    gh = _Gh(label_sticks=False)
+    monkeypatch.setattr(RCI, "run_gh", gh)
+
+    # When   the report is opened
+    try:
+        RCI.open_issue("body", "2026-10-27T00:00:00Z", "asimov-agent/llgenie")
+    except SystemExit as exc:
+        # Then  the step fails, naming the issue and the missing label
+        assert "#705" in str(exc) and RCI.LABEL in str(exc), exc
+    else:                                            # pragma: no cover - the failure is the assertion
+        raise AssertionError("an unlabelled change issue must fail the step")
+
+    # And    the failure is the READ-BACK, not a skipped write
+    assert [c for c in gh.calls if c[:1] == ["api"] and "POST" in c]
 
 
 def test_dry_run_mutates_nothing(monkeypatch):
     """`DRY=1` previews the decision, it does not touch GitHub."""
     # Given  a marker-less listing
-    calls: list[list[str]] = []
-    monkeypatch.setattr(RCI, "run_gh", lambda args: calls.append(args) or "[]")
+    gh = _Gh()
+    monkeypatch.setattr(RCI, "run_gh", gh)
 
     # When   the open runs dry
     result = RCI.open_issue("body", "2026-10-27T00:00:00Z", "asimov-agent/llgenie", dry=True)
 
-    # Then   it says what it would do and creates nothing
+    # Then   it says what it would do, and neither writes the body nor labels anything
     assert result == "would create one issue"
-    assert not any(c[:2] in (["issue", "create"], ["issue", "edit"]) for c in calls)
+    assert not any(c[:2] in (["issue", "create"], ["issue", "edit"]) for c in gh.calls)
+    assert not any(c[:1] == ["api"] for c in gh.calls)
+
+
+def test_a_dry_update_of_a_marked_issue_does_not_label_it(monkeypatch):
+    """The dry run is inert on the update path too: no edit, no label write."""
+    # Given  an open issue carrying this store's marker and no label
+    utc = "2026-10-26T00:00:00Z"
+    marker = RCI.MARKER.format(utc=utc)
+    gh = _Gh(open_issues=[{"number": 704, "body": marker}])
+    monkeypatch.setattr(RCI, "run_gh", gh)
+
+    # When   the open runs dry
+    result = RCI.open_issue("new body", utc, "asimov-agent/llgenie", dry=True)
+
+    # Then   nothing is written
+    assert result == "would update #704"
+    assert not any(c[:2] in (["issue", "edit"], ["issue", "create"]) for c in gh.calls)
+    assert not any(c[:1] == ["api"] for c in gh.calls)
 
 
 def test_the_workflow_runs_the_step_even_when_a_gate_is_red():

@@ -260,6 +260,49 @@ def run_gh(args: list[str]) -> str:
     return out.stdout
 
 
+def repo_slug(repo: str | None) -> str:
+    """`owner/name` — `gh api` paths carry the repository, so it must be spelled out."""
+    if repo:
+        return repo
+    return run_gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).strip()
+
+
+def _gh_api(args: list[str]) -> str:
+    """`gh api` takes no `--repo`; the path carries the repository."""
+    return run_gh(["api", *args])
+
+
+def labels_of(repo: str, number: int) -> list[str]:
+    """The labels the issue ACTUALLY carries, read back from the tracker.
+
+    Read over the same REST endpoint the write uses. `gh issue view --json labels` goes the
+    GraphQL way, and a read on the other transport can agree with a write that never happened.
+    """
+    out = _gh_api([f"repos/{repo}/issues/{number}/labels", "--jq", ".[].name"])
+    return [line.strip() for line in (out or "").splitlines() if line.strip()]
+
+
+def set_labels(repo: str, number: int, labels: list[str]) -> None:
+    """Label the issue through the REST API and PROVE it stuck, or fail the step.
+
+    `--label` on `gh issue create` is silently dropped on the runner's PAT (#724: issues #710
+    and #749 were filed with zero labels, and no `labeled` event exists in their timelines), so
+    the create flag is not a write. The POST is the write; the read-back decides. An unlabelled
+    change issue is invisible to every bot that selects on `agent:implement`, which looks exactly
+    like a green step — hence SystemExit, naming the issue and the missing label.
+    """
+    args = ["-X", "POST", f"repos/{repo}/issues/{number}/labels"]
+    for label in labels:
+        args += ["-f", f"labels[]={label}"]
+    _gh_api(args)
+    have = labels_of(repo, number)
+    missing = [label for label in labels if label not in have]
+    if missing:
+        raise SystemExit(
+            f"[registry-change] #{number} is missing {', '.join(missing)} after the label write — "
+            "an unlabelled change issue routes the store review to nobody, so the step fails")
+
+
 def open_issue(body: str, utc: str, repo: str | None, dry: bool = False) -> str:
     """Create ONE issue for this store, or update the open one carrying its marker."""
     marker = MARKER.format(utc=utc)
@@ -273,11 +316,20 @@ def open_issue(body: str, utc: str, repo: str | None, dry: bool = False) -> str:
             if dry:
                 return f"would update #{issue['number']}"
             run_gh(["issue", "edit", str(issue["number"]), *base, "--body", body])
+            # An issue that carries the marker but lost its label is re-queued, not skipped: a
+            # re-run after a dropped write is how the store review gets back to the bots (#724).
+            if LABEL not in labels_of(repo_slug(repo), issue["number"]):
+                set_labels(repo_slug(repo), issue["number"], [LABEL])
             return f"updated #{issue['number']}"
     if dry:
         return "would create one issue"
-    url = run_gh(["issue", "create", *base, "--title", title, "--label", LABEL,
-                  "--body", body]).strip()
+    # No `--label`: it is dropped on the runner path, so the issue would be filed invisible.
+    url = run_gh(["issue", "create", *base, "--title", title, "--body", body]).strip()
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    if not number.isdigit():
+        raise SystemExit(f"[registry-change] the created issue returned no number ({url!r}); "
+                         "it cannot be labelled or linked")
+    set_labels(repo_slug(repo), int(number), [LABEL])
     return url
 
 

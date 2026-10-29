@@ -275,15 +275,17 @@ def test_the_october_fixture_registry_validates_with_the_real_decisions():
 def _fake_gh(tmp_path: Path, open_issues: list | None = None, create_fails: bool = False,
              label_sticks: bool = True):
     """`gh` that records every argv as ONE JSON line and answers `issue list` with
-    `open_issues`, `issue create` with a URL, and `issue view`/`issue edit` from a label
-    store. It is a real executable the product starts as a subprocess — only the GitHub
-    API is a stand-in, never the request the product builds (`tests/test_ci_images.py`
+    `open_issues`, `issue create` with a URL, and the label endpoints of `gh api` from a
+    label store. It is a real executable the product starts as a subprocess — only the
+    GitHub API is a stand-in, never the request the product builds (`tests/test_ci_images.py`
     does the same for `docker`).
 
-    `issue create` stores NO label: that is the measured CI behaviour (#724), where the
-    issue exists and `--label` was silently dropped. `label_sticks=False` makes `issue
-    edit --add-label` a no-op as well — the case where the queue label cannot be applied
-    at all.
+    `issue create` stores NO label: that is the measured CI behaviour (#724), where the issue
+    exists and `--label` was silently dropped. The only write that sticks is the REST label
+    endpoint — `POST repos/<repo>/issues/<n>/labels` — which the product must therefore use,
+    and `GET repos/<repo>/issues/<n>/labels --jq .[].name` is the read-back it must trust.
+    `label_sticks=False` makes even that POST a no-op: the case where the queue label cannot
+    be applied at all.
     """
     tmp_path.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "gh.log"
@@ -308,19 +310,21 @@ elif args[:2] == ["issue", "create"]:
     n = int(pathlib.Path({str(counter)!r}).read_text()) + 1
     pathlib.Path({str(counter)!r}).write_text(str(n))
     print(f"https://github.com/acme/llgenie/issues/{{n}}")
-elif args[:2] == ["issue", "view"]:
-    data = json.loads(pathlib.Path({str(labels)!r}).read_text())
-    print(json.dumps({{"labels": [{{"name": x}} for x in data.get(args[2], [])]}}))
-elif args[:2] == ["issue", "edit"]:
-    n = args[2]
-    want = args[args.index("--add-label") + 1] if "--add-label" in args else None
+elif args[0] == "api":
+    path = next((a for a in args if a.startswith("repos/")), "")
+    n = path.split("/issues/")[1].split("/")[0] if "/issues/" in path else ""
     store = pathlib.Path({str(labels)!r})
     data = json.loads(store.read_text())
-    if {bool(label_sticks)!r} and want:
-        data.setdefault(n, [])
-        if want not in data[n]:
-            data[n].append(want)
+    if "POST" in args and {bool(label_sticks)!r}:
+        for i, a in enumerate(args):
+            if a == "-f" and args[i + 1].startswith("labels[]="):
+                want = args[i + 1].split("=", 1)[1]
+                data.setdefault(n, [])
+                if want not in data[n]:
+                    data[n].append(want)
         store.write_text(json.dumps(data))
+    if "--jq" in args:
+        print("\\n".join(data.get(n, [])))
 ''')
     gh.chmod(0o755)
     return gh, log
@@ -359,6 +363,14 @@ def test_spawn_opens_one_issue_per_unresolved_engine_with_real_evidence(tmp_path
     assert len(creates) == 1, _calls(log)
     args = creates[0]
     assert args[args.index("--repo") + 1] == "acme/llgenie"
+    # And the create passes NO --label: on the runner path it is dropped, so the label is
+    # applied through the API and read back instead (#724)
+    assert "--label" not in args, args
+    posts = [c for c in _calls(log) if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1, _calls(log)
+    assert "repos/acme/llgenie/issues/501/labels" in posts[0]
+    assert f"labels[]={gap_mod.QUEUE_LABEL}" in posts[0]
+    assert f"labels[]={gap_mod.ISSUE_LABEL}" in posts[0]
     title = args[args.index("--title") + 1]
     body = args[args.index("--body") + 1]
     assert "BrandNewServer" in title and "has no llgenie skill" in title
@@ -419,9 +431,10 @@ def test_spawn_is_idempotent_and_creates_nothing_for_a_decided_engine(tmp_path):
     assert r2.returncode == 0, r2.stderr
     calls = _calls(log2)
     assert not [c for c in calls if c[:2] == ["issue", "create"]]
-    assert [c[:2] for c in calls if c[:2] == ["issue", "edit"]] == [["issue", "edit"]]
-    edit = next(c for c in calls if c[:2] == ["issue", "edit"])
-    assert edit[edit.index("--add-label") + 1] == gap_mod.QUEUE_LABEL
+    posts = [c for c in calls if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1, calls
+    assert "repos/acme/llgenie/issues/42/labels" in posts[0]
+    assert f"labels[]={gap_mod.QUEUE_LABEL}" in posts[0]
     assert "existing: BrandNewServer" in r2.stdout and "#42" in r2.stdout
 
 
@@ -496,17 +509,20 @@ def test_a_spawned_tracking_issue_lands_in_the_bots_queue(tmp_path):
                         "--repo", "acme/llgenie", "--gh", str(gh)],
                        capture_output=True, text=True, timeout=120)
 
-    # Then the step is green and the queue label was applied EXPLICITLY after the create…
+    # Then the step is green and the queue label was applied through the REST label endpoint…
     assert r.returncode == 0, r.stderr
     calls = _calls(log)
-    edits = [c for c in calls if c[:2] == ["issue", "edit"]]
-    assert len(edits) == 1, calls
-    assert edits[0][edits[0].index("--add-label") + 1] == gap_mod.QUEUE_LABEL
-    assert edits[0][edits[0].index("--repo") + 1] == "acme/llgenie"
+    posts = [c for c in calls if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1, calls
+    assert posts[0][posts[0].index("-X") + 1] == "POST"
+    assert "repos/acme/llgenie/issues/501/labels" in posts[0]
+    assert f"labels[]={gap_mod.QUEUE_LABEL}" in posts[0]
+    # …and no GraphQL write is attempted, because the runner's PAT refuses it (#724)
+    assert not [c for c in calls if c[:2] in (["issue", "edit"], ["issue", "view"])]
 
-    # …and READ BACK, so "the issue exists" and "the issue is queued" are both true
-    views = [c for c in calls if c[:2] == ["issue", "view"]]
-    assert views and "--json" in views[0] and "labels" in views[0]
+    # …and READ BACK through the same endpoint, so "exists" and "is queued" are both true
+    reads = [c for c in calls if c[:1] == ["api"] and "--jq" in c]
+    assert reads and "repos/acme/llgenie/issues/501/labels" in reads[-1]
     state = json.loads((tmp_path / "labels.json").read_text())
     assert gap_mod.QUEUE_LABEL in state["501"]
 
@@ -527,6 +543,12 @@ def test_a_tracking_issue_that_cannot_be_labelled_fails_the_step_naming_it(tmp_p
     # Then it fails loudly, naming the issue and the label
     assert r.returncode == 1
     assert gap_mod.QUEUE_LABEL in r.stderr and "501" in r.stderr
+    assert "after the label write" in r.stderr
+
+    # And the failure is the READ-BACK, not a skipped write: the POST was attempted first
+    posts = [c for c in _calls(_log) if c[:1] == ["api"] and "POST" in c]
+    assert len(posts) == 1, _calls(_log)
+    assert "repos/acme/llgenie/issues/501/labels" in posts[0]
 
 
 # ---------------------------------------------------------------------------

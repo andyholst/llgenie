@@ -168,8 +168,10 @@ per-engine view into `data/engine-skill-gap.json`). An engine upstream adds with
 no skill and no entry is **new and unresolved**: `make check-engine-skill-gap`
 fails naming it, and the sync opens one tracking issue per new engine, so the gap
 is a linkable work item instead of a log line. That issue is created **in the bots' queue**: the sync
-labels it `agent:implement` with an explicit `gh issue edit --add-label` after the create and reads the
-label back (a `--label` on create is dropped on the CI token path, #724/#757), and its body names
+passes no `--label` on the create — it is silently dropped on the runner path — and labels the issue
+through `POST repos/<repo>/issues/<n>/labels`, then reads the labels back and **fails the step** when
+`agent:implement` is missing (`gh issue edit --add-label` is GraphQL `addLabelsToLabelable`, which the
+runner's PAT refuses outright — measured on registry-sync run 40682255828; #724/#757). Its body names
 `make engine-skill-scaffold ENGINE="<registry name>"` — the target that writes
 `skills/engines/<id>/SKILL.md` from the registry's own entry (engine, repo URL, backends) and leaves
 every upstream fact it cannot prove EMPTY, so `make skills-validate` names the remaining work instead of
