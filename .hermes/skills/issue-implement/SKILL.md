@@ -35,6 +35,12 @@ what you leave behind, so the tree and `pr-body.md` are the deliverable.
 
 - **Never create a git worktree.** AGENTS.md's worktree rule is for a host agent; here `../llgenie-wt`
   resolves outside the mount and is destroyed with the container, taking your work with it.
+- **Never prune a worktree.** `make worktree-prune`, `git worktree prune` and `git worktree remove`
+  delete directories and cannot see uncommitted work — a tree mid-flight whose branch tip is already
+  an ancestor of `main` looks identical to a finished one, and a prune has destroyed in-flight work.
+  Report stale trees with `make worktree-report` (it lists every worktree and mutates nothing) and
+  leave deletion to the owner; run one of those three commands only when the owner explicitly tells
+  you to (issue #794).
 - **Every gate runs through the Makefile** (`make test-unit`, `make lint`, `make check-wiring`,
   `make check-docs`, `make openspec-validate NAME=<change>` …). Fix what they report; CI runs the
   same commands.

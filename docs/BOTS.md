@@ -1541,6 +1541,16 @@ make issue-cleaner-apply  # the same decision, then: an evidence comment on the 
                           # completed. An issue the PR's own `Not covered` section names is a tracked
                           # remainder and is left open; REPO= picks the repo
 make workflows-report  # show every YAML file the workflow gate reads, how many expressions it validated, and its verdict
+make worktree-report   # measure the bench before a bot starts, and mutate NOTHING (issue #794): one row per
+                       # `git worktree list --porcelain` entry with its path, branch (`detached` when it holds
+                       # none), merged-into-main (a real `git merge-base --is-ancestor <head> <base>`), open-pr
+                       # (a real `gh pr list`) and dirty (a real `git status --porcelain` in that directory),
+                       # then a summary counting total, stale (merged, no open PR), off-main-no-pr and dirty.
+                       # Exit 0 even when nothing is stale; exit 2 naming the step when a measurement fails,
+                       # because an unreadable state is not a clean state. SLUG= and BASE= override the repo and
+                       # the base. A host bot runs this INSTEAD of the prune: the prune deletes directories and
+                       # cannot see uncommitted work, so a mid-flight tree whose tip is already an ancestor of
+                       # `main` looks exactly like a finished one (it destroyed the #791 run's worktree).
 make worktree-prune    # remove the worktrees and local branches whose PR already merged, so the checkout stops
                        # accumulating debris (issue #431). Eligibility is the PR, never a name pattern or an
                        # ancestry guess: this repo squash-merges, so a merged branch's tip is NEVER an ancestor
@@ -1558,7 +1568,16 @@ make worktree-prune    # remove the worktrees and local branches whose PR alread
                        # single retry, while one with a branch checked out or uncommitted/unmerged work makes the
                        # branch a KEEP with that reason printed — never an `Error 2` that reds the whole sweep.
                        # DRY=1 prints the plan and mutates nothing; SLUG= picks the owner/name
-                       # gh reads (default asimov-agent/llgenie — REPO is the checkout path, which gh rejects)
+                       # gh reads (default asimov-agent/llgenie — REPO is the checkout path, which gh rejects).
+                       # A BOT RUN IS REFUSED (issue #794): `scripts/worktree_prune_guard.py` runs first and,
+                       # when the run is unattended and CONFIRM=1 is absent, exits 3 naming the marker that
+                       # said so, `make worktree-report`, and the re-run spelling. "Unattended" covers every
+                       # lane a bot takes: `CI` (a GitHub step sets it), `BOT` (the Makefile's
+                       # AGENT_BOT_MARKER, forwarded as `-e BOT=1` on every agent-image run — docker does not
+                       # inherit the host env) and the dispatcher's `HERMES_KANBAN_TASK`,
+                       # `HERMES_KANBAN_WORKSPACE`, `HERMES_KANBAN_BRANCH`, `HERMES_KANBAN_WORKSPACES_ROOT`
+                       # (a lane spawned on the host). The owner's own run (no marker set) is unchanged, and
+                       # CONFIRM=1 lets a bot proceed once a human has read the report.
 make test-clean        # prune stopped orphaned test containers (always)
 ```
 
