@@ -15,6 +15,8 @@ This gate keeps that true, because nothing else can:
 * a skill whose frontmatter `name` disagrees with its directory is not resolvable by `-s`;
 * a skill whose `Inputs`/`Output`/`Rules` section went missing is a contract with a hole in it;
 * a prompt that grows past the pointer budget means the rules crept back into the recipe;
+* a host skill (an operator loop a GPU host runs, no CI leg) is admitted by NAME, never by
+  shape, so every admission is a reviewed diff and the contract rules still apply to it;
 * the unattended contract inlined again is the duplication this change removed;
 * an `AGENTS.md` that no longer states the rule lets the seam be deleted silently.
 
@@ -43,6 +45,11 @@ PROMPT_BUDGET = 400
 REQUIRED_SECTIONS = ("## Inputs", "## Output", "## Rules")
 #: The shared unattended contract, preloaded beside each bot's own skill.
 UNATTENDED_SKILL = "bot-unattended"
+#: Skills an operator runs on a GPU HOST on demand, which no CI leg preloads. They live here so the
+#: engine loop is versioned with the repo it drives, and they still owe frontmatter and
+#: Inputs/Output/Rules — they are exempt from the unused-skill rule only. Listed by name (never
+#: detected from the body), so admitting another one is a reviewed diff.
+HOST_SKILLS = frozenset({"llgenie-engine-improver"})
 #: The rule AGENTS.md must keep, so the seam cannot be deleted silently.
 AGENTS_MARKER = "## A bot's behaviour lives in its project skill"
 #: The retired second place a bot's rules lived (moved into `.hermes/skills/pr-fix/SKILL.md`).
@@ -279,7 +286,7 @@ def findings(root: Path = REPO_ROOT) -> list[dict]:
             })
 
     for name in found:
-        if name not in seen:
+        if name not in seen and name not in HOST_SKILLS:
             items.append({
                 "key": "skill-unused",
                 "where": str((found[name] / SKILL_FILE).relative_to(root)),
@@ -327,7 +334,8 @@ def report(root: Path = REPO_ROOT) -> str:
     lines.append(f"[check-agent-skills] {SKILLS_DIR}/ ({len(found)} skill(s)):")
     for name, dirpath in found.items():
         meta = frontmatter(dirpath / SKILL_FILE) or {}
-        lines.append(f"  {name}: name={meta.get('name')!r} "
+        kind = " host-skill" if name in HOST_SKILLS else ""
+        lines.append(f"  {name}:{kind} name={meta.get('name')!r} "
                      f"description={'yes' if meta.get('description') else 'MISSING'}")
     items = findings(root)
     lines.append(f"[check-agent-skills] {len(items)} finding(s)")
