@@ -358,8 +358,12 @@ skill: `references/proving-and-pitfalls.md`.
 
 ## Rules
 
-- **Never merge.** No squash, no auto-merge, no push to `main`. Stop at the
-  reviewable PR; every merge is the user's decision.
+- **Arm auto-merge when your work on a PR is DONE (owner directive 2026-10-29).** Never squash or
+  merge by hand and never push to `main` — but the LAST push is the trigger to arm:
+  `gh pr merge <n> --auto --squash`, then report the arm time in the PR comment (`auto=<enabledAt>`
+  from `gh pr view --json autoMergeRequest`). "Done" triggers the arm, not "approved": a finished,
+  unarmed PR waits for a human instead of a merger. Only exception — a PR the owner explicitly
+  forbade: write `auto=none (owner instruction)` plus where that instruction lives.
 - **Never build an inference-server engine image locally.** CI builds and
   publishes every engine x arch cell (`.github/workflows/engine-build.yml`);
   this host pulls and RUNS. No `make build-engine*`, no `docker build`, no
