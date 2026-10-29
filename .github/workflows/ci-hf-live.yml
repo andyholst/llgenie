@@ -17,7 +17,7 @@ name: ci-hf-live — the merge-to-main real-Hub test pipeline (HF live tests + t
 #       make test-unit-network (the @pytest.mark.network ownership set, via the tester's seam,
 #       scripts/unit_tests.py run --marker network, issue #393). Order is the contract: a dead link
 #       fails before any test runs, so the red names the URL, not a test's 404.
-# Trigger surface: push to branches main (merge-to-main) + schedule daily 06:15 UTC (its own odd
+# Trigger surface: push to branches main (merge-to-main) + schedule daily 06:59 UTC (its own odd
 #                  minute — issue #275) + workflow_dispatch (owner / repository bot / collaborator
 #                  with write), and NOTHING else — no pull_request and no non-main branch trigger.
 # Never: never runs in a pull request, never on a non-main branch push, never replaces ci-unit,
@@ -28,7 +28,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "15 6 * * *"    # nightly 06:15 UTC — its own odd minute (issue #275: no bot shares a slot)
+    - cron: "59 6 * * *"    # nightly 06:59 UTC — own odd minute free on all seven weekdays (issue #275: no bot shares a slot; minute 15 is now taken by the every-hour set and ci-requeue)
   workflow_dispatch:
 
 permissions:
