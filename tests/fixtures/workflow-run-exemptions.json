@@ -7,9 +7,6 @@
     },
     "run-failure-reactor \u2014 routes a failed run to a fix or a deduped issue (never merges)": {
       "reason": "It skips its own completion so a self-trigger loop is impossible (#286); listing itself is refused by the `workflow-run-self` rule. Its own red is what `code-review-bot` and `queued-alarm` report, and a red reactor run cannot route itself."
-    },
-    "ci-hf-live \u2014 the merge-to-main real-Hub test pipeline (HF live tests + the committed-link liveness gate), never a PR check": {
-      "reason": "Its red is a named work item, not a defect needing a second issue: the liveness gate (scripts/check_model_links_liveness.py LIVE=1 LIMIT=25) names the exact dead URL it fails on, and the test failures are the @pytest.mark.network live-set's real-Hub flakes \u2014 investigation targets, not an implementation defect the reactor's Route B should file. It runs only on merge-to-main + nightly (#1002), so a reactor issue per main-merge to chase a live-Hub blip would duplicate the merge gate itself."
     }
   }
 }
