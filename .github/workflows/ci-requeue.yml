@@ -6,7 +6,7 @@ name: ci-requeue — re-runs only the cancelled runs no later run superseded, ev
 # `run-failure-reactor` no longer treats a cancellation as "nothing to do". This is the scheduled half
 # of the healer; `make ci-requeue-cancelled` is the manual half and takes WINDOW/DRY.
 
-# Trigger surface: the 30-minute schedule (`23,53 * * * *`) and `workflow_dispatch` - never a
+# Trigger surface: the 30-minute schedule (`15,45 * * * *`) and `workflow_dispatch` - never a
 #   `pull_request` or a `push`: this workflow heals runs, it does not gate a change.
 # Flow: `make ci-requeue-cancelled` reads the completed runs in the window, re-runs ONLY a cancelled
 #   run with no later run of the same workflow on its branch, and reports every superseded one.
@@ -17,7 +17,8 @@ name: ci-requeue — re-runs only the cancelled runs no later run superseded, ev
 # a dispatch input.
 on:
   schedule:
-    - cron: "23,53 * * * *" # every 30 minutes, off the hour and off the other bots' minutes
+    - cron: "15,45 * * * *" # every 30 minutes at :15 and :45 — minutes no other bot owns (issue #275: a shared
+                            # minute is a collision, and the collision test failed on :23 issue-bot and :53 engine-bump)
   workflow_dispatch:
 
 permissions:

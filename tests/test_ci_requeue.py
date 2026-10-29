@@ -202,9 +202,9 @@ def test_the_scheduled_healer_is_wired_to_the_manual_target():
     wf = yaml.safe_load(path.read_text())
     on = wf.get("on") or wf.get(True)
 
-    # Then  it fires every 30 minutes at an off-the-hour minute …
+    # Then  it fires every 30 minutes on minutes no other bot owns …
     crons = [str(slot.get("cron")) for slot in on["schedule"]]
-    assert crons == ["23,53 * * * *"], crons
+    assert crons == ["15,45 * * * *"], crons
 
     # … it can be dispatched by hand …
     assert "workflow_dispatch" in on
