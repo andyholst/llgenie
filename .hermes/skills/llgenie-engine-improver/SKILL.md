@@ -232,6 +232,28 @@ cuda image** (disabled: "fat CUDA build runs > 50 min on hosted runners") and it
 was unpublished here, so on this card such a model is not runnable at all until CI
 publishes or the disable is revisited. Never solve that by building locally.
 
+## Step 3c — a wait on an image is a TWO-LANE dependency (#873 rule 14)
+
+Before any wait for an artifact another job produces, **name the producer on the PR and to the lane
+that owns it**:
+
+```
+waiting on engine-image-<engine>-<arch>, produced by job <job-name> in run <run-id>
+```
+
+- A claim belongs in the thread a stranger can find — the issue or PR — never only in a DM or in
+  memory. Re-read that thread before the first edit: an existing claim, a live branch or a note from
+  the lane that touched the files last outranks your plan.
+- When the producer sits behind a long queue, message that lane with the id, the sha and what you
+  need, **then post the conclusion back in the issue**; a decision that exists only in a DM does not
+  exist for the next reader.
+- The precedent is #807: the awaited tags did not exist because the producer cells were still
+  `pending`, and the 30-minute wait (#893) expired on the queue rather than on a bad tag. Read the
+  producer's job state **before** blaming the artifact, and say which of the two it is — a missing
+  artifact is a fact to report with its log, never a reason to park a PR.
+- Rebase, rewrite or force-push on a branch another lane is working is a conversation first, a
+  command second.
+
 ## Step 4 — tune the serving params per engine on the real GPU (the core value)
 
 This is the part the job exists for. A built image is not a tuned engine.
