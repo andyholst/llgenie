@@ -100,6 +100,26 @@ State the current HEADs and the gap before changing anything; the answer to
 "what is new" is that report, never a guess. Worktrees `llgenie-wt` and
 `trending-local-llms-wt` exist for parallel branches.
 
+## Step 0b — cut from a fresh upstream main, and bookend the work (#873 rule 15)
+
+Before creating a worktree or branch: `git fetch upstream main` — the canonical remote is
+`asimov-agent/llgenie`, and a fork named `origin` is **not** upstream — then branch from
+`origin/main` **at the sha you fetched in that moment**. Never from a branch you already had, and
+never from a sha quoted in a chat message: it is stale by the time you read it.
+
+An engine bump cut from a stale `main` builds engines that no longer exist — the third way the same
+bump fails, and it looks identical to the other two (#807: the awaited tags were absent; #893: the
+30-minute wait outlived the queue).
+
+**Bookend the work in the thread, never in a DM:**
+
+- **start comment** — issue/PR id, branch, the `main` sha you cut from, and what "done" means;
+- **finish comment** — head sha, what changed, the run id or command that proves it, and anything
+  left open.
+
+A start with no finish is an abandoned claim; a finish with no start has no baseline to compare
+against. For an engine wait, the same thread carries `producer job + run id + sha`.
+
 ## Step 1 — sync new/updated engines that have Linux support
 
 - `make sync-registry` vendors the store into `data/models.json` + the contract
@@ -231,6 +251,28 @@ log. That model needs the **Prism** build. Before blaming the launcher, dump tha
 cuda image** (disabled: "fat CUDA build runs > 50 min on hosted runners") and its cpu tag
 was unpublished here, so on this card such a model is not runnable at all until CI
 publishes or the disable is revisited. Never solve that by building locally.
+
+## Step 3c — a wait on an image is a TWO-LANE dependency (#873 rule 14)
+
+Before any wait for an artifact another job produces, **name the producer on the PR and to the lane
+that owns it**:
+
+```
+waiting on engine-image-<engine>-<arch>, produced by job <job-name> in run <run-id>
+```
+
+- A claim belongs in the thread a stranger can find — the issue or PR — never only in a DM or in
+  memory. Re-read that thread before the first edit: an existing claim, a live branch or a note from
+  the lane that touched the files last outranks your plan.
+- When the producer sits behind a long queue, message that lane with the id, the sha and what you
+  need, **then post the conclusion back in the issue**; a decision that exists only in a DM does not
+  exist for the next reader.
+- The precedent is #807: the awaited tags did not exist because the producer cells were still
+  `pending`, and the 30-minute wait (#893) expired on the queue rather than on a bad tag. Read the
+  producer's job state **before** blaming the artifact, and say which of the two it is — a missing
+  artifact is a fact to report with its log, never a reason to park a PR.
+- Rebase, rewrite or force-push on a branch another lane is working is a conversation first, a
+  command second.
 
 ## Step 4 — tune the serving params per engine on the real GPU (the core value)
 
