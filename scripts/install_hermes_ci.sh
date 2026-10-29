@@ -40,9 +40,9 @@ echo "[hermes-ci] installed: $(command -v hermes)"
 # every file at once, which is why `make check-agent-model` compares this default with the
 # Dockerfile's (scripts/agent_model_pin.py, issue #405).
 ALIAS="${HERMES_ALIAS:-nous-deepseek}"
-MODEL_ID="${HERMES_MODEL_ID:-deepseek/deepseek-v4.1-flash-1017}"   # provider-prefixed; `-1017` is the SNAPSHOT (2026-10-17) — the unsuffixed id is the older, different model
+MODEL_ID="${HERMES_MODEL_ID:-deepseek/deepseek-v4-flash-0731}"   # provider-prefixed; `-0731` is the SNAPSHOT (2026-07-31) — the unsuffixed id is the April 23 release, a different model
 BASE_URL="${HERMES_BASE_URL:-https://inference-api.nousresearch.com/v1}"
-# The snapshot's published budget (context_length 1048576, max_completion_tokens 943718). Written
+# The snapshot's published budget (context_length 1048576, max_completion_tokens 65536). Written
 # literally on purpose: these belong to the MODEL, not to a deployment choice, and leaving them
 # unset makes Hermes budget the run from models.dev, which has no entry for this snapshot id.
 MAX_TOKENS="${HERMES_MAX_TOKENS:-16000}"
