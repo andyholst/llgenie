@@ -29,6 +29,37 @@ import scripts.unit_tests as ut
 REPO = Path(__file__).resolve().parent.parent
 
 
+#: The engine whose release archive is verified live. Its `ref` is the ONLY version source: the pin a
+#: bump edits, so the live test follows the bump instead of asserting a release the repo left behind
+#: (issue #830 — the target asserted a version two bumps after the pin had moved on, and the version
+#: was even baked into a test NAME, which is how it survived).
+PROMOTED_ENGINE = "tensorfold"
+
+
+def _pinned_ref(engine: str = PROMOTED_ENGINE, root: Path | None = None) -> str:
+    """The engine's pinned release tag, read from the params the bump writes.
+
+    Fails LOUDLY when the pin cannot be read: falling back to a literal is exactly how the target
+    kept asserting a dead release through two bumps (issue #830).
+    """
+    path = (root or REPO) / "containers" / "engines" / "params" / f"{engine}.json"
+    rel = f"containers/engines/params/{engine}.json"
+    try:
+        params = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        pytest.fail(f"cannot read the pinned release from {rel}: {exc}")
+    ref = str((params or {}).get("ref") or "").strip()
+    if not ref:
+        pytest.fail(f"{rel} carries no `ref`: the live archive test cannot know which release to "
+                    f"verify (issue #830)")
+    return ref
+
+
+def _pinned_version(engine: str = PROMOTED_ENGINE, root: Path | None = None) -> str:
+    """The asset-name form of the pin: `v1.1.6` -> `1.1.6` (release assets carry no leading `v`)."""
+    return _pinned_ref(engine, root).lstrip("v")
+
+
 def _git(repo: Path, *args: str) -> str:
     p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
     assert p.returncode == 0, f"git {' '.join(args)} failed: {p.stderr}"
@@ -1727,19 +1758,85 @@ def test_release_lookup_does_not_retry_a_missing_release(monkeypatch):
     assert assets == []
 
 
+def test_the_pinned_release_classifies_native_assets_offline():
+    """Classification and checksum parsing are PURE logic, so they run on every platform (#830).
+
+    The live test below reaches api.github.com, which a macOS runner cannot; but the half that
+    actually decides "is this asset native for this machine" is a string-and-arch judgement over an
+    asset list. This test feeds it the asset list the pinned release must publish, derived from the
+    pin itself, so a bump that renames an asset fails here on Linux **and** macOS before any
+    download is attempted.
+    """
+
+    # Given the asset list the PINNED release must publish (names derived from the pin, no literal)
+    version = _pinned_version()
+    names = [f"tensorfold-{version}-{os_tok}-{arch_tok}.tar.gz"
+             for os_tok, arch_tok in (("linux", "x86_64"), ("macos", "arm64"))]
+    assets = [{"name": name} for name in names + [f"{n}.sha256" for n in names]]
+
+    # When  the bump classifies them
+    found = eb._native_archives(assets)
+
+    # Then  each platform+arch resolves to its archive, and a checksum file is never the archive
+    assert found[("linux", "x86_64")] == f"tensorfold-{version}-linux-x86_64.tar.gz"
+    assert found[("macos", "arm64")] == f"tensorfold-{version}-macos-arm64.tar.gz"
+    assert all(not value.endswith(".sha256") for value in found.values()), found
+
+    # And the published checksum line parses the way the install step reads it
+    digest, named = f"{'a' * 64}  tensorfold-{version}-linux-x86_64.tar.gz".split()
+    assert (len(digest), named) == (64, f"tensorfold-{version}-linux-x86_64.tar.gz")
+
+    # And the archive install step names the pinned version, never a stale literal
+    pip_skill = {"id": "tensorfold", "engine": "TensorFold",
+                 "repo": "https://github.com/ashhart/TensorFold",
+                 "ref": _pinned_ref(), "version": _pinned_ref(), "backends": ["metal", "cuda"],
+                 "install": {"metal": ["uv tool install --force 'tensorfold @ git+{repo}.git@v{version}'"],
+                             "cuda": ["uv pip install --system 'tensorfold @ git+{repo}.git@v{version}'"]}}
+    steps = eb.release_archive_install(pip_skill, assets)
+    assert steps is not None
+    assert "tensorfold-{version}-linux-x86_64.tar.gz" in steps["cuda"][1]
+    assert "tensorfold-{version}-macos-arm64.tar.gz" in steps["metal"][1]
+
+
+def test_the_pin_reader_fails_loudly_when_the_params_cannot_be_read(tmp_path, monkeypatch):
+    """No silent fallback to a literal: an unreadable pin names the file (#830)."""
+
+    # Given a tree whose params directory is missing the engine it must read
+    with pytest.raises(pytest.fail.Exception) as excinfo:
+        _pinned_ref("tensorfold", root=tmp_path)
+
+    # Then  the failure names the params file it tried to read
+    assert "containers/engines/params/tensorfold.json" in str(excinfo.value), str(excinfo.value)
+
+
+def test_a_scratch_bump_changes_the_version_the_live_test_asserts(tmp_path):
+    """The derivation FOLLOWS the pin — proven by bumping the pin in a scratch tree (#830)."""
+
+    # Given a copy of the params, bumped to a version this tree does not ship
+    params = tmp_path / "containers" / "engines" / "params"
+    params.mkdir(parents=True)
+    (params / "tensorfold.json").write_text(json.dumps({"ref": "v9.9.9"}))
+
+    # When  the derivation reads the pin through the tree it was given
+    assert _pinned_ref("tensorfold", root=tmp_path) == "v9.9.9"
+    assert _pinned_version("tensorfold", root=tmp_path) == "9.9.9"
+
+
 def test_derive_reports_the_live_release_archives(tmp_path):
     """E10 lives in derive, not only in apply.
 
-    `derive` must put the published release's archives on `auto.release_assets`
-    for a tag pin, and must not for a branch pin. Reads the live GitHub release
-    and a real local git repo for the rest of the extractors.
+    `derive` must put the PINNED release's archives on `auto.release_assets` for a tag pin, and
+    must not for a branch pin. Reads the live GitHub release and a real local git repo for the rest
+    of the extractors. The version is the pin's, never a literal (issue #830).
     """
 
-    # Given a tag-pinned skill whose repo is a real local git repo, and the
-    # published TensorFold v1.0.5 release standing in for its own
+    # Given a tag-pinned skill whose repo is a real local git repo, and the published release the
+    # repo actually pins standing in for its own
+    ref = _pinned_ref()
+    version = _pinned_version()
     repo = _make_repo(tmp_path, "up", {"README.md": "native binary\n"})
     sha = _git(repo, "rev-parse", "HEAD")
-    skill = _skill(tmp_path, "https://github.com/ashhart/TensorFold", "v1.0.5", "tag", sha)
+    skill = _skill(tmp_path, "https://github.com/ashhart/TensorFold", ref, "tag", sha)
     skill["backends"] = ["cuda", "metal"]
     skill["install"] = {"cuda": ["uv pip install 'engine @ git+{repo}.git@v{version}'"],
                         "metal": ["uv tool install 'engine @ git+{repo}.git@v{version}'"]}
@@ -1747,11 +1844,11 @@ def test_derive_reports_the_live_release_archives(tmp_path):
     # When derive runs at that pin
     findings = epd.derive(skill, sha, repo_dir=repo)
 
-    # Then the live release's archives are on the finding, ready for apply
+    # Then the pinned release's archives are on the finding, ready for apply
     names = {a["name"] for a in findings["auto"]["release_assets"]}
-    assert "tensorfold-1.0.5-linux-x86_64.tar.gz" in names
-    assert "tensorfold-1.0.5-linux-x86_64.tar.gz.sha256" in names
-    assert "tensorfold-1.0.5-macos-arm64.tar.gz" in names
+    assert f"tensorfold-{version}-linux-x86_64.tar.gz" in names, (version, sorted(names))
+    assert f"tensorfold-{version}-linux-x86_64.tar.gz.sha256" in names, (version, sorted(names))
+    assert f"tensorfold-{version}-macos-arm64.tar.gz" in names, (version, sorted(names))
     steps = eb.release_archive_install(skill, findings["auto"]["release_assets"])
     assert steps and "tensorfold-{version}-linux-x86_64.tar.gz" in steps["cuda"][1]
 
@@ -1761,30 +1858,32 @@ def test_derive_reports_the_live_release_archives(tmp_path):
     assert "release_assets" not in again["auto"]
 
 
-def test_tensorfold_v1_0_5_release_is_native_archives():
-    """The published TensorFold 1.0.5 release is what E10 must recognise.
+def test_the_pinned_release_is_native_archives():
+    """The release the PIN names is what E10 must recognise.
 
-    Reads the live GitHub release. A bump that cannot see these assets would
-    leave the pip install that 1.0.5 refuses.
+    Reads the live GitHub release at the pin the bump edits, so the assertion follows every bump
+    instead of naming a version in its own test name (issue #830). A bump that cannot see these
+    assets would leave the pip install upstream stops publishing.
     """
 
-    # Given the published TensorFold v1.0.5 release
-    assets = eb._release_assets("https://github.com/ashhart/TensorFold", "v1.0.5")
+    # Given the release the repository pins
+    ref = _pinned_ref()
+    assets = eb._release_assets("https://github.com/ashhart/TensorFold", ref)
 
     # When the bump classifies its assets
     found = eb._native_archives(assets)
 
     # Then both archives the skill's backends need are there, checksummed
-    assert assets, "GitHub returned no assets for TensorFold v1.0.5"
+    assert assets, f"GitHub returned no assets for TensorFold {ref} (the pin this repo ships)"
     assert ("linux", "x86_64") in found
     assert ("macos", "arm64") in found
     assert found[("linux", "x86_64")].endswith(".tar.gz")
-    # The derivation's input contract is a skill that pip-installs from git, so the
-    # fixture is that skill — NOT es.get_skill("tensorfold"), which is already the
-    # archive shape after a bump and correctly derives nothing (issue #389)
+    # The derivation's input contract is a skill that pip-installs from git, so the fixture is that
+    # skill — NOT es.get_skill("tensorfold"), which is already the archive shape after a bump and
+    # correctly derives nothing (issue #389)
     pip_skill = {"id": "tensorfold", "engine": "TensorFold",
                  "repo": "https://github.com/ashhart/TensorFold",
-                 "ref": "v1.0.5", "version": "v1.0.5", "backends": ["metal", "cuda"],
+                 "ref": ref, "version": ref, "backends": ["metal", "cuda"],
                  "install": {"metal": ["uv tool install --force 'tensorfold @ git+{repo}.git@v{version}'"],
                              "cuda": ["uv pip install --system 'tensorfold @ git+{repo}.git@v{version}'"]}}
     steps = eb.release_archive_install(pip_skill, assets)
@@ -1799,36 +1898,45 @@ def test_tensorfold_v1_0_5_release_is_native_archives():
         assert eb.release_archive_install(live, assets) is None
 
 
-def test_tensorfold_release_archive_unpacks_and_runs(tmp_path):
-    """The install steps E10 writes actually install TensorFold 1.0.5.
+def test_the_pinned_release_archive_unpacks_and_runs(tmp_path):
+    """The install steps E10 writes actually install the PINNED TensorFold.
 
-    Downloads the real release archive, checks the published checksum and runs
-    the unpacked binary. This is the step the cuda image died on: pip of
-    v1.0.5 refuses to build, the archive is what upstream ships instead.
+    Downloads the real release archive at the pin, checks the published checksum and runs the
+    unpacked binary. This is the half a macOS runner cannot do (it cannot reach api.github.com and
+    upstream publishes no macos-x86_64 archive), so it skips there with a printed reason instead of
+    being gated out of the whole run: the classification above still ran (#830).
     """
     import hashlib
     import platform
     import tarfile
 
-    # Given the archive E10 picks for this host's machine, and its published checksum.
-    # macos-15-intel is Darwin but x86_64: system() alone picked the arm64
-    # archive and the binary died with Bad CPU type.
+    # Given the pin the repo ships, and the archive it picks for this host's machine
+    ref = _pinned_ref()
+    version = _pinned_version()
+    # macos-15-intel is Darwin but x86_64: system() alone picked the arm64 archive and the binary
+    # died with Bad CPU type.
     arch_tok = "x86_64" if platform.machine() in ("x86_64", "AMD64") else "arm64"
     os_tok = "linux" if platform.system() == "Linux" else "macos"
-    assets = eb._release_assets("https://github.com/ashhart/TensorFold", "v1.0.5")
+    if os_tok == "macos" and arch_tok == "x86_64":
+        pytest.skip(f"TensorFold publishes no macos-x86_64 archive for {ref}: the download half "
+                    f"cannot run on this runner (the classification half did)")
+    if platform.system() != "Linux":
+        pytest.skip(f"the live download at {ref} needs a runner that can reach api.github.com "
+                    f"(macOS runners cannot); the classification half ran")
+    assets = eb._release_assets("https://github.com/ashhart/TensorFold", ref)
     found = eb._native_archives(assets)
     asset = found[(os_tok, arch_tok)]
-    base = "https://github.com/ashhart/TensorFold/releases/download/v1.0.5"
+    base = f"https://github.com/ashhart/TensorFold/releases/download/{ref}"
     archive = tmp_path / asset
     eb._download(f"{base}/{asset}", archive)
     eb._download(f"{base}/{asset}.sha256", tmp_path / f"{asset}.sha256")
 
-    # When the checksum is checked and the archive unpacked the way the install
-    # step does (bin/ one level down, --strip-components=1)
+    # When the checksum is checked and the archive unpacked the way the install step does
+    # (bin/ one level down, --strip-components=1)
     digest, named = (tmp_path / f"{asset}.sha256").read_text().split()
     assert named == asset
     assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
-    dest = tmp_path / "1.0.5"
+    dest = tmp_path / version
     with tarfile.open(archive) as tar:
         members = [m for m in tar.getmembers() if m.name.startswith(asset[:-7] + "/bin/")]
         assert members, [m.name for m in tar.getmembers()]
@@ -1836,12 +1944,12 @@ def test_tensorfold_release_archive_unpacks_and_runs(tmp_path):
             m.name = "/".join(m.name.split("/")[1:])
             tar.extract(m, dest, filter="data")
 
-    # Then the unpacked binary is the native engine and reports 1.0.5
+    # Then the unpacked binary is the native engine and reports the PINNED version
     binary = dest / "bin" / "tensorfold-native"
     assert binary.is_file() and os.access(binary, os.X_OK)
     ver = subprocess.run([str(binary), "--version"], capture_output=True, text=True, timeout=60)
     assert ver.returncode == 0, ver.stderr
-    assert "1.0.5" in ver.stdout + ver.stderr
+    assert version in ver.stdout + ver.stderr, (version, ver.stdout, ver.stderr)
 
 
 def test_unit_job_fetches_history():
@@ -1882,9 +1990,9 @@ def test_unit_recipe_keeps_the_image_build_out():
 
     # And the live release reads are de-selected by exact node id, not silently run
     deselect = ut.load_roster(REPO)["deselect"].get("tests/test_engine_bump.py", {})
-    assert "test_tensorfold_release_archive_unpacks_and_runs" in deselect
+    assert "test_the_pinned_release_archive_unpacks_and_runs" in deselect
     live = (REPO / "Makefile").read_text().split("\ntest-engine-bump-live:", 1)[1].split("\n\n", 1)[0]
-    assert "test_tensorfold_release_archive_unpacks_and_runs" in live
+    assert "test_the_pinned_release_archive_unpacks_and_runs" in live
     unit = yaml.safe_load((REPO / ".github" / "workflows" / "pipeline.yml").read_text())["jobs"]["unit"]
     live_step = next(s for s in unit["steps"] if "test-engine-bump-live" in str(s.get("run", "")))
     assert live_step.get("if") == "runner.os == 'Linux'"
@@ -1928,8 +2036,8 @@ def test_unit_recipe_runs_the_destination_release_cases():
     )
     live = (
         "test_derive_reports_the_live_release_archives",
-        "test_tensorfold_v1_0_5_release_is_native_archives",
-        "test_tensorfold_release_archive_unpacks_and_runs",
+        "test_the_pinned_release_is_native_archives",
+        "test_the_pinned_release_archive_unpacks_and_runs",
     )
 
     # When the invocation and the roster are read
