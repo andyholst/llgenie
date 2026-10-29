@@ -80,7 +80,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	agent-shell-keys-check \
 	agent-fetch search-smoke require-env web-coverage issue-evidence \
 	engine-bump-rebase generate-engine-params check-engine-params check-engine-coverage engine-coverage-report check-engine-source engine-source-report build-engine run-engine stop-engine list-engine-images engine-build-matrix ci-lint ci-unit ci-agents-read \
-	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk test-engine-stage bot-sync-main bot-sync-branch ci-wait-engine-images \
+	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk ci-slow-rows test-engine-stage bot-sync-main bot-sync-branch ci-wait-engine-images \
 	ci-install-dry ci-install-run ci-install-uninstall test-env test-top-tier test-top-tier-ci test-top-tier-cli-ci test-top-tier-serve test-top-tier-serve-ci \
 	check-agent-model model-pin-report check-agent-skills agent-skills-report test-agent-skills-live hermes-skills-register \
 	test-hub-live test-strata-live test-engine-bump-live test-native-engines test-native-engine-light test-variant-image \
@@ -1584,6 +1584,9 @@ endif
 ci-engines: bash-check ## CI engine stage, the ONLY per-OS row (issue #120): BACKEND=cpu|cuda|rocm|vulkan -> make test-install-published (container engines), BACKEND=metal -> each native-Metal engine installed + "hi" on Metal (scripts/ci_engines.py)
 	@test -n "$(BACKEND)" || { echo "Usage: make ci-engines BACKEND=cpu|cuda|rocm|vulkan|metal"; exit 1; }
 	python3 scripts/ci_engines.py $(BACKEND)
+
+ci-slow-rows: ## CI: decide which heavy rows this run schedules — `linux / top-tier` runs on every non-PR event (push to main) and on a PR only with the `ci:slow` label (scripts/ci_slow_rows.py, issue #859)
+	python3 scripts/ci_slow_rows.py decide --event "$$EVENT" --labels "$$LABELS"
 
 ci-free-disk: ## CI: free runner disk for the large engine images (Linux runner: drop preinstalled SDKs; macOS runner: report only)
 	@if [ "$$(uname -s)" = Linux ]; then sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL; \

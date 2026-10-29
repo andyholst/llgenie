@@ -1447,6 +1447,23 @@ image → download → lint → unit → install → health → top-tier → top
   the coverage can be restored by adding a caller back; until then nothing in CI exercises macOS, and
   the native-engine targets (`make ci-engines BACKEND=metal`) are verified on an Apple-Silicon host
   by hand.
+- **`linux / top-tier` is not a pull-request gate (issue #859).** It downloads and serves a real
+  model on every PR; what it proves is a property of `main` and of the weekly engine/registry data,
+  not of a diff, and it was one of the long poles of every matrix (measured: #767's run
+  `40694228407`, a one-file documentation PR, sat with 26 green jobs and zero failures waiting on
+  one heavy row alone). It **does** run on every non-PR event — the `push` to `main`, so one run per
+  merge still catches a model/engine regression — and on a pull request that carries the
+  **`ci:slow`** label (add the label, then a new run of that PR — close/reopen, or a push —
+  schedules it). It is the heaviest row when requested. Everything else is unchanged:
+  `linux / unit` remains the PR gate for the whole suite (`ci-unit` included), and
+  `linux / cpu-health` still serves the 0.5B model through the engine image on a PR. The macOS rows
+  this issue also named (`macos / unit`, `macos / top-tier`) are gone by **deletion** (#870), not by
+  a condition. The decision is `scripts/ci_slow_rows.py` behind `make ci-slow-rows`, published by
+  `ci.yml`'s `guard` job and consumed as the ONE matrix axis of `pipeline.yml`'s `top-tier` job, so
+  there is no job-level `if:` and no silent skip: a run that does not schedule the row has the
+  `["none"]` placeholder, which runs no make target and whose first step prints
+  `[slow-rows] … = NOT SCHEDULED` with the reason. `tests/test_ci_slow_rows.py` pins the decision and
+  the wiring.
 - **Required for merging into `main`** (branch protection): the Linux jobs that remain. A failure
   fails the run. That is `linux / *` and the four `linux-published / install-published-*` installs.
   They have no published-image stage of their own and no native-engine job: `linux / cpu-health` and

@@ -364,9 +364,12 @@ def test_only_linux_calls_the_pipeline_file_and_no_macos_runner_is_requested():
     # When the callers of the pipeline are read
     callers = {n: j for n, j in ci.items() if j.get("uses") == "./.github/workflows/pipeline.yml"}
 
-    # Then  exactly one caller remains, on ubuntu-latest ...
+    # Then  exactly one caller remains, on ubuntu-latest, carrying the row selection (#859: the
+    #       guard's decision, so the top-tier row follows the `ci:slow` label while every other row
+    #       of the same call is unchanged) ...
     assert set(callers) == {"linux"}, callers
-    assert callers["linux"]["with"] == {"runner": "ubuntu-latest"}
+    assert callers["linux"]["with"] == {"runner": "ubuntu-latest",
+                                        "top_tier_rows": "${{ needs.guard.outputs.top_tier_rows }}"}
     # ... no macOS job survived in any form, and no macOS label is named anywhere in the workflow
     assert not [n for n in ci if "macos" in n.lower()], list(ci)
     assert "macos-15-intel" not in (REPO / ".github/workflows/ci.yml").read_text()
@@ -483,8 +486,15 @@ def test_no_ci_step_or_job_is_skipped():
         # `matrix.backend != 'none'` is the published family's placeholder row (#844): the exact twin of
         # `matrix.engine != 'none'` that #828 gave the engine family. It skips a ROW, never a job, so
         # every check name still reports and the row's own first step prints why it installed nothing.
+        # The `row` conditions are the same shape for `pipeline.yml`'s top-tier stage (#859): its ONE
+        # matrix axis comes from `make ci-slow-rows`, so a row a pull request does not schedule runs no
+        # make target — and, combined with the OS condition, the docker step stays Linux-only on a row
+        # that did run (`matrix.row != 'none' && always()` is its container prune).
         assert cond in ("${{ !cancelled() }}", "always()", "runner.os == 'Linux'", "runner.os == 'macOS'",
-                        "${{ matrix.engine != 'none' }}", "${{ matrix.backend != 'none' }}"), key
+                        "${{ matrix.engine != 'none' }}", "${{ matrix.backend != 'none' }}",
+                        "matrix.row != 'none'",
+                        "matrix.row != 'none' && runner.os == 'Linux'",
+                        "matrix.row != 'none' && always()"), key
 
     # And the OS / matrix decisions live in make: ci-free-disk and test-engine-stage
     mk = (REPO / "Makefile").read_text()

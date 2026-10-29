@@ -118,6 +118,9 @@ def test_common_github_expression_shapes_all_parse():
         " secrets.BUMP_TOKEN || github.token ", " inputs.check || 'make ci-unit' ",
         " github.event.issue.number || inputs.issue_number || '' ", " 3 * 2 + 1 ", " job.steps[0].name ",
         " runner.os == 'Linux' ", " null ", " -matrix.engine ",
+        # issue #859: the row-selection axis of the top-tier stage
+        " fromJSON(inputs.top_tier_rows) ", " matrix.row != 'none' && runner.os == 'Linux' ",
+        " matrix.row != 'none' && always() ", " toJSON(github.event.pull_request.labels.*.name) ",
     ]
 
     # When  each is parsed
