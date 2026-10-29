@@ -132,6 +132,30 @@ def test_model_file_param_serves_that_exact_file(tmp_path):
     assert "llgenie-engine-llama-cpp-prism" in r.stdout and "download" not in r.stdout
 
 
+def test_model_file_labels_the_file_not_a_registry_model(tmp_path):
+    """`--model-file` serves a file the user named: print ITS name, not a trend row's.
+
+    It used to print the registry row that ranked the engines — `--model-file
+    qwen2.5-0.5b-instruct-q4_0.gguf` announced "Model : Qwen3.8-27B", which reads
+    as if a 27B model were about to be served.
+    """
+    # Given a GGUF whose name matches no trend row
+    f = tmp_path / "my-own-model-Q4_K_M.gguf"
+    f.write_bytes(b"GGUF")
+    env = {**os.environ, "LLGENIE_REGISTRY_SRC": str(FIXTURE), "LLAMA_MODELS_ROOT": str(tmp_path),
+           "LLAMA_BACKEND": "cuda", "LLAMA_RAM_BYTES": str(16 * 2**30)}
+    # When llgenie serves exactly that file
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "llgenie_serve.py"), "--pick", "bonsai",
+                        "--engine", "prism", "--model-file", str(f), "--auto", "--dry"],
+                       capture_output=True, text=True, env=env,
+                       timeout=hf_auth.TOP_TIER_DRY_RUN_TIMEOUT)
+    # Then the Model line names the FILE, and the trend row is credited only for the ranking
+    assert r.returncode == 0, r.stderr
+    model_line = next(ln for ln in r.stdout.splitlines() if ln.startswith("Model  :"))
+    assert f.name in model_line, model_line
+    assert "only ranked the inference servers" in r.stdout
+
+
 def test_disabled_images_are_never_offered(reg):
     """Issue #103: a disabled engine x arch image is not offered by the picker."""
     import scripts.engine_image as ei

@@ -1716,7 +1716,10 @@ def _main_pick(args):
     pickable = [r for r in rows if not r.get("why")]
     if not pickable:
         raise SystemExit("[llgenie] no model of the trend list can be served on this card")
-    interactive = not args.model and not args.auto and not args.select and sys.stdin.isatty()
+    # `--model-file` already names the model: never ask which trend model to serve, and
+    # never label the output with a registry row the user did not pick.
+    interactive = (not (args.model or args.model_file) and not args.auto and not args.select
+                   and sys.stdin.isatty())
     if interactive or args.trend or args.select:
         _print_trend(mp, reg, rows, gb)
     if args.trend:
@@ -1760,7 +1763,13 @@ def _main_pick(args):
             path = dest if plan.get("dir") else dest / plan["path"]
         else:
             path = mp.download(model, gb, fmt=fmt, engine=eng["id"], plan=plan)
-    print(f"\nModel  : {model['name']}  ({path})")
+    if args.model_file:
+        # the file IS the model; the trend row only ranked the engine
+        print(f"\nModel  : {Path(args.model_file).name}  ({path})")
+        print(f"[llgenie] --model-file serves exactly this file; the trend row "
+              f"{model['name']!r} only ranked the inference servers")
+    else:
+        print(f"\nModel  : {model['name']}  ({path})")
     print(f"Engine : {eng['engine']} [{eng['variant']}]  {_tps_label(eng)}{_engine_state(eng)}")
     _ensure_and_exec(eng, path, args)
 
