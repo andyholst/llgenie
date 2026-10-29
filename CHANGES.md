@@ -16,6 +16,7 @@ a note that does not exist, or when a row is malformed.
 
 | Date | Change | Record | Issue / PR |
 |---|---|---|---|
+| 2026-10-28 | [bot-preflight](agent-wiki/2026-10-28-bot-preflight.md) | a leg proves its tree is current and cites the rulebook it obeyed (#792) |
 | 2026-10-29 | `make check-wiring` also asserts the reverse `.PHONY` direction: every key must name a target with a recipe, an inline `;` command or a prerequisite (a declared alias) — a key whose recipe is gone is a permanent green no-op (`make <name>` → "Nothing to be done", exit 0) | [2026-10-29-check-wiring-phony-declares-recipe.md](agent-wiki/2026-10-29-check-wiring-phony-declares-recipe.md) | #883 |
 | 2026-10-29 | the change index is one row per file (`docs/changes.d/`), rendered into `CHANGES.md` by `make changes-index` — two changes can no longer edit one line, so a merge cannot re-dirty an open PR | [2026-10-29-changes-index-per-change-file.md](agent-wiki/2026-10-29-changes-index-per-change-file.md) | #934 |
 | 2026-10-28 | a worktree the sweep unregistered but could not delete is a named leftover with its clearing command (branch still deleted, exit 0), and root-owned debris is cleared through the container engine | [2026-10-28-worktree-prune-leftover.md](agent-wiki/2026-10-28-worktree-prune-leftover.md) | #759 |

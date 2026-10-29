@@ -15,6 +15,28 @@ This skill is preloaded **alongside the bot's own skill** (`issue-triage`, `issu
 `issue-dedup`, `issue-implement`, `architecture-doc`, `agent-fetch`, `rebase-conflict`, `pr-fix`).
 That skill says what this run is; this one says how a run with nobody watching it must behave.
 
+## Preflight — before you read the issue, not after
+
+Every uninterruptible run starts the same way, and the target is the one that makes it provable:
+
+```bash
+make bot-preflight          # fetch origin/main, fast-forward when clean, write preflight.txt
+```
+
+- `preflight.txt` carries the `origin/main` commit, `AGENTS.md`'s byte size, line count, heading
+  digest, and the `AGENTS: <sha> <bytes>b <lines>l` line your PR body must contain.
+- A **dirty or diverged** checkout is a refusal, not a warning: stop and say which paths, do not
+  rebase, do not proceed on a stale tree. `git merge-base --is-ancestor` is the measurement.
+- Re-read `AGENTS.md` at that commit. The rules change weekly — the author allowlist, the issue-body
+  shape, the agent-skill contract and the bot roster all moved this month alone — and a leg that
+  starts from an old one produces work the next gate rejects.
+- Cite the line. `make check-pr-hygiene` refuses a bot PR whose `AGENTS:` sha is not an ancestor of
+  both the head and the base, because a fix written against an older rulebook is a rejection an hour
+  later rather than a failure in minute one.
+
+`make check-agent-skills` fails when this obligation disappears from a leg's skill, so it cannot be
+dropped silently.
+
 ## Inputs
 
 - The bot's own skill, preloaded in the same session. Read its **Inputs** section for the files and

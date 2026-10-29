@@ -2037,3 +2037,7 @@ in stderr, retried within the same bound, and named at the bound instead of esca
 38-minute macOS stage.
 
 ---
+
+### Preflight
+
+`make bot-preflight` fetches `origin/main`, fast-forwards a clean behind checkout and writes `preflight.txt` — the `origin/main` commit, `AGENTS.md`'s bytes, lines and heading digest, and the `AGENTS: <sha> <bytes>b <lines>l` line a bot PR body must carry (issue #792). A dirty or diverged checkout is refused with its paths; the target never rebases. `CHECK=1` re-derives the record and fails when the file on disk disagrees with the tree.

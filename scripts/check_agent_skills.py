@@ -56,6 +56,8 @@ AGENTS_MARKER = "## A bot's behaviour lives in its project skill"
 RETIRED_RULES_FILE = Path("scripts") / "fix_bot_rules.md"
 #: Text that belongs in `bot-unattended/SKILL.md` and nowhere near a make recipe.
 INLINE_UNATTENDED = "NEVER ask a question"
+#: The preflight every unattended leg owes before it reads anything else (issue #792).
+PREFLIGHT_OBLIGATION = "make bot-preflight"
 LEG_SOURCES = ("Makefile", "scripts/*.sh")
 _SKILL_FLAG = re.compile(r"(?:^|\s)(?:-s|--skills)[\s=]+(\S+)")
 
@@ -194,6 +196,19 @@ def findings(root: Path = REPO_ROOT) -> list[dict]:
             "detail": f"no {SKILLS_DIR}/<name>/{SKILL_FILE} in the tree — the bots' contracts "
                       "have nowhere to live",
         })
+
+    # ---- the shared unattended contract still states the preflight ---------------------
+    unattended = found.get(UNATTENDED_SKILL)
+    if unattended is not None:
+        text = (unattended / SKILL_FILE).read_text()
+        if PREFLIGHT_OBLIGATION not in text:
+            items.append({
+                "key": "unattended-preflight",
+                "where": str((unattended / SKILL_FILE).relative_to(root)),
+                "detail": f"the unattended contract no longer states the preflight "
+                          f"(`{PREFLIGHT_OBLIGATION}`): a leg that skips it starts from a stale tree and "
+                          f"obeys a rulebook nobody currently enforces (issue #792)",
+            })
 
     # ---- every skill is a real, resolvable contract --------------------------------
     for name, dirpath in found.items():

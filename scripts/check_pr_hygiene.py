@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -330,6 +331,83 @@ def check_agents_mandate(root: Path) -> list[dict]:
     return out
 
 
+#: Every identity the bot lanes commit as. One email, several names: `check_pr_authors.py` allows
+#: `Asimov Agent <support@docondee.com>` and `Mr. Asimov <support@docondee.com>`.
+BOT_EMAILS = frozenset({"support@docondee.com"})
+
+AGENTS_LINE = re.compile(r"^AGENTS:\s+([0-9a-f]{7,40})\s+(\d+)b\s+(\d+)l\s*$", re.M)
+
+
+def range_authors(root: Path, base: str, head: str) -> list[str]:
+    """The author emails of the commits this PR adds, `--no-merges` so `refs/pull/N/merge` cannot hide them."""
+    out = _git(root, "log", "--no-merges", "--format=%ae", f"{base}..{head}")
+    return [line.strip() for line in (out or "").splitlines() if line.strip()]
+
+
+def is_bot_pr(root: Path, base: str, head: str) -> bool:
+    """Whether this PR carries a bot leg's work — **any** bot-authored commit, not every one.
+
+    `all()` was the hole: a branch where a human commit sits beside a bot commit reported False, so a
+    bot PR body with no `AGENTS:` line passed this gate — including the PR that introduced it. A human
+    PR with no bot commit is still skipped, because the rule is stated nowhere a person reads.
+    """
+    return any(author in BOT_EMAILS for author in range_authors(root, base, head))
+
+
+def pr_agents_line_findings(root: Path, head: str, base: str, body: str) -> list[dict]:
+    """`agents_line_findings`, but only for a range that carries bot work — the gate's real entry point."""
+    if not is_bot_pr(root, base, head):
+        return []
+    return agents_line_findings(root, head, base, body)
+
+
+def agents_line_findings(root: Path, head: str, base: str, body: str) -> list[dict]:
+    """A bot PR's `AGENTS:` line must cite a rulebook its head AND base both contain (issue #792).
+
+    Ancestry, never equality with the merge base: `rebase-bot` moves the merge base while the cited
+    rulebook stays reachable from both sides, so equality would reject exactly the PRs that were kept
+    current. `--no-merges` on the range read keeps the `refs/pull/N/merge` commit CI checks out from
+    hiding a citation that was never on either side.
+    """
+    m = AGENTS_LINE.search(body)
+    if m is None:
+        return [{
+            "key": "agents-line",
+            "where": "PR body",
+            "detail": "no `AGENTS: <sha> <bytes>b <lines>l` line — run `make bot-preflight` and cite what "
+                      "it writes (issue #792)",
+        }]
+    sha = m.group(1)
+    resolved = _git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
+    if resolved is None:
+        return [{
+            "key": "agents-line",
+            "where": "PR body",
+            "detail": f"the `AGENTS:` line cites {sha}, which is not a commit in this clone",
+        }]
+    bad = [ref for ref in (head, base) if not _is_ancestor(root, resolved, ref)]
+    if bad:
+        return [{
+            "key": "agents-line",
+            "where": "PR body",
+            "detail": f"the `AGENTS:` line cites {sha[:12]}, which is not an ancestor of "
+                      f"{', '.join(bad)} — the rulebook cited must be reachable from both the head and "
+                      f"the base (issue #792)",
+        }]
+    return []
+
+
+def _git(root: Path, *args: str) -> str | None:
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _is_ancestor(root: Path, sha: str, ref: str) -> bool:
+    r = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", sha, ref],
+                       capture_output=True, text=True, check=False)
+    return r.returncode == 0
+
+
 def findings(root: Path = REPO_ROOT) -> list[dict]:
     return check_producers(root) + check_agents_mandate(root)
 
@@ -379,12 +457,26 @@ def main(argv=None) -> int:
     for name in ("check", "report"):
         c = sub.add_parser(name)
         c.add_argument("--root", default=str(REPO_ROOT))
+    a = sub.add_parser("agents-line", help="a PR body's `AGENTS:` line cites a reachable rulebook (issue #792)")
+    a.add_argument("--root", default=str(REPO_ROOT))
+    a.add_argument("--head", required=True, help="the PR head ref or sha")
+    a.add_argument("--base", required=True, help="the PR base ref or sha")
+    a.add_argument("--body-file", required=True, help="the file holding the PR body")
     args = p.parse_args(argv)
     if not args.cmd:
         p.error("need a command: check | report")
     root = Path(args.root)
     if args.cmd == "report":
         print(report(root))
+        return 0
+    if args.cmd == "agents-line":
+        body = Path(args.body_file).read_text()
+        items = pr_agents_line_findings(root, args.head, args.base, body)
+        if items:
+            for it in items:
+                print(f"[check-pr-hygiene] {it['where']}: {it['detail']}", file=sys.stderr)
+            return 1
+        print("[check-pr-hygiene] OK: the `AGENTS:` line is reachable from both head and base")
         return 0
     items = findings(root)
     print(render(items))
