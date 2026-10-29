@@ -1,0 +1,1 @@
+| 2026-10-28 | a worktree the sweep unregistered but could not delete is a named leftover with its clearing command (branch still deleted, exit 0), and root-owned debris is cleared through the container engine | [2026-10-28-worktree-prune-leftover.md](agent-wiki/2026-10-28-worktree-prune-leftover.md) | #759 |
