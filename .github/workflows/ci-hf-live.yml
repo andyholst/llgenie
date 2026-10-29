@@ -1,0 +1,99 @@
+name: ci-hf-live — the merge-to-main real-Hub test pipeline (HF live tests + the committed-link liveness gate), never a PR check
+
+# Issue #1002 (split half of #1000): the live-HF tests get their own pipeline, and the owner says
+# "the ci pipeline only runs the hf live tests as a separate pipeline that runs when merged to main
+# branch". So: runs ONLY the @pytest.mark.network set (via the tester's seam, `make test-unit-network`
+# -> scripts/unit_tests.py run --marker network, same discovery as unit — issue #393), triggered on
+# merge to `main` (push on main) plus a nightly schedule and manual dispatch — NOT on every branch
+# push and never in a pull request.
+#
+# The committed-link liveness gate (scripts/check_model_links_liveness.py, issue #1000) runs FIRST,
+# LIVE=1 with a bounded LIMIT, over the committed model/GGUF links the tests depend on, via
+# tests/hub_probe.probe (#256) as the single authority: a dead URL is a NAMED message that fails the
+# job, not a raw 404 and not a silent green. A merge to main that would rot a committed link fails
+# HERE (the merge-time control), and the bounded probe is what lets the same gate run nightly too.
+# Flow: guard (owner / repository bot / collaborator with write, BEFORE any run) -> make test-env
+#       (pull llgenie/test) -> make check-model-links LIVE=1 LIMIT=25 (liveness gate) ->
+#       make test-unit-network (the @pytest.mark.network ownership set, via the tester's seam,
+#       scripts/unit_tests.py run --marker network, issue #393). Order is the contract: a dead link
+#       fails before any test runs, so the red names the URL, not a test's 404.
+# Trigger surface: push to branches main (merge-to-main) + schedule daily 06:59 UTC (its own odd
+#                  minute — issue #275) + workflow_dispatch (owner / repository bot / collaborator
+#                  with write), and NOTHING else — no pull_request and no non-main branch trigger.
+# Never: never runs in a pull request, never on a non-main branch push, never replaces ci-unit,
+#        never merges, never pushes to `main` itself, and never hand-edits a fixture (issue #987).
+# dispatch: no inputs — the pipeline runs exactly the @pytest.mark.network ownership set, gated first
+#           by the bounded liveness check; nothing to choose at dispatch time (issue #1000/#1002).
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "59 6 * * *"    # nightly 06:59 UTC — own odd minute free on all seven weekdays (issue #275: no bot shares a slot; minute 15 is now taken by the every-hour set and ci-requeue)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# concurrency: A bot never cancels an in-progress run (issue #275): the group is this workflow's own,
+# and `cancel-in-progress` is false so a second run (merge + nightly) waits instead of killing one.
+concurrency:
+  group: ci-hf-live
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Owner / collaborator trigger guard
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          # The run's head repository: empty for every non-PR event (issue #510).
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            # The repository's own bot is a GitHub App login, so it is never a collaborator and the
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
+            if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
+              echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+
+  hf-live:
+    needs: [guard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0   # the seam's discovery needs the parent commit (unit-suite.json, issue #393)
+      - uses: ./.github/actions/docker
+        if: runner.os == 'Linux'
+      - name: make test-env (Python 3.11 - Linux pulls llgenie/test from GHCR)
+        run: make test-env
+      - name: Liveness gate — every committed model/GGUF link a test depends on must resolve (issue #1000)
+        run: make check-model-links LIVE=1 LIMIT=25
+      - name: make test-unit-network (the @pytest.mark.network ownership set, via the seam, issue #1000)
+        run: make test-unit-network
+      - name: Prune orphaned test containers
+        if: always()
+        run: make test-clean
