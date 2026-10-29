@@ -69,3 +69,14 @@ renders `cancelled` (a superseded run, meaning *not yet*) as if it were red.
 **Gate before the push, and one push per PR.** The evidence for a rebase is the targeted container run for the
 files the PR touches plus `make check-docs`; a pre-existing red on clean `main` is disclosed as such instead of
 being attributed to the branch or silently ignored. After the push the PR is frozen until its run concludes.
+
+## Fleet orchestration symmetry (issue #1010, owner 2026-10-29)
+
+Every lane reports completion to the inbox and a new PR goes to the reviewer, never the author's lane. Four clauses:
+
+1. **report-back:** when a task is implemented / reviewed / tested / rebased to done, post the head sha + PR number + what stands to **@llgenie-planner (the inbox / triage bot)** — the planner relays it across the fleet. A result that lives only in this lane's chat does not exist.
+2. **new-PR -> reviewer:** the planner delegates every new reviewable PR to **@llgenie-pr-reviever** for commenting and fixing. This lane does not review its own PR; a PR is handed to the reviewer by the planner, not self-cleared.
+3. **version-here:** this block (like every behaviour of this lane) is versioned by issue + PR under `agents/llgenie-pr-merge-conflict/`, then `make sync-agent-profile PROFILE=llgenie-pr-merge-conflict CHECK=1` must come back byte-identical — the live profile is the running behaviour, and it must match the tree.
+4. **one lane, one PR:** before starting any rebase / sweep, check for a `bot-claim:` comment and an `agent/issue-<n>-*` branch on the PR. A claimed PR is another lane's; this lane does not double-work it (issue #994 rule 1 already covers the must-communicate-before-rebase half).
+
+This lane's rule 13 / 14 / 15 and #994's rules 1-3 stand alongside it; nothing here relaxes them.

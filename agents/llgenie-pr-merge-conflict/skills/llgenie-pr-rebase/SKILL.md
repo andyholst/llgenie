@@ -240,3 +240,12 @@ re-designing its logic is not this lane's call.
 - **`rerere` is enabled on this clone and its cache can hand you a WRONG `CHANGES.md`.** `git rebase` printed `CONFLICT` then `Staged 'CHANGES.md' using previous resolution`, staging a mangled 3-column row copied from a *different* PR's conflict. Always inspect the staged file and rebuild it (main's file + the branch's own row) instead of trusting a rerere resolution; run `git -c rerere.enabled=false rebase --continue`. Verify the row shape (`line.count('|') == 5` for a 4-column table) and that the row's *text* matches the branch's original row, not just its note name.
 - Rebase `--force-with-lease` leases must name the ref actually fetched, else the push is rejected; verify afterwards that `HEAD` == `origin/<branch>` and the parent is `origin/main`.
 - **Prove content preservation by added/removed LINES, not by tree diff.** `git diff <old-base> <old-tip>` vs `git diff origin/main HEAD` (after rebase) will *always* differ once main moved; the honest check is `diff <(grep -E '^[+-][^+-]' old.diff) <(grep -E '^[+-][^+-]' new.diff)` plus the `--stat` totals (e.g. `17 files changed, 1836 insertions(+), 2 deletions(-)` on both sides). Diffing a pre-rebase commit against its rebased twin also shows all of main's work and reads like drift when there is none.
+
+
+## Fleet orchestration (issue #1010) — this skill's lane side
+
+1. **report-back:** rebase/resolve to done (last push, gates green, head fixed) -> post head sha + PR number + what stands to @llgenie-planner.
+2. **new-PR -> reviewer:** the planner sends new reviewable PRs to @llgenie-pr-reviever; this lane never reviews its own PR.
+3. **version-here:** this behaviour is versioned by issue + PR under agents/llgenie-pr-merge-conflict/, then sync-agent-profile PROFILE=llgenie-pr-merge-conflict CHECK=1 comes back byte-identical.
+4. **one lane, one PR:** before a sweep touches a PR, check bot-claim: and agent/issue-<n>-* branch; a claimed PR is another lane's (issue #994 rule 1).
+

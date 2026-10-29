@@ -174,3 +174,11 @@ The assertion text names the test file and line, which is what lets you match it
 Re-measure staleness against the same sha and report: current / still-stale with a per-PR reason /
 held. The per-PR reasons are the deliverable — "4 left, one gate-red, one blocked by another PR, two
 diverged worktrees" is a report; "mostly done" is not.
+
+## Fleet orchestration (issue #1010) — this skill's lane side
+
+1. **report-back:** rebase/resolve to done (last push, gates green, head fixed) -> post head sha + PR number + what stands to @llgenie-planner.
+2. **new-PR -> reviewer:** the planner sends new reviewable PRs to @llgenie-pr-reviever; this lane never reviews its own PR.
+3. **version-here:** this behaviour is versioned by issue + PR under agents/llgenie-pr-merge-conflict/, then sync-agent-profile PROFILE=llgenie-pr-merge-conflict CHECK=1 comes back byte-identical.
+4. **one lane, one PR:** before a sweep touches a PR, check bot-claim: and agent/issue-<n>-* branch; a claimed PR is another lane's (issue #994 rule 1).
+
