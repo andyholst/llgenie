@@ -100,6 +100,26 @@ State the current HEADs and the gap before changing anything; the answer to
 "what is new" is that report, never a guess. Worktrees `llgenie-wt` and
 `trending-local-llms-wt` exist for parallel branches.
 
+## Step 0b — cut from a fresh upstream main, and bookend the work (#873 rule 15)
+
+Before creating a worktree or branch: `git fetch upstream main` — the canonical remote is
+`asimov-agent/llgenie`, and a fork named `origin` is **not** upstream — then branch from
+`origin/main` **at the sha you fetched in that moment**. Never from a branch you already had, and
+never from a sha quoted in a chat message: it is stale by the time you read it.
+
+An engine bump cut from a stale `main` builds engines that no longer exist — the third way the same
+bump fails, and it looks identical to the other two (#807: the awaited tags were absent; #893: the
+30-minute wait outlived the queue).
+
+**Bookend the work in the thread, never in a DM:**
+
+- **start comment** — issue/PR id, branch, the `main` sha you cut from, and what "done" means;
+- **finish comment** — head sha, what changed, the run id or command that proves it, and anything
+  left open.
+
+A start with no finish is an abandoned claim; a finish with no start has no baseline to compare
+against. For an engine wait, the same thread carries `producer job + run id + sha`.
+
 ## Step 1 — sync new/updated engines that have Linux support
 
 - `make sync-registry` vendors the store into `data/models.json` + the contract
