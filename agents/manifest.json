@@ -49,6 +49,12 @@
       "rules": [
         "never-merge"
       ]
+    },
+    {
+      "name": "llgenie-pr-merge-conflict",
+      "rules": [
+        "never-merge"
+      ]
     }
   ]
 }
