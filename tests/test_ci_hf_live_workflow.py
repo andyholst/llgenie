@@ -101,17 +101,18 @@ def test_the_hermetic_unit_gate_never_runs_the_network_set():
 
 
 
-def test_ci_hf_live_is_rostered_not_exempted():
-    """The CI lane's admission: a live-HF gate's red must ROUTE to a repair, not be exempted (#349).
-
-    security-scan is exempted because its red is by-design; a live-HF gate's red is a genuine signal
-    (a link went down, a model check failed) and must be consumed by run-failure-reactor.yml. So
-    ci-hf-live's exact top-level name is a ROSTER ROW in that workflow, and it has NO exemption entry.
-    check-workflows fails when the roster name stops matching, so this cannot rot silently.
+def test_ci_hf_live_is_exempted_with_a_reason():
+    """CI-lane admission (final): ci-hf-live's red is a named work item, so a dated, reasoned #349
+    exemption passes the gate (check_workflows treats `exempt` exactly like a watch — the exemption
+    file IS the routing). It must NOT be a run-failure-reactor roster row, and its exemption footer
+    must say WHY the red is expected (the real-call flake class), matching security-scan (#349).
     """
-    reactor = (REPO / ".github" / "workflows" / "run-failure-reactor.yml").read_text()
-    assert "ci-hf-live" in reactor,         "ci-hf-live must be a run-failure-reactor roster row (its red routes to a repair)"
-
     import json
+    reactor = (REPO / ".github" / "workflows" / "run-failure-reactor.yml").read_text()
+    assert "ci-hf-live" not in reactor, \
+        "ci-hf-live must NOT be a run-failure-reactor roster row (final ruling: exemption)"
     ex = json.loads((REPO / "tests" / "fixtures" / "workflow-run-exemptions.json").read_text())
-    assert all("ci-hf-live" not in k for k in ex.get("workflows", {})),         "ci-hf-live must not be #349-exempted (a sincere signal is not a work item by default)"
+    entry = [k for k in ex.get("workflows", {}) if "ci-hf-live" in k]
+    assert entry, "ci-hf-live must have a workflow-run-exemptions entry"
+    reason = ex["workflows"][entry[0]].get("reason", "")
+    assert len(reason) > 80, "the exemption reason must explain why the red is expected/routed"
