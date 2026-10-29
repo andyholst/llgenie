@@ -36,7 +36,12 @@ def test_ci_hf_live_triggers_on_merge_to_main_not_pr_or_feature_push():
 
     # It pushes on main (the merge) ...
     assert re.search(r"^  push:\s*$", text, re.M), "ci-hf-live.yml must have a push trigger (merge)"
-    assert re.search(r"branches:\s*\[main\]", text, re.M), "push must be restricted to main only"
+    # ... restricted to main ONLY: no wildcard, no other branch, no tags (not every branch push)
+    m = re.search(r"branches:\s*\[([^\]]*)\]", text)
+    assert m, "push must restrict to branches: [main]"
+    branches = [b.strip() for b in m.group(1).split(",") if b.strip()]
+    assert branches == ["main"], f"push must be main-only, got branches={branches}"
+    assert re.search(r"^  tags:", text, re.M) is None, "push must not trigger on tags"
     # ... is manually dispatchable and optionally scheduled
     assert "workflow_dispatch" in text, "ci-hf-live.yml must be manually dispatchable"
     assert re.search(r"^  schedule:", text, re.M), "ci-hf-live.yml may run nightly (owner-OK'd)"
