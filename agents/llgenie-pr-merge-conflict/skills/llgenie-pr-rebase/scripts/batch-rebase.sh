@@ -18,9 +18,25 @@ for spec in "$@"; do
   if git merge-base --is-ancestor "$REMOTE/$BR" origin/main; then echo "  no-op (already an ancestor of main)"; continue; fi
   git worktree add -B "b$N" "$WT" "refs/remotes/$REMOTE/$BR" --force >/dev/null 2>&1 || { echo "  worktree failed"; continue; }
   cd "$WT" || continue
+  # CHANGES.md is generated and conflicts on every rebase (main + branch both added rows). Resolve it by
+  # taking main's table wholesale and continuing; the final make changes-index regenerates from fragments,
+  # so no row is lost or hand-merged.
   if ! GIT_EDITOR=true git rebase origin/main >/tmp/rb-$N.log 2>&1; then
-    echo "  REBASE CONFLICT: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
-    git rebase --abort 2>/dev/null; cd "$P"; continue
+    CONF=$(git diff --name-only --diff-filter=U)
+    CONFLIST=$(echo "$CONF" | sed '/^$/d' | sort -u)
+    ONLY_CHANGES=1
+    for f in $CONFLIST; do [ "$f" = "CHANGES.md" ] || ONLY_CHANGES=0; done
+    if [ "$ONLY_CHANGES" = 1 ] && [ -n "$CONFLIST" ]; then
+      git checkout origin/main -- CHANGES.md && git add CHANGES.md
+      if ! GIT_EDITOR=true git rebase --continue >/tmp/rb-$N.log 2>&1; then
+        echo "  continue conflict: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+        git rebase --abort 2>/dev/null; cd "$P"; continue
+      fi
+      echo "  (CHANGES.md resolved via main's table + regenerate)"
+    else
+      echo "  REBASE CONFLICT (files: $CONFLIST)"
+      git rebase --abort 2>/dev/null; cd "$P"; continue
+    fi
   fi
   make changes-index >/dev/null 2>&1
   if [ -n "$(git status --porcelain)" ]; then
