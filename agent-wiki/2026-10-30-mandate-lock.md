@@ -17,4 +17,5 @@ Measured verification at head `7eb2d84c` (after the push that landed this record
 - holds gate run 40974911311 → completed/success (no do-not-merge label present)
 - CI run 40974911595 → in_progress (no completed-run verdict yet at this head; not claimed)
 - local gates: `check_pr_authors` over `f244efe8..7eb2d84c` → OK; `make check-docs` → ok (a local pass, not a CI run)
+- executed suite at head `c386949e`: `pytest tests/test_pr_authors.py` → **29 passed in 2.97s, exit 0**
 
