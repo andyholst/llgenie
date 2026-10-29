@@ -283,3 +283,25 @@ def test_a_workflow_run_trigger_is_wired_to_the_ci_workflow():
     assert "conclusion == 'failure'" in wf, "only a failed run may dispatch a repair"
     assert "ATTEMPTS=5" in wf, "the sweep cap is five"
     assert 'default: "5"' in wf, "a manual dispatch defaults to five rounds"
+
+
+# ---------------------------------------------------------------------------------------------------
+# A cancellation is not a verdict (issue #843): `gh pr checks` buckets CANCELLED as `fail`, so before
+# this the sweep "fixed" PRs whose only problem was that a bulk cancel killed their run.
+def test_a_cancelled_check_is_pending_not_red(monkeypatch, capsys):
+    rows = [{"name": "linux / unit", "state": "CANCELLED", "bucket": "fail", "workflow": "CI"},
+            {"name": "guard", "state": "CANCELLED", "bucket": "cancel", "workflow": "CI"}]
+    monkeypatch.setattr(sweep, "_gh", lambda args: json.dumps(rows))
+
+    assert sweep.failing_checks(OWNER + "/llgenie", 7) == []
+    out = capsys.readouterr().out
+    assert "PENDING, not red" in out, out
+    assert "ci-requeue-cancelled" in out, out
+
+
+def test_a_real_failure_is_still_red_beside_a_cancelled_check(monkeypatch):
+    rows = [{"name": "linux / unit", "state": "FAILURE", "bucket": "fail", "workflow": "CI"},
+            {"name": "docs", "state": "CANCELLED", "bucket": "fail", "workflow": "Docs"}]
+    monkeypatch.setattr(sweep, "_gh", lambda args: json.dumps(rows))
+
+    assert sweep.failing_checks(OWNER + "/llgenie", 7) == ["linux / unit"]
