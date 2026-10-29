@@ -76,7 +76,6 @@ def test_ci_hf_live_schedule_is_an_odd_own_minute():
 
 def test_the_hermetic_unit_gate_never_runs_the_network_set():
     """#1000/#1002: ci-unit stays `-m "not network"`; the seam is the ONLY `-m network` consumer.
-
     A live-HF test must never silently run inside ci-unit (the owner: "they can't be part of ci
     unit anymore"), and the dedicated pipeline must never run the hermetic unit gate. This pins the
     one-expression boundary at the Makefile/seam level so neither side can drift into the other.
@@ -100,3 +99,19 @@ def test_the_hermetic_unit_gate_never_runs_the_network_set():
         "ci-unit/test-unit must never select the network set (issue #1000)"
 
 
+
+
+def test_ci_hf_live_is_rostered_not_exempted():
+    """The CI lane's admission: a live-HF gate's red must ROUTE to a repair, not be exempted (#349).
+
+    security-scan is exempted because its red is by-design; a live-HF gate's red is a genuine signal
+    (a link went down, a model check failed) and must be consumed by run-failure-reactor.yml. So
+    ci-hf-live's exact top-level name is a ROSTER ROW in that workflow, and it has NO exemption entry.
+    check-workflows fails when the roster name stops matching, so this cannot rot silently.
+    """
+    reactor = (REPO / ".github" / "workflows" / "run-failure-reactor.yml").read_text()
+    assert "ci-hf-live" in reactor,         "ci-hf-live must be a run-failure-reactor roster row (its red routes to a repair)"
+
+    import json
+    ex = json.loads((REPO / "tests" / "fixtures" / "workflow-run-exemptions.json").read_text())
+    assert all("ci-hf-live" not in k for k in ex.get("workflows", {})),         "ci-hf-live must not be #349-exempted (a sincere signal is not a work item by default)"
