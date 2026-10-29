@@ -72,3 +72,31 @@ def test_ci_hf_live_schedule_is_an_odd_own_minute():
     m = re.search(r"cron:\s*\"([0-9]+) ([0-9]+) \* \* \*\"", _text())
     assert m, "ci-hf-live.yml must declare a nightly cron"
     assert int(m.group(1)) % 2 == 1, f"ci-hf-live cron minute is not odd (issue #275)"
+
+
+def test_the_hermetic_unit_gate_never_runs_the_network_set():
+    """#1000/#1002: ci-unit stays `-m "not network"`; the seam is the ONLY `-m network` consumer.
+
+    A live-HF test must never silently run inside ci-unit (the owner: "they can't be part of ci
+    unit anymore"), and the dedicated pipeline must never run the hermetic unit gate. This pins the
+    one-expression boundary at the Makefile/seam level so neither side can drift into the other.
+    """
+
+    mk = (REPO / "Makefile").read_text()
+    seam = (REPO / "scripts" / "unit_tests.py").read_text()
+
+    # The seam target exists (the workflow depends on it) and selects the network set
+    assert re.search(r"^test-unit-network:", mk, re.M), "the seam target must exist"
+    assert "--marker" in seam and "network" in seam, \
+        "unit_tests.py must expose the --marker network slot (issue #1000)"
+    tail = mk.split("test-unit-network:", 1)[1]
+    seam_body = tail.split("\n\ntest-unit:", 1)[0]
+    assert "--marker network" in seam_body, \
+        "the seam must select the network set by marker (issue #1000)"
+
+    # The hermetic gate region (the test-unit target onward) must never select the network set
+    hermetic = tail.split("\n\ntest-unit:", 1)[1]
+    assert "--marker network" not in hermetic, \
+        "ci-unit/test-unit must never select the network set (issue #1000)"
+
+
