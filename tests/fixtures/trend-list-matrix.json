@@ -11413,7 +11413,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -11996,7 +11996,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -12627,7 +12627,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -13258,7 +13258,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -13769,7 +13769,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -14424,7 +14424,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -15127,7 +15127,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -15838,7 +15838,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -19389,7 +19389,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -19972,7 +19972,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -20603,7 +20603,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -21234,7 +21234,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 18 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -21745,7 +21745,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -22400,7 +22400,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -23103,7 +23103,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -23814,7 +23814,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 37 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -27365,7 +27365,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 10 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 10 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -27948,7 +27948,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 10 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 10 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -28579,7 +28579,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 10 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 10 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
@@ -29210,7 +29210,7 @@
           "tps": 0,
           "measured_on": "",
           "variant": "",
-          "why": "smallest GGUF is 10 GB > 10 GB this host can hold"
+          "why": "smallest GGUF is 6 GB > 10 GB this host can hold"
         },
         {
           "model": "GLM-5.2",
