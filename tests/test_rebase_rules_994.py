@@ -12,6 +12,7 @@ SKILL = REPO / "agents/llgenie-pr-merge-conflict/skills/llgenie-pr-rebase/SKILL.
 
 RULE1 = "must always communicate with the other llgenie bots before rebasing an ongoing PR"
 RULE2 = "keep their ongoing PR rebased onto the latest fetched `asimov-agent/llgenie` `main`"
+RULE3 = "before starting ANY new issue/PR work, every lane must fetch and rebase its worktree onto the latest fetched `asimov-agent/llgenie` `main`"
 
 
 def test_rule1_is_verbatim_in_the_lane_soul():
@@ -26,6 +27,13 @@ def test_rule1_is_verbatim_in_the_lane_skill():
 
 def test_rule2_is_verbatim_in_the_lane_soul():
     assert RULE2 in SOUL.read_text(encoding="utf-8")
+
+
+def test_rule3_is_verbatim_in_the_lane_soul_and_skill():
+    soul = SOUL.read_text(encoding="utf-8")
+    skill = SKILL.read_text(encoding="utf-8")
+    assert RULE3 in soul
+    assert RULE3 in skill
 
 
 def test_both_rules_cite_the_issue_so_the_source_of_truth_is_named():
