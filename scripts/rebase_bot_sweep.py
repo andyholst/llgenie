@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import time
 import datetime as dt
@@ -49,6 +50,28 @@ REBASE_CLAIM_TTL = dt.timedelta(minutes=30)
 MAX_PER_DAY = 5
 #: Merge states that mean "this branch has to come back onto main".
 NEEDS = ("BEHIND", "DIRTY")
+
+#: The four outcomes of reading ONE PR's merge state, and there are exactly four (issue #801).
+#: Three would be the defect: collapsing `UNKNOWN` into "nothing to do" left #445-#447 stale with a
+#: green run behind them (issue #453), and collapsing a crashed read into "nothing to do" is what let a
+#: sweep report success while the conflicted PR it was dispatched for was never rebased (issue #801).
+REBASE, NONE, DEFER, ERROR = "rebase", "none", "defer", "error"
+
+
+def outcome(state: str, crashed: bool = False) -> str:
+    """Classify one PR's merge state into exactly one of the four outcomes.
+
+    `crashed` is an argument rather than a separate code path on purpose: a read that failed is an
+    outcome of the same decision, so it cannot be dropped by a caller that only remembers three.
+    """
+    if crashed:
+        return ERROR
+    value = (state or "").upper()
+    if value in NEEDS:
+        return REBASE
+    if value == "UNKNOWN":
+        return DEFER
+    return NONE
 #: GitHub computes mergeability lazily: a `pr list` right after a push/comment can report
 #: `UNKNOWN` for every PR. Treating that as "no rebase needed" is what left #445-#447 stale
 #: (issue #453), so a PR reported UNKNOWN is re-queried — bounded, never an unbounded poll.
@@ -248,7 +271,7 @@ def sweep(gh: str, repo: str, today: str | None = None, max_per_day: int = MAX_P
                              unknown_attempts, unknown_delay)
             if not isinstance(state, str):
                 continue
-        if state not in NEEDS:
+        if outcome(state) is not REBASE:
             if state == "UNKNOWN":
                 deferred.append(num)
                 reasons.append(f"#{num} has no computed merge state (UNKNOWN) after "
@@ -300,6 +323,34 @@ def sweep(gh: str, repo: str, today: str | None = None, max_per_day: int = MAX_P
             "reason": "no open PR needs rebasing"}
 
 
+CRASHED_PR = re.compile(r"#(\d+)")
+
+
+def surface_crashes(gh: str, repo: str, crashed: list[str], post=_gh) -> list[int]:
+    """Comment on each PR whose read crashed, so the fleet sees it and not only a red run (issue #801).
+
+    A `DIRTY` PR has no CI run at all, and `fix-bot` reacts only to failing checks — so a sweep that
+    crashes while a conflicted PR exists leaves that PR invisible to every other bot. The comment is
+    the only channel that reaches a human reader of the PR, and it names what failed rather than saying
+    "the sweep broke".
+    """
+    seen: list[int] = []
+    for line in crashed:
+        m = CRASHED_PR.search(line)
+        if not m:
+            continue
+        num = int(m.group(1))
+        if num in seen:
+            continue
+        seen.append(num)
+        body = ("**rebase-bot could not decide this PR.** The sweep failed while reading it, so no rebase "
+                "was attempted and no CI run was started (a conflicted PR gets none).\n\n"
+                f"```\n{line}\n```\n\n"
+                "Nothing on this branch is at fault; the next sweep will retry it. Filed under #801.")
+        post(gh, ["pr", "comment", str(num), "--repo", repo, "--body", body])
+    return seen
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="rebase_bot_sweep")
     p.add_argument("--gh", default="gh")
@@ -341,6 +392,10 @@ def main(argv=None) -> int:
         # crash that does not name the PR it prevented is what #801 was about.
         for line in res.get("crashed") or []:
             print(f"error={line}")
+        surfaced = surface_crashes(a.gh, a.repo, res.get("crashed") or [])
+        if surfaced:
+            print(f"[rebase-bot] surfaced the failure on {', '.join(f'#{n}' for n in surfaced)} so it is "
+                  f"not only a red run (issue #801)")
         return 1
     return 0
 

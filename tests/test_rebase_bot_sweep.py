@@ -833,3 +833,81 @@ def test_the_cli_reports_the_named_failure_on_stdout_and_exits_non_zero(tmp_path
     assert rc == 1
     assert "action=error" in out, out
     assert "error=#812" in out, out
+
+
+# ---- the four outcomes of one PR's merge state (issue #801) --------------------------------
+# Four, never three: `UNKNOWN` is its own answer (#453) and a crashed read is its own answer (#801).
+# The negative control in each case is the outcome it must NOT be — that is the assertion a future
+# refactor breaks first, and it is why each case asserts a pair rather than a single value.
+
+
+def test_a_conflicted_pr_is_a_rebase():
+    assert rb.outcome("DIRTY") is rb.REBASE
+    assert rb.outcome("BEHIND") is rb.REBASE
+    assert rb.outcome("dirty") is rb.REBASE, "the state is case-insensitive"
+
+
+def test_a_clean_pr_is_none_not_defer():
+    assert rb.outcome("MERGEABLE") is rb.NONE
+    assert rb.outcome("BLOCKED") is rb.NONE, "a required check pending is not a rebase"
+    assert rb.outcome("CLEAN") is rb.NONE
+    assert rb.outcome("MERGEABLE") is not rb.DEFER
+
+
+def test_an_uncomputed_state_is_defer_and_never_none():
+    assert rb.outcome("UNKNOWN") is rb.DEFER
+    assert rb.outcome("") is rb.NONE, "an absent field is not UNKNOWN — gh omitted it"
+    assert rb.outcome("UNKNOWN") is not rb.NONE, "collapsing this is what left #445-#447 stale"
+
+
+def test_a_crashed_read_is_error_even_with_a_rebasable_state():
+    assert rb.outcome("DIRTY", crashed=True) is rb.ERROR
+    assert rb.outcome("UNKNOWN", crashed=True) is rb.ERROR
+    assert rb.outcome("DIRTY", crashed=True) is not rb.REBASE, (
+        "a crashed read must never be read as 'this PR needs a rebase' — the sweep did not see it")
+
+
+def test_the_four_outcomes_are_distinct_values():
+    """The structural control: a refactor that collapses two outcomes cannot keep these four names."""
+    values = {rb.REBASE, rb.NONE, rb.DEFER, rb.ERROR}
+    assert len(values) == 4, values
+
+
+# ---- item 4: a crashed sweep surfaces on the PR it prevented (issue #801) -------------------
+
+
+def test_a_crashed_sweep_comments_on_the_pr_it_could_not_read():
+    """A DIRTY PR has no CI run and `fix-bot` only watches failing checks, so a red run alone is invisible."""
+    posted = []
+
+    def fake_post(gh, args):
+        posted.append(args)
+        return "https://example.invalid/comment"
+
+    surfaced = rb.surface_crashes(
+        "gh", "o/r", ["#789 (agent/issue-772-a-scaffolded) could not be read: gh pr view failed"], fake_post)
+
+    assert surfaced == [789]
+    assert len(posted) == 1
+    assert posted[0][:4] == ["pr", "comment", "789", "--repo"]
+    body = posted[0][posted[0].index("--body") + 1]
+    assert "could not decide this PR" in body
+    assert "#789 (agent/issue-772-a-scaffolded) could not be read" in body, "the cause is quoted verbatim"
+    assert "#801" in body
+
+
+def test_one_comment_per_pr_even_when_several_reads_of_it_crashed():
+    posted = []
+    surfaced = rb.surface_crashes(
+        "gh", "o/r",
+        ["#42 (b) could not be read: boom", "#42 (b) could not be read: boom again", "#43 (c) could not be read: x"],
+        lambda gh, args: posted.append(args))
+    assert surfaced == [42, 43], "no duplicate comments on the same PR"
+    assert len(posted) == 2
+
+
+def test_a_crash_line_without_a_pr_number_posts_nothing():
+    """The control: a failure that names no PR must not invent one, and must not go silent either."""
+    posted = []
+    assert rb.surface_crashes("gh", "o/r", ["the PR list could not be read"], lambda gh, args: posted.append(args)) == []
+    assert posted == []
