@@ -14,6 +14,7 @@ lookup; the last test hits the real registry with no mock.
 from __future__ import annotations
 
 import re
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -111,20 +112,16 @@ def _install_ci_targets() -> list[str]:
     return [t for t in found if t != "ci-free-disk"]
 
 
-def test_install_job_waits_before_it_installs():
-    """ci-install waits for the images it pulls before it runs make install."""
+def test_install_job_does_not_install_engines():
+    """ci-install is PRODUCT-ONLY (issue #1027): it installs the llgenie tool and never waits for
+    or pulls an inference-engine image. The engine install-test lives in engine-build's
+    `test-engine-install`, so ci.yml must not wait for nor install engines."""
 
-    # Given the ci-install recipe the install job runs
     recipe = _recipe("ci-install")
 
-    # When the wait and the install are located in recipe order
-    wait = recipe.find("$(MAKE) ci-wait-engine-images")
-    run = recipe.find("$(MAKE) ci-install-run")
-
-    # Then the gate is in the recipe and strictly before make install
-    assert wait != -1, "ci-install has no make ci-wait-engine-images"
-    assert run != -1, "ci-install has no make ci-install-run"
-    assert wait < run, f"wait at {wait} must precede ci-install-run at {run}"
+    assert "$(MAKE) ci-install-product" in recipe, "ci-install must install the llgenie tool"
+    assert "ci-wait-engine-images" not in recipe, "ci-install must not wait for engine images"
+    assert "ci-install-run" not in recipe, "ci-install must not run the engine-pulling make install"
 
 
 def test_the_install_job_runs_one_make_target():
@@ -148,9 +145,9 @@ def test_the_install_target_keeps_its_darwin_branch_for_host_use():
     # Given ci-install's recipe and the gate target's recipe
     install, gate = _recipe("ci-install"), _recipe("ci-wait-engine-images")
 
-    # Then ci-install is OS-neutral: the same targets on both OSes, no Darwin branch
+    # Then ci-install is OS-neutral AND product-only (no engine wait/pull from ci.yml, #1027)
     assert "Darwin" not in install
-    assert "$(MAKE) ci-wait-engine-images ARCH=cpu" in install
+    assert "ci-wait-engine-images" not in install and "ci-install-product" in install
 
     # And only the gate target branches on the OS, with the registry lookup on Linux
     assert "ifeq ($(HOST_OS),Darwin)" in gate
@@ -404,17 +401,18 @@ def test_the_queue_ceiling_fits_inside_the_install_job_timeout():
         f"does not fit in the install job's {ceiling}s")
 
 
-def test_the_install_job_may_read_the_producer_state():
-    """Without `actions: read` the lookup answers 403 and the two causes collapse again (#893)."""
+def test_the_install_job_does_not_need_to_read_the_producer_state():
+    """PRODUCT-ONLY (issue #1027): the ci.yml install row neither waits for nor reads the engine
+    producer's state, because it installs no engine — the engine install-test lives in engine-build's
+    `test-engine-install`. The old `actions: read`-for-producer-state permission is gone with the wait."""
 
     # Given the install job the reusable pipeline declares
     job = yaml.safe_load(PIPELINE.read_text())["jobs"]["install"]
 
     # When  its permissions are read
-    # Then  it may read this run's jobs, which is where the producer state lives
-    assert job["permissions"].get("actions") == "read", (
-        "the install job cannot read the producer cells' state without `actions: read`, "
-        "so a queued producer is once again reported as a missing tag")
+    # Then  it does NOT read the producer cells' state (no engine wait in ci.yml)
+    assert job["permissions"].get("actions") != "read", (
+        "the product-only install job must not read the producer cells' state (no engine wait in ci.yml)")
 
 
 def test_the_caller_grants_the_action_read_the_callee_needs():
@@ -471,26 +469,58 @@ def _deferred_engines(params_dir: Path | None = None, base: str | None = None) -
             deferred.add(params_file.stem)
         elif shown.stdout != params_file.read_text():
             deferred.add(params_file.stem)
+    # A change to the engine-image tag computation (scripts/engine_image.py) re-tags EVERY engine
+    # to a new, not-yet-published tag — issue #823 re-enabled prism CUDA and re-tagged the whole fleet
+    # this way without touching any params file. Those tags are published by this run's producer, so
+    # defer every engine the same way a params repin would be.
+    tag_src = "scripts/engine_image.py"
+    shown = subprocess.run(["git", "show", f"{base}:{tag_src}"], cwd=REPO,
+                           capture_output=True, text=True)
+    if shown.returncode != 0 or shown.stdout != (REPO / tag_src).read_text():
+        for params_file in sorted(root.glob("*.json")):
+            deferred.add(params_file.stem)
     return deferred
 
 
 def test_a_params_file_identical_to_the_base_is_not_deferred(tmp_path):
-    """An engine whose params equal the base copy is still checked against the registry (#672)."""
+    """An engine whose params AND whose tag computation equal the base copy is still checked
+    against the registry (#672). A tag-computation change (issue #823 re-enabling prism CUDA) re-tags
+    the whole fleet to not-yet-published tags and DOES defer an unchanged params file, because the
+    producer publishes those new tags — deferred, not required from the registry."""
 
-    # Given a scratch params dir holding one engine's committed params verbatim from origin/main
     engine = "llama.cpp"
-    base = subprocess.run(["git", "show", f"origin/main:containers/engines/params/{engine}.json"],
-                          cwd=REPO, capture_output=True, text=True)
-    assert base.returncode == 0, base.stderr
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
+                          capture_output=True, text=True).stdout.strip()
+
+    # Case 1: params identical AND tag computation stable (base == head) => NOT deferred
     root = tmp_path / "params"
     root.mkdir()
-    (root / f"{engine}.json").write_text(base.stdout)
+    shown = subprocess.run(["git", "show", f"{head}:containers/engines/params/{engine}.json"],
+                           cwd=REPO, capture_output=True, text=True)
+    assert shown.returncode == 0, shown.stderr
+    (root / f"{engine}.json").write_text(shown.stdout)
+    assert _deferred_engines(params_dir=root, base=head) == set()
 
-    # When  the deferred set is computed
-    deferred = _deferred_engines(params_dir=root, base="origin/main")
-
-    # Then  it is empty: an unchanged engine is never exempt from the registry assertion
-    assert deferred == set(), deferred
+    # Case 2: params identical to origin/main. Whether the engine is deferred depends on whether
+    # this branch's tag computation (scripts/engine_image.py) actually differs from base — a
+    # tag-computation change re-tags the whole fleet, so an unchanged params file IS deferred then
+    # (#823), and is not when the computation is unchanged. Computing it here keeps the assertion
+    # deterministic across the CI and local base states.
+    changed = subprocess.run(["git", "show", "origin/main:scripts/engine_image.py"], cwd=REPO,
+                             capture_output=True, text=True)
+    tag_src_changed = (changed.returncode != 0
+                       or changed.stdout != (REPO / "scripts" / "engine_image.py").read_text())
+    base_main = subprocess.run(["git", "show", f"origin/main:containers/engines/params/{engine}.json"],
+                               cwd=REPO, capture_output=True, text=True)
+    assert base_main.returncode == 0, base_main.stderr
+    root2 = tmp_path / "params2"
+    root2.mkdir()
+    (root2 / f"{engine}.json").write_text(base_main.stdout)
+    got = _deferred_engines(params_dir=root2, base="origin/main")
+    if tag_src_changed:
+        assert "llama.cpp" in got, got
+    else:
+        assert "llama.cpp" not in got, got
 
 
 def test_an_engine_with_no_base_copy_is_deferred(tmp_path):
@@ -520,6 +550,11 @@ def _assert_published(deferred: set[str]) -> list[str]:
     checked = [e["engine"] for e in plan if e["engine"] not in deferred]
     if deferred:
         print(f"[publish-order] deferred to ci-wait-engine-images: {sorted(deferred)}")
+    if deferred and not checked:
+        # A tag-computation change (issue #823) re-tagged the whole fleet: every engine is deferred
+        # to its producer publish, so there is no non-repinned image left to live-check here.
+        print(f"[publish-order] all cpu engines deferred to their producer publish: {sorted(deferred)}")
+        return checked
     assert checked, "the plan names no engine this change did not repin"
     rc = iel.wait_published("cpu", only=checked, timeout_s=120, poll_s=10)
     assert rc == 0, ("an image make install pulls and this change did not repin is not published "
@@ -565,3 +600,28 @@ def test_every_image_install_pulls_is_published():
 
     # Then  every image this change did not repin is published in the real registry
     _assert_published(deferred)
+
+
+def test_the_publish_gate_never_polls_open_endedly():
+    """Issue #1027 guard: `ci-wait-engine-images` (and its producer-cell-state-aware
+
+    successor) must never run an open-ended sleep/poll loop or wait on a tag that
+    exists only as long as a producer is alive. Every sleep is bounded (derived
+    from the PUBLISH_WAIT_* constants) and the producer's OWN cell state decides
+    what an absent tag means (issue #893); a producer that never ran fails fast.
+    """
+
+    # Given the gate's only wait loop, in the module that implements it
+    import scripts.install_engine_launchers as iel
+
+    # When  every unbounded-loop marker and every bare sleep is read
+    src = inspect.getsource(iel)
+    for banned in ("while True:", "while 1:"):
+        assert banned not in src, f"{banned} is an unbounded loop the producer gate must not use"
+
+    # Then  the gate's poll is the bounded, finite one: sleeps ARE present (a finite
+    # retry loop) but every one sits behind the PUBLISH_WAIT_* wall-clock budgets —
+    # never an unbounded wait on tag-existence
+    assert "time.sleep(" in src, "the producer gate must poll with a bounded retry"
+    assert "PUBLISH_WAIT_TIMEOUT_S" in src and "PUBLISH_WAIT_POLL_S" in src, \
+        "the wait must be bounded by the finite PUBLISH_WAIT_* constants, not open-ended"

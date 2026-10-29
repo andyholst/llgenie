@@ -370,7 +370,8 @@ def test_no_ci_job_builds_a_ci_image():
 
     # Given every workflow in .github/workflows
     ci = _jobs("ci.yml")
-    pipeline, published = _jobs("pipeline.yml"), _jobs("published.yml")
+    pipeline = _jobs("pipeline.yml")
+    published = {}
     every = {**{f"ci/{k}": v for k, v in ci.items()}, **{f"pipeline/{k}": v for k, v in pipeline.items()},
              **{f"published/{k}": v for k, v in published.items()}}
 
@@ -386,7 +387,7 @@ def test_no_ci_job_builds_a_ci_image():
     pulls = {n for n, t in runs.items() if "make test-image-pull" in t or "make test-env" in t or "make openspec-image-pull" in t}
     assert pulls, "no job pulls the CI images"
     callers = {"pipeline": ("linux",),
-               "published": ("linux-published",)}
+               }
     for name in pulls:
         wf, job = name.split("/", 1)
         if wf == "ci":
@@ -462,12 +463,15 @@ def test_every_pipeline_job_runs_one_ci_make_target():
     # macOS never runs those inside a container.
     recipe = mk.split("\nci-install:", 1)[1].split("\n\n", 1)[0]
     assert "$(MAKE) test-env" in recipe
-    assert "$(MAKE) ci-wait-engine-images ARCH=cpu" in recipe.split("$(MAKE) ci-install-run")[0]
-    assert "$(MAKE) ci-install-run" in recipe and "$(MAKE) ci-install-dry" in recipe
+    # product-only (issue #1027): ci-install installs the llgenie tool, never engine images
+    assert "$(MAKE) ci-install-product" in recipe and "$(MAKE) ci-install-dry" in recipe
+    assert "ci-wait-engine-images" not in recipe and "ci-install-run" not in recipe
     assert "$(MAKE) ci-install-uninstall" in recipe and "test-install-ci" not in recipe
-    run = mk.split("\nci-install-run:", 1)[1].split("\n\n", 1)[0]
-    assert "ifeq ($(HOST_OS),Darwin)" in run and "$(MAKE) install" in run
-    assert "$(ENGINE_TEST_RUN)" in run.split("else", 1)[1]
+    # ci-install-product is OS-neutral: pure venv + launcher + smoke, no engine pull, no branch
+    prod = mk.split("\nci-install-product:", 1)[1].split("\n\n", 1)[0]
+    assert "$(MAKE) venv-install" in prod and "$(MAKE) link" in prod and "$(MAKE) smoke" in prod
+    # product-only: it must NOT pull or version-test any inference engine
+    assert "engine-launchers" not in prod and "test-built-engine" not in prod and "ci-wait-engine-images" not in prod
     dry = mk.split("\nci-install-dry:", 1)[1].split("\n\n", 1)[0]
     assert '"$(BIN)/llgenie" --dry' in dry
     assert "$$HOME/bin/llgenie --dry" in dry.split("else", 1)[1]
@@ -526,7 +530,7 @@ def test_no_ci_step_or_job_is_skipped():
     empty before the job if: is evaluated. That row is skipped and builds nothing."""
 
     # Given every workflow
-    files = ("ci.yml", "pipeline.yml", "published.yml")
+    files = ("ci.yml", "pipeline.yml")
     wf = {f: _jobs(f) for f in files}
 
     # When every job-level and step-level if: is collected

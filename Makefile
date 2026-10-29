@@ -57,7 +57,7 @@ SERVER_ROOT ?= $(HOME)/repository/git
 # link always agree on the binary.
 SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 
-.PHONY: all install venv-install link uninstall smoke list version help test-native-engine test-native-engine-serve test-interactive-tensorfold test-interactive-tensorfold-ci test-unit-network \
+.PHONY: all install venv-install link uninstall smoke list version help test-native-engine test-native-engine-serve test-interactive-tensorfold test-interactive-tensorfold-ci test-unit-network test-engine-install ci-install-product \
 	git-identity-apply check-git-identity git-identity-line git-identity-report \
 	sweep-concurrency-report \
 	openspec-image openspec-new openspec-validate openspec-validate-all openspec-status openspec-shell \
@@ -88,7 +88,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	ci-install-dry ci-install-run ci-install-uninstall test-env test-top-tier test-top-tier-ci test-top-tier-cli-ci test-top-tier-serve test-top-tier-serve-ci \
 	check-agent-model model-pin-report check-agent-skills agent-skills-report test-agent-skills-live hermes-skills-register \
 	test-hub-live test-strata-live test-engine-bump-live test-native-engines test-native-engine-light test-variant-image \
-	bash-check engine-bump engine-bump-daily engine-bump-plan engine-derive generate-requirements openspec-tasks-check check-registry-keys ci-engines engine-matrix-pushed
+	bash-check engine-bump engine-bump-daily engine-bump-plan engine-derive generate-requirements openspec-tasks-check check-registry-keys ci-engines
 
 # ---- container runtime: docker -------------------------------------------
 RUNTIME ?= docker
@@ -280,6 +280,13 @@ engine-launchers: ## Pull this host's published engine images (default: llama.cp
 	python3 scripts/install_engine_launchers.py --bin "$(BIN)" $(if $(ARCH),--arch $(ARCH),) $(if $(BUILD),--build,) $(if $(ENGINES),--engines $(ENGINES),)
 test-built-engine: ## After make install: every ~/bin/llgenie-engine-* start script must print its engine version via docker (Metal-only engines excluded)
 	python3 scripts/install_engine_launchers.py --bin "$(BIN)" --test
+
+test-engine-install: bash-check # Internal CI seam (issue #1027, deliberately internal like test-unit-network): after ENGINE's image was built + published in the engine-build producer, install + test-built-engine (the installed launcher must report the engine's version) + llgenie --dry + uninstall the just-published image — the producer-owned install leg. Gating lives in the engine-build workflow (`inputs.push == 'true'`).
+	@test -n "$(ENGINE)" || { echo "Usage: make test-engine-install ENGINE=<id> ARCH=<variant>"; exit 1; }
+	make engine-install ENGINE="$(ENGINE)" BACKEND="$(ARCH)"
+	make test-built-engine
+	make ci-install-dry
+	make ci-install-uninstall
 
 # ---- engine skills (issue #98) ------------------------------------------
 # One SKILL.md per inference server in skills/engines/<id>/. The skills are read
@@ -1391,11 +1398,6 @@ test-hub-live: ## The live-Hub checks kept OUT of the hermetic gate (issue #438)
 	$(TEST_RUN) python -m pytest tests/test_trend_pick.py::test_the_vendored_registry_links_all_answer tests/test_trend_pick.py::test_readme_links_answer_and_a_broken_copy_is_caught tests/test_trend_pick.py::test_select_downloads_a_missing_model_for_real -p no:cacheprovider -q
 test-strata-live: ## The Strata download/serve checks kept OUT of the hermetic gate (issue #437): Strata's pinned commit is fetched over git, its GGUF choices come from the live Hub, and its real server answers — network + a real install
 	$(TEST_RUN) python -m pytest tests/test_strata_download.py -p no:cacheprovider -q
-# Internal CI plumbing for ci.yml (#844): prints true|false. No `##` line on purpose - it is not a
-# user-facing command, it is the decision `install-published-*` is selected on.
-engine-matrix-pushed:
-	python3 scripts/engine_matrix_pushed.py --event "$(EVENT)" --matrix '$(MATRIX)'
-
 test-engine-bump-live: ## The PINNED engine's release archive: list, classify, checksum, download, run — the version is read from the engine's params at run time, never a literal (issue #830)
 	$(TEST_RUN) python -m pytest tests/test_engine_bump.py::test_derive_reports_the_live_release_archives tests/test_engine_bump.py::test_the_pinned_release_is_native_archives tests/test_engine_bump.py::test_the_pinned_release_archive_unpacks_and_runs -p no:cacheprovider -q
 
@@ -1650,20 +1652,28 @@ ci-top-tier: bash-check ## CI job top-tier: same targets on both OSes (venv on m
 # The gate below branches on $(HOST_OS), so it lives AFTER `HOST_OS := $(shell uname -s)`:
 # make evaluates ifeq while it parses the file, and a conditional placed before that line
 # would see an empty HOST_OS and take the Linux branch on macOS too.
-ci-wait-engine-images: bash-check ## CI gate (issue #169): wait until every image `make install` pulls for ARCH is published; names and fails on a tag that never appears. macOS pulls no engine image (issue #120), so it has nothing to wait for.
+ci-wait-engine-images: bash-check ## Host/consumer helper (issue #169): wait until every image `make install` pulls for ARCH is published; names and fails on a tag that never appears. No longer a CI gate: ci-install is product-only and the engine-build producer installs the just-published image directly (#1027). macOS pulls no engine image (issue #120).
 ifeq ($(HOST_OS),Darwin)
 	@echo "ci-wait-engine-images: macOS pulls no engine image (issue #120), nothing to wait for"
 else
 	python3 scripts/install_engine_launchers.py --wait-published $(if $(ARCH),--arch $(ARCH),) $(if $(ENGINES),--engines $(ENGINES),)
 endif
 
-ci-install: bash-check ## CI job install: prepare the environment, wait for the images install pulls, then test make install, the installed llgenie dry run, and make uninstall as separate steps. macOS never runs a container.
+ci-install: bash-check ## CI job install (issue #1027): PRODUCT-ONLY — prepare the environment, install the llgenie tool (venv + launcher, no engine pull/test), then the installed llgenie dry run, the CLI arg surface and make uninstall, as separate steps. The inference-engine install-test lives in the engine-build producer's `test-engine-install`. macOS never runs a container.
 	$(MAKE) test-env
-	$(MAKE) ci-wait-engine-images ARCH=cpu
-	$(MAKE) ci-install-run
+	$(MAKE) ci-install-product
 	$(MAKE) ci-install-dry
 	$(MAKE) ci-install-dry-args
 	$(MAKE) ci-install-uninstall
+
+ci-install-product: bash-check # Internal CI seam (issue #1027, product-only like test-engine-install): install the llgenie tool WITHOUT pulling or testing any inference engine — venv + launcher + smoke only. The engine install-test is the engine-build producer's `test-engine-install`. Runs inside the test container (which has the repo's python 3.11), like every other ci-install stage.
+ifeq ($(HOST_OS),Darwin)
+	$(MAKE) venv-install
+	$(MAKE) link
+	$(MAKE) smoke
+else
+	$(ENGINE_TEST_RUN) sh -c 'make venv-install && make link && make smoke'
+endif
 
 ci-install-run: bash-check ## make install, as-is (Linux: inside the test container; macOS: the 3.11 venv, no container)
 ifeq ($(HOST_OS),Darwin)
@@ -1696,7 +1706,7 @@ else
 	$(ENGINE_TEST_RUN) sh -c 'touch ~/bin/not-ours && make uninstall && make test-uninstalled && test -e ~/bin/not-ours'
 endif
 
-ci-engines: bash-check ## CI engine stage, the ONLY per-OS row (issue #120): BACKEND=cpu|cuda|rocm|vulkan -> make test-install-published (container engines), BACKEND=metal -> each native-Metal engine installed + "hi" on Metal (scripts/ci_engines.py)
+ci-engines: bash-check ## Per-backend engine install for a host (BACKEND=cpu|cuda|rocm|vulkan|metal -> make test-install-published / each native-Metal engine + \"hi\" via scripts/ci_engines.py). No longer a CI stage: the engine install/serve test lives in the engine-build producer (#1027).
 	@test -n "$(BACKEND)" || { echo "Usage: make ci-engines BACKEND=cpu|cuda|rocm|vulkan|metal"; exit 1; }
 	python3 scripts/ci_engines.py $(BACKEND)
 
