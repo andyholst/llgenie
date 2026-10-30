@@ -425,7 +425,7 @@ sync-agent-profile: ## Copy agents/<PROFILE>/ into that profile's Hermes home (P
 	@test -n "$(PROFILE)" || { echo "Usage: make sync-agent-profile PROFILE=<profile> [CHECK=1] [FORCE=1]"; exit 2; }
 	python3 scripts/agent_profile_sync.py --profile "$(PROFILE)" $(if $(CHECK),--check,) $(if $(FORCE),--force,)
 
-check-agent-profiles: ## CI: fail when a listed host-agent profile has no SOUL.md, a skill's frontmatter name disagrees with its directory, a skill names a missing reference or carries a secret value, a SOUL.md dropped a standing rule — searched in the file's own voice, so a QUOTED rule satisfies nothing — or a file exists only in the live profile with no counterpart in the tree (issue #791, #922, #1069)
+check-agent-profiles: ## CI: fail when a listed host-agent profile has no SOUL.md, a skill's frontmatter name disagrees with its directory, a skill names a missing reference or carries a secret value, a SOUL.md dropped a standing rule — searched in the file's own voice, so a QUOTED rule satisfies nothing — or a file, or a whole skill directory, exists only in the live profile with no counterpart in the tree (issue #791, #922, #1069, #1086)
 	python3 scripts/check_agent_profiles.py check
 
 profile-drift-alarm: ## The SCHEDULED caller for #928: run on a host with live profiles, file ONE issue on drift (exit 2 = could not compare, 3 = drift)
