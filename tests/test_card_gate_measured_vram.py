@@ -90,6 +90,19 @@ def test_the_gate_never_reads_the_display_label_when_the_store_states_a_measurem
     assert mp.fits(label_says_big, 8, RAM) is True
 
 
+def test_a_dense_27b_with_no_small_run_is_not_admitted_on_an_8gb_card():
+    """#669: "a measured run admits a model only if the host's arch can reproduce it." A DENSE
+    27B whose smallest run is on a 24 GB card (weights 14 GB > 8 GB VRAM, and no partial-offload
+    run) is REFUSED on an 8 GB card.
+
+    This preserves, hermetically (cached fixture), the "a dense 27B does not fit 8 GB" check that
+    test_rank_follows' live case must not lose when its qwen3.8-27b row — a MoE/partial-offload
+    build that genuinely DID run on 8 GB — is (correctly) admitted there."""
+    dense = _model(vram_min="16GB", vram_tier="16GB", weight_gb="14GB", engines=[_run(24)])
+    assert mp.card_evidence(dense, 8) == ""
+    assert mp.fits(dense, 8, RAM) is False
+
+
 def test_the_weights_only_fit_admits_a_model_above_its_declared_minimum():
     """A model whose file fits the card is placed on it, labelled `weights-only` — upstream's
     own second kind of evidence."""
