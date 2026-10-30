@@ -12,6 +12,7 @@ metadata:
 # Architecture pass
 
 <!-- host-bot-tools:begin -->
+
 ## Tools
 
 This lane's chat session is pinned to these Hermes toolsets and no others: `clarify`, `file`, `memory`, `session_search`, `skills`, `terminal`, `todo`, `web`.
