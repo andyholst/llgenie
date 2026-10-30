@@ -2345,4 +2345,4 @@ in stderr, retried within the same bound, and named at the bound instead of esca
 
 ### Import roots
 
-`make check-import-roots` refuses a test file that carries its own `sys.path` entry (only `tests/conftest.py` may) or imports a `scripts/` module bare, and it **ratchets** against `tests/fixtures/import-roots-baseline.json`: the count may fall as the migration batches land and may never rise, so the guard can ship before the migration finishes (issue #796).
+`make check-import-roots` refuses a test file that carries its own `sys.path` entry (only `tests/conftest.py` may) or imports a `scripts/` module bare, and it **ratchets** against `tests/fixtures/import-roots-baseline.json`: the count may fall as the migration batches land and may never rise, so the guard can ship before the migration finishes (issue #796). When a count rises, the refusal prints the aggregate line **and** the `file:line` of every site that rule counted, so the author of the new root reads it in the gate's own output instead of running `report` (issue #1066). The baseline records a count, not a set, so the output names all of them and says so — it never guesses which one is new.

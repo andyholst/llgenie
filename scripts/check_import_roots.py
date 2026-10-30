@@ -27,6 +27,7 @@ old cut asserts the past, and a guard that asserts the past is a guard people di
 Usage:
     python3 scripts/check_import_roots.py check      # exit 1 on any finding
     python3 scripts/check_import_roots.py report     # the findings, or the two rules and their counts
+    python3 scripts/check_import_roots.py ratchet    # exit 1 when a count rose, naming the sites it counted
 """
 
 from __future__ import annotations
@@ -129,13 +130,23 @@ def counts(root: Path = REPO_ROOT) -> dict[str, int]:
 
 
 def ratchet(root: Path = REPO_ROOT, allow: tuple[str, ...] = ALLOWED) -> list[dict]:
-    """Findings that push a count above the recorded baseline — the only ones a landed guard can red on."""
+    """Findings that push a count above the recorded baseline — the only ones a landed guard can red on.
+
+    Each over-count names the `file:line` of every finding its own rule counted (`sites`), from the
+    same `findings()` output `report` prints: the aggregate says the migration regressed, the sites say
+    where, so a reader never has to run `report` to find the offending file (issue #1066). The baseline
+    records a COUNT and not a set, so the ratchet cannot claim which one site is the new one — it names
+    them all and the author's own diff picks it out.
+    """
     path = root / BASELINE
     now = counts(root)
     if not path.exists():
         return [{"key": "baseline", "where": str(BASELINE),
                  "detail": f"missing; record the current counts with `--update` ({now})"}]
     recorded = json.loads(path.read_text())
+    sites: dict[str, list[str]] = {}
+    for finding in findings(root, allow):
+        sites.setdefault(finding["key"], []).append(finding["where"])
     items: list[dict] = []
     for key, value in sorted(now.items()):
         was = int(recorded.get(key, 0))
@@ -143,6 +154,8 @@ def ratchet(root: Path = REPO_ROOT, allow: tuple[str, ...] = ALLOWED) -> list[di
             items.append({
                 "key": key,
                 "where": str(BASELINE),
+                "over": value - was,
+                "sites": sites.get(key, []),
                 "detail": f"{key}: {value} now, {was} recorded — the migration may only shrink this "
                           f"count (issue #796); a new file adding its own root is refused here",
             })
@@ -164,6 +177,27 @@ def render(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_ratchet(items: list[dict]) -> str:
+    """The aggregate line per over-count, then the `file:line` of every site that rule counted.
+
+    Same information `report` prints for the offending rule, so the author of the new root reads it
+    here instead of running a second command (issue #1066).
+    """
+    lines: list[str] = []
+    for it in items:
+        if "over" not in it:                            # a missing baseline: no rule counted anything
+            lines.append(f"[import-roots] {it['where']}: {it['detail']}")
+            continue
+        lines.append(f"[import-roots] {it['detail']}")
+        sites = it.get("sites") or []
+        if sites:
+            lines.append(f"[import-roots] {it['key']}: over by {it['over']} — the {len(sites)} site(s) "
+                         f"this rule counts, and the new one is among them ({BASELINE} records a "
+                         f"count, not a set):")
+            lines += [f"  {site}" for site in sites]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="check_import_roots", description=__doc__)
     p.add_argument("cmd", choices=("check", "report", "ratchet"))
@@ -179,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "ratchet":
         items = ratchet(root, tuple(args.allow))
-        print(render(items) if items else
+        print(render_ratchet(items) if items else
               f"[import-roots] OK: counts at or below the recorded baseline {counts(root)}",
               file=sys.stderr if items else sys.stdout)
         return 1 if items else 0
