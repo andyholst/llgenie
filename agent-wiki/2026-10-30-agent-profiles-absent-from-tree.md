@@ -1,7 +1,8 @@
 # The agent-profile gate now sees the live side too
 
 **Issue:** [#1069](https://github.com/asimov-agent/llgenie/issues/1069) · **OpenSpec change:**
-`agent-profiles-absent-from-tree` · **PR:** (this branch) · **Follow-ups:** #1086, #1087
+`agent-profiles-absent-from-tree` · **PR:**
+[#1114](https://github.com/asimov-agent/llgenie/pull/1114) · **Follow-ups:** #1086, #1087
 
 ## What was verified against the spec
 
