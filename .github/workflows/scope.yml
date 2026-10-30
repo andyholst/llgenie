@@ -1,0 +1,107 @@
+name: ci-scope — selects the CI stages a diff needs, and runs the docs gates a docs-only PR still needs
+
+# Trigger surface: `pull_request` with NO path filter, so one check of this exact name always reports
+# (issue #824). `ci.yml` ignores a docs-only diff at the trigger, because a job-level `if:` that skips a
+# stage is invisible in the job list and `tests/test_ci_images.py::test_no_ci_step_or_job_is_skipped`
+# allows no such condition — so the docs class is selected before any job exists, and this workflow is
+# where the docs gates still run.
+# Flow: classify the diff (scripts/ci_scope.py) -> the docs-class gates -> the decision printed in the log.
+# Never: publishes an image, reads a repository secret, or runs on a push (`ci.yml` owns those).
+
+# dispatch: no inputs — dispatch re-classifies the current tree against `main`; the selected set is a
+# function of the diff, so no input can change it (issue #824).
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# One PR supersedes its own previous run, exactly like ci.yml's pull_request group (issue #288). The
+# value is EVALUATED per event, never a bare `true`: a bare true is what killed in-flight bot runs and
+# half-pushed GHCR tags, and `tests/test_ci_concurrency.py` refuses it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    # Only the owner, a collaborator with WRITE access, or the bot may drive this workflow (the
+    # byte-identical shape every dispatchable workflow carries, issue #295). The classifier reads the
+    # diff and runs the docs gates; a dispatch is started by a person, so the trigger guard runs first.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Owner / collaborator trigger guard
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGER: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          # The run's head repository: empty for every non-PR event (issue #510).
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for u in "$ACTOR" "$TRIGGER"; do
+            if [ "$u" = "$OWNER" ]; then continue; fi
+            # The repository's own bot is a GitHub App login, so it is never a collaborator and the
+            # permission read below answers 404 -> `none`: every bot-opened PR was refused (run
+            # 39650944430, #495). It may pass ONLY when the run's head is a branch in THIS repository —
+            # a same-repo head can be produced only by a token with write access — while the bot as the
+            # actor of a FOREIGN head (a bot commenting on a stranger's PR) is still refused (#510).
+            if [ "$u" = "github-actions[bot]" ] && [ -n "${HEAD_REPO:-}" ] && [ "${HEAD_REPO:-}" = "$REPO" ]; then
+              echo "Repository bot $u on a same-repo head ($HEAD_REPO) - allowed."
+              continue
+            fi
+            perm=$(gh api "repos/$REPO/collaborators/$u/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) echo "Collaborator $u has $perm - allowed." ;;
+              *) echo "Refused: $u is not the owner or a collaborator with write access (permission: ${perm:-none})."; exit 1 ;;
+            esac
+          done
+          echo "Allowed: actor=$ACTOR triggering_actor=$TRIGGER"
+
+  scope:
+    needs: [guard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0   # the classifier diffs against the PR base
+      - name: make test-env (Python 3.11 + the test image the gates run in)
+        run: make test-env
+      - name: classify the diff (one class= line per class, one job= line per stage)
+        # `github.base_ref` is empty for every non-`pull_request` event, so the dispatch path falls back
+        # to `main` rather than diffing against the empty string and classifying nothing (issue #824).
+        # The classifier itself is reached through the `ci-scope` make target, never inline (the repo
+        # rule that every workflow step that runs a script must route through `make`).
+        run: |
+          BASE="${{ github.base_ref }}"
+          if [ -z "$BASE" ]; then
+            echo "No github.base_ref for event '${{ github.event_name }}': reporting the diff against main."
+            BASE=main
+          fi
+          git fetch --no-tags origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
+          make ci-scope BASE="origin/$BASE"
+      - name: make ci-lint (linefeed / editorconfig — the markdown gate)
+        run: make ci-lint
+      - name: make check-docs
+        run: make check-docs
+      - name: make check-wiring
+        run: make check-wiring
+      - name: make check-issue-bodies
+        run: make check-issue-bodies
+      - name: make openspec-image-pull (the OpenSpec CLI image the docs gates run in)
+        # `ci.yml`'s `ci-images` job builds and tags this image; a workflow that runs `ci-openspec`
+        # without it fails at `docker run llgenie/openspec:latest` with "pull access denied", which is
+        # what this step exists to prevent (measured on run 40778404808, step 9).
+        run: make openspec-image-pull
+      - name: make ci-openspec (validate every active change, no unchecked task)
+        run: make ci-openspec
+      - name: Prune orphaned test containers
+        if: always()
+        run: make test-clean

@@ -1557,6 +1557,7 @@ from the pipeline that will run.
 | `rebase-bot.yml` | keeps every open PR current with main, every eligible PR per run (never merges) | `max_prs` (optional, default `10`) — Most PRs this run may rebase (the sweep's daily cap still applies on top) |
 | `registry-sync-review.yml` | a GREEN registry-sync PR is reviewed into ONE agent:implement issue | `dry` (optional, default `false`) — Preview the brief and the issue body this run would file, filing nothing |
 | `registry-sync.yml` | syncs the vendored registry and regenerates the derived tables, then opens the PR | none — the sync has no modes: it always fetches the upstream registry, regenerates |
+| `scope.yml` | selects the CI stages a diff needs, and runs the docs gates a docs-only PR still needs | none — dispatch re-classifies the current tree against `main`; the selected set is a |
 | `search-smoke.yml` | one real Firecrawl request proves the masked web reach | none — the smoke takes no target: it always proves the same leg with one request. |
 | `security-bot.yml` | turns ONE auto-fixable vulnerability issue into a green PR (never merges) | `dry` (optional, default `false`) — Preview the issue it would take and the edit it would make, pushing nothing |
 | `security-scan.yml` | the daily vulnerability pipeline (Trivy + Syft + Grype + Semgrep), never a PR or push check | `tools` (optional, default `all`) — Which scanners to run: all, or one of syft / trivy / grype / semgrep<br>`enforce` (optional, default `full`) — Failure policy for THIS dispatch: full = the daily policy, report = never gate |
@@ -1578,6 +1579,9 @@ make openspec-image    # the OpenSpec CLI image, the same way (hash of openspec/
 make ci-image-refs     # print both GHCR refs for the current files
 make ci-<job>          # one CI pipeline job (ci-lint, ci-unit,
                        # ci-agents-read, ci-openspec, ci-cpu-health, ci-top-tier, ci-install): what CI runs
+make ci-scope         # classify a diff into the CI classes/jobs it selects (scripts/ci_scope.py, the
+                       # `scope` workflow's step; issue #824): BASE=<ref> to diff against instead of the
+                       # PR base
                        # ci-install chains, in this order: test-env -> ci-install-run (make install)
                        # -> ci-install-dry (the installed launcher, bare --dry) -> ci-install-dry-args
                        # (the INSTALLED launcher's argument surface over the mocked arch x vram x ram

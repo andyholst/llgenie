@@ -32,6 +32,7 @@ on:
       - auto-merge
       - ci-requeue — re-runs only the cancelled runs no later run superseded, every 30 minutes
       - CI
+      - ci-scope — selects the CI stages a diff needs, and runs the docs gates a docs-only PR still needs
       - code-review-bot — reviews the tree and the pipelines and files one issue per finding (never edits code)
       - engine-build — builds and verifies EVERY engine at its committed pin, in parallel (never merges)
       - engine-bump-rebase — rebases every open engine-bump PR onto the latest main

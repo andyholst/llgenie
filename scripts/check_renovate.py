@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -134,11 +135,44 @@ def findings(root: Path) -> list[str]:
     out.extend(_pip_source_findings(cfg, compile_cfg))
 
     ci_text = (root / CI).read_text(encoding="utf-8")
-    if "paths-ignore:" in ci_text or "\n    paths:" in ci_text:
-        out.append(f"{CI} filters `pull_request` by path: a base-image bump may skip the image build")
+    # #718: a Dockerfile bump must reach the image build. That is violated only when a `paths-ignore`
+    # list could exclude a build/dependency file. A DOCS-only ignore (the docs-class globs #904/#824
+    # uses to skip ci.yml on a docs-only PR) contains no `containers/**`, `Dockerfile`, `*.dockerfile`
+    # or `tools/` path, so it provably cannot skip an image build. A positive `paths:` filter is always
+    # a finding (it is an allowlist that excludes everything else).
+    path_filter = _path_filter_finding(ci_text)
+    if path_filter:
+        out.append(path_filter)
     if "engine-image" not in ci_text:
         out.append(f"{CI} declares no engine-image job: a Dockerfile bump would build nothing")
     return out
+
+
+#: Glob stems that identify a build/dependency file — the only things a `paths-ignore` must not skip.
+_BUILD_STEMS = ("containers/", "dockerfile", "engine", "requirements", "renovate.json",
+                "pytest.ini", "tools/", "Makefile", ".gitleaks", ".github", "scripts/", "tests/")
+
+
+def _path_filter_finding(ci_text: str) -> str | None:
+    """The #718 path-filter finding, or None when ci.yml's filter cannot skip an image build.
+
+    A positive `paths:` allowlist excludes everything it does not name, so it is always a finding.
+    A `paths-ignore` is a finding only when one of its globs could match a build/dependency stem
+    (`_BUILD_STEMS`); the docs-class ignore #904 ships cannot, so docs-only PRs skipping ci.yml is
+    exactly the #824 trigger decision and is not a renovate violation.
+    """
+    paths_block = re.search(r"\n    paths-ignore:\s*\n((?:      - .*\n)+)", ci_text) or \
+        re.search(r"\n    paths:\s*\n((?:      - .*\n)+)", ci_text)
+    positive = "\n    paths:\n" in ci_text and "\n    paths-ignore:" not in ci_text
+    if paths_block:
+        globs = re.findall(r"^\s+- \"?([^\"#]+?)\"?\s*$", paths_block.group(1), re.M)
+        # `paths:` (positive, no ignore) excludes everything unlisted -> unsafe
+        bad = positive or any(any(stem in g for stem in _BUILD_STEMS) for g in globs)
+        if bad:
+            return (f"{CI} filters `pull_request` by path: a base-image bump may skip the image build")
+    elif positive:
+        return f"{CI} filters `pull_request` by path: a base-image bump may skip the image build"
+    return None
 
 
 def check(root: Path) -> int:
