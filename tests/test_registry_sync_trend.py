@@ -387,8 +387,14 @@ def test_rank_follows_the_given_vram_ram_and_arch(live_sync):
         assert shown["engines"][0]["engine"] == current["engine"]
         assert shown["engines"][0]["tps"] == current["tps"] > previous["tps"]
         assert shown["engines"][0]["measured_on"] == "CUDA"
+    # The vendored README's "### Up to 8 GB" table places Qwen3.8-27B FIRST, and #669's own
+    # criterion is "every model its `Up to N GB` table places is admitted by fits(model, N)" — so
+    # qwen IS admitted at 8 GB (a measured run at <= 8 GB: "4GB VRAM + 32GB system RAM (… partial
+    # offload)", tps 14.06). The former `is None` encoded the pre-#669 `vram_min` gate and
+    # contradicted both the README and
+    # tests/test_card_gate_measured_vram.py::test_every_model_the_published_tier_table_places_is_admitted.
     assert next((r for r in mp.rank_models(new, "cuda", 8)
-                 if r["model"]["id"] == "qwen3.8-27b"), None) is None
+                 if r["model"]["id"] == "qwen3.8-27b"), None) is not None
     metal = mp.rank_engines(qwen_new, "metal")[0]
     assert metal["measured_on"] == "Metal" and metal["variant"] == "metal"
     assert all(e["variant"] != "metal" for e in mp.rank_engines(qwen_new, "cpu"))
