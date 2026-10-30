@@ -20,4 +20,5 @@ Measured verification at head `7eb2d84c` (after the push that landed this record
 - executed suite at head `75c83814` (final pushed head of this record): `pytest tests/test_pr_authors.py` → **29 passed in 2.97s, exit 0**
 - pushed+verified fork ref (resolves the local-only report): `git ls-remote --heads https://github.com/andyholst/llgenie.git fix/1031-author-alias-mandate` → **`b7a406f1`** (change-record on the pushed head)
 - fresh CI at final pushed head `e29035e2`: run **40975428531** in_progress (openspec, guard, holds, ci-images, top-tier pass; linux/unit, lint, install, agents-read, scanner pending) — no completed-run verdict yet, not claimed
+- sibling census-gate acceptance (#1042 re-verdict at `cf89b860`, this lane): the doc's `measured at <sha>` invariant is **count-based** — pointer must be a real commit (`cat-file …^{commit}`) AND its tree must carry HEAD's `git ls-tree -r` tracked-file count; verified both red directions (dangling pointer exit 1; count-drift to a 1959-file tree exit 1) and green at the real pointer (exit 0). Literal `pointer == HEAD` declined as unsatisfiable-by-design (the doc lives inside the tree it measures)
 
