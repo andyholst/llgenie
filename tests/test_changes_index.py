@@ -47,28 +47,58 @@ def _row(date: str, summary: str, stem: str, refs: str) -> str:
 # ---------------------------------------------------------------------------
 # the real tree
 # ---------------------------------------------------------------------------
-def test_the_real_index_renders_the_committed_changes_md():
-    """`make changes-index` is deterministic: the committed table is exactly its output."""
+def test_the_real_index_accepts_a_committed_changes_md_that_lags_the_fragments():
+    """The committed table is the renderer's output — or a lag of it that `report` names (issue
+    #1100). A change adds its note and its `docs/changes.d/` row and never edits `CHANGES.md`
+    (issue #934 / #1063), so being behind MUST NOT fail the gate; only disagreeing with the
+    fragments may."""
 
     # Given the real checkout
     rendered = ci.render(REPO)
     committed = (REPO / ci.CHANGES).read_text()
 
-    # When the index is rendered from the fragments
+    # When the index is rendered and checked
     parsed, errors = ci.rows(REPO)
 
-    # Then there is one row per note, no fragment is malformed, and the render is the committed file
+    # Then every fragment parses, one row stands for every note, and the gate is green
     assert errors == [], errors
     assert len(parsed) == len(list((REPO / "agent-wiki").glob("*.md"))), len(parsed)
-    assert committed == rendered, "CHANGES.md is out of date — run `make changes-index`"
+    assert ci.check(REPO) == [], ci.check(REPO)
+    assert _run(REPO, "check").returncode == 0
 
-    # And the report says so, in one line
-    assert "— current" in ci.report(REPO)
+    # And the committed table is either current or REPORTED behind — never a silent lag
+    state = [l for l in ci.report(REPO).splitlines() if f"{ci.CHANGES}:" in l]
+    assert len(state) == 1, state
+    assert "current" in state[0] or "row(s) behind" in state[0], state[0]
 
-    # And writing it changes nothing (the renderer is the only author of that file)
-    before = committed
-    assert ci.write(REPO) == 0
-    assert (REPO / ci.CHANGES).read_text() == before
+    # And every row it commits is a row the renderer would write: a stale index may lag, it may
+    # never invent. The comparison is a subset, so the fragment tree can keep growing under it.
+    committed_rows = [l for l in committed.splitlines() if l.startswith("| 20")]
+    rendered_rows = [l for l in rendered.splitlines() if l.startswith("| 20")]
+    assert set(committed_rows) <= set(rendered_rows), \
+        "CHANGES.md carries a row `make changes-index` would never write"
+
+
+def test_write_renders_a_lagging_index_and_is_idempotent(tmp_path):
+    """`write` is the only author of `CHANGES.md`: a lagging index is not a defect, the write is
+    exactly the render, and a second write changes nothing (issues #934, #1100)."""
+
+    # Given two notes with their rows, and a committed CHANGES.md that carries neither
+    stems = ("note-2026-10-13", "note-2026-10-14")
+    root = _tree(tmp_path, {stem: "# N\n\n#257\n" for stem in stems},
+                 {stem: _row(stem[-10:], stem, stem, "#257") for stem in stems})
+    (root / ci.CHANGES).write_text("# Changes\n")
+
+    # When the index is checked, then written twice
+    lagging = _run(root, "check")
+    assert lagging.returncode == 0, lagging.stderr
+    assert ci.write(root) == 0
+    first = (root / ci.CHANGES).read_text()
+    assert ci.write(root) == 0
+
+    # Then the lag was never a defect, the write is the render, and the second write is a no-op
+    assert first == ci.render(root)
+    assert (root / ci.CHANGES).read_text() == first
 
 
 def test_the_real_tree_indexes_every_note_with_no_defect():

@@ -1149,7 +1149,10 @@ appears in `README.md` or in a `docs/` page the README links (`docs/BOTS.md` for
 pipeline, `docs/SECURITY.md` for the pins, `docs/RENOVATE.md` for dependency updates), every
 `agent-wiki/` note must reference an issue or PR and have its own index row in
 `docs/changes.d/` (one row per file, so a merge never re-dirties an open PR — issue #934), every
-row must name a note that exists, `CHANGES.md` — the rendered table — must link no missing note,
+row must name a note that exists, `CHANGES.md` — rendered from `docs/changes.d/` by
+`make changes-index` — must link no missing note and may lag the fragments but never disagree with
+them, so a change that adds its own `docs/changes.d/<note>.md` fragment and no index edit is green
+(issues #934, #1100),
 `README.md` must link `CHANGES.md`, and a README heading
 that carries an `(issue #N)`, a change-log title or the generated dispatch-table marker
 fails. A user-facing target that is deliberately undocumented needs a dated exception in
