@@ -94,6 +94,7 @@ DATA_PATH_FILES = (
     "test_engine_bump.py",
     "test_pick_matrix.py",
     "test_pick_matrix_arch_perms.py",
+    "test_pick_full_registry.py",
     "test_trend_pick.py",
     "test_install_trend.py",
 )
@@ -104,8 +105,10 @@ DATA_PATH_FILES = (
 # download (test_full_download_...) in test_trend_pick, and test_model_engine_pick's
 # test_download_fetches_a_real_chunk_of_the_chosen_file (mp.download, host implied by the model
 # dict — NOT a 0-open-primitive hermetic test, as the earlier census wrongly claimed). Everything
-# else is hermetic by construction or reaches only a localhost serve / non-Hub, so nothing else may
-# be marked. test_plan_download_per_format_live_hub is deliberately ABSENT: it only plans, no i/o.
+# else is hermetic by construction or reaches only a localhost serve / non-Hub, apart from
+# test_pick_full_registry.py (added by issue #1059: its whole surface is the live matrix, below).
+# So nothing else may be marked. test_plan_download_per_format_live_hub is deliberately ABSENT: it
+# only plans, no i/o.
 EXPECTED_NETWORK_TESTS = {
     "test_trend_pick.py": {
         "test_live_upstream_registry_is_the_live_readme_list",
@@ -118,6 +121,22 @@ EXPECTED_NETWORK_TESTS = {
     },
     "test_model_engine_pick.py": {
         "test_download_fetches_a_real_chunk_of_the_chosen_file",
+    },
+    # test_pick_full_registry.py is the FULL-registry live matrix: every one of its tests drives
+    # `_live_matrix()` (mp.matrix -> the live Hub repo trees) or the wired `llgenie --matrix` CLI
+    # over them, so the whole file is a real-Hub scope (issue #1059 — the quant-links test was the
+    # one that red-ed a local `make test-unit` with a Hub 429). Its hermetic twin is
+    # tests/test_pick_matrix.py + tests/test_pick_matrix_arch_perms.py (synthetic registry, stubbed
+    # Hub tree), which stay in the unit gate, so no offline assertion is lost by routing these.
+    "test_pick_full_registry.py": {
+        "test_pick_matrix_any_offer_is_a_real_fitting_hf_url",
+        "test_pick_matrix_real_quant_links_exist",
+        "test_pick_matrix_engine_supported_quants_catalog",
+        "test_pick_matrix_llgenie_cli_agrees_with_business_logic",
+        "test_pick_matrix_offers_only_engines_the_gap_says_have_an_image",
+        "test_pick_matrix_edge_case_golden",
+        "test_pick_matrix_edge_case_golden_ram",
+        "test_the_ram_ladder_never_shrinks_the_chosen_quant",
     },
 }
 
