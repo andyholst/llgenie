@@ -21,14 +21,38 @@ Prove staleness rather than assert it — regenerate with the repo's own target,
 
 ```
 make render-trend-list-matrix      # trend-list golden
-make changes-index                 # CHANGES.md is rendered from docs/changes.d/, never hand-edited in a change PR
+make changes-index                 # CHANGES.md is RENDERED from docs/changes.d/ — commit the result
 ```
 
 Decision rule: if the differing value **matches the intended change** (and the neighbours/docstring agree with the new value), the golden is stale — regenerate. If it **contradicts** its neighbours or the recipe's own docstring, suspect the code instead.
 
+**On `CHANGES.md` specifically: render it and commit the render.** It is generated, so never
+hand-write a row — but "do not hand-edit" is not "do not touch". `tests/test_changes_index.py`
+asserts `committed == rendered` and `tests/test_check_docs.py` asserts the rendered index links
+every note, so a PR that adds a fragment and leaves the aggregate alone **passes
+`scripts/check_docs.py check` and reds `ci-unit`**. Two checks, one subject, different depths — and
+only the suite gates. See `references/gate-auditing.md` §5.
+
 ## Measure on the data path the test uses
 
 If the test refreshes its data — a module fixture that downloads an upstream registry, a `live_sync`-style helper — then a probe against the **vendored** copy can disagree with the test and send you after a phantom. Re-run any claim through the same refresh the test performs before publishing it.
+
+## Predict a red from the tree instead of waiting for the matrix
+
+When a reviewable PR's deciding leg is queued behind a long suite (measured: ~18 min per `ci-unit`,
+and longer under runner contention), you can usually answer the question **now** by running the
+specific test the leg will run, at the PR's own head:
+
+```bash
+<venv>/bin/python -m pytest <the test> -q          # at the reviewable head
+HOME=/tmp/clean <venv>/bin/python -m pytest <the test> -q   # rule out host drift, same result
+```
+
+Post that as a **prediction with its retraction clause** — "if the run concludes green this comment is
+wrong and I will say so with the run id" — rather than as a verdict. Two properties make it honest:
+the evidence is the tree at a named sha, and the claim names what would falsify it. It also removes
+the excuse "we cannot know until CI finishes", which is how a known red sits on the board for half an
+hour.
 
 ## Control shape
 

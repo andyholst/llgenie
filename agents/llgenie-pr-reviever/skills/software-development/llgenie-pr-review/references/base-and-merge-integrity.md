@@ -108,6 +108,26 @@ git merge-tree --write-tree refs/remotes/live/main HEAD   # does it merge RIGHT 
 and credit the rebase for clearing a real conflict while saying the underlying change is still
 there — otherwise `BLOCKED` reads as repaired and the defect ships.
 
+## Render a shared append AFTER rebasing, never before
+
+A generated aggregate that every PR appends to (`CHANGES.md` and its fragment renderer are the
+canonical case) is a **shared append**, and its generator is deterministic against the fragment set
+*on the base it reads*. So rendering on the stale base writes a file whose rows sit where the old
+base put them, and landing that on a moved `main` produces a conflict in the very file the rebase
+existed to escape. Measured: `make changes-index` on the pre-rebase tree → `git merge-tree` against
+the new tip reported **1 conflict**, in `CHANGES.md` alone.
+
+Correct order, every time:
+
+```bash
+git checkout -B <branch> refs/remotes/live/main   # or re-apply your diff onto it
+make changes-index                                 # render from the base you will target
+python3 -m pytest <the aggregate's own test> -q    # the render is only correct if this passes
+```
+
+Corollary: if a rebase is required for any reason, re-render afterwards even when you rendered
+before — the earlier render is now a claim about a base that no longer exists.
+
 ## Quote the base at the moment of the claim
 
 Every finding, control and verdict is relative to a base sha. Read it (`git fetch origin

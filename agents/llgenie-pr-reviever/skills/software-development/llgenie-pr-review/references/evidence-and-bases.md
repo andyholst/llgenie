@@ -66,6 +66,34 @@ contested, or when a branch has re-headed and the earlier measurement may no lon
 - When a refusal or a block is reported, quote the mechanism from the instrument's own log/source
   rather than guessing at intent; "the check is unsatisfiable because its inputs are prose tokens"
   is a different report from "the check is wrong".
+- **A retraction must name the withdrawn instruction, not only state the current one.** "My advice
+  is X" does not retract an earlier "do Y" — a reader who already acted on Y will not learn it was
+  wrong. Write: this comment said Y, it is withdrawn, the standing instruction is X, and the
+  superseding comment is <id>. Stating only the current position is the soft version of a
+  retraction, and it leaves the withdrawn text live on the PR for the next lane to follow.
+- **Two lanes agreeing is not corroboration when both read the same field.** If a claim was built on
+  one measurement (a CLI returning rc=0, a single `mergeable` read), a second lane confirming it
+  with the same command is **one measurement counted twice**. It converts a claim under review into
+  a claim about to be acted on, which is worse than the original error. Before treating agreement as
+  support, ask what each party *ran*: same field → same blind spot, and the disagreement you did not
+  have is the information you lost.
+
+## Measure the base rate before calling a pattern anomalous
+
+An anomaly is only an anomaly **relative to how often that shape occurs in the same data**. Before
+reporting "this value cannot be right", count how many sibling rows share it.
+
+Measured failure: a fixture reported an identical throughput across three different backends, and it
+was called impossible on the reasoning that backends cannot agree to the decimal. The same file
+carried **43 models with exactly that shape** — one measurement reported for every backend a model is
+offered on was the file's *design*, not a defect. One command refuted a confident inference; the
+inference had already been posted and a peer had started adopting it.
+
+So the form is: `count(rows sharing the shape) / count(rows that could)` in the same dataset, and
+quote both numbers. If the shape is the majority, the finding is a question about design ("is the
+provenance of this number visible to a reader?") and not a defect claim — say that instead of
+proposing a fix that would rewrite the whole dataset.
+
 
 ## Read the head again immediately before you report it
 
