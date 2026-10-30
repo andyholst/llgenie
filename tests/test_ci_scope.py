@@ -207,9 +207,13 @@ def test_the_scope_workflow_has_no_path_filter_and_runs_the_docs_gates():
     on = workflow.get("on") or workflow.get(True)
 
     assert "paths" not in on["pull_request"] and "paths-ignore" not in on["pull_request"], on
-    assert list(workflow["jobs"]) == ["scope"], workflow["jobs"]
+    # `scope` runs the docs gates; the `guard` job is REQUIRED by test_workflow_guards for a
+    # dispatchable workflow (issue #295), so it sits beside `scope` and `scope` needs it — the same
+    # shape ci.yml uses. The always-present check is still the single `scope` gate.
+    assert list(workflow["jobs"]) == ["guard", "scope"], workflow["jobs"]
+    assert workflow["jobs"]["scope"].get("needs") == ["guard"], workflow["jobs"]["scope"].get("needs")
     runs = " ".join(step.get("run", "") for step in workflow["jobs"]["scope"]["steps"])
-    for gate in ("scripts/ci_scope.py", "make ci-lint", "make check-docs", "make check-wiring",
+    for gate in ("make ci-scope", "make ci-lint", "make check-docs", "make check-wiring",
                  "make check-issue-bodies", "make ci-openspec"):
         assert gate in runs, (gate, runs)
     # No new third-party action: the one `uses:` is the same pinned checkout ci.yml uses.
