@@ -48,3 +48,17 @@ python3 scripts/check_agent_profiles.py check                              # wit
 ```
 
 With an empty HOME the gate prints `tree checks only, LIVE RULEBOOKS NOT COMPARED`. Report the clean-home result as the branch's state and the real-home delta as host drift — never file the host's drift as a PR defect.
+
+**The symptom, so it is recognised instead of investigated:** running the profile/wiring tests on the
+host with live profiles present gives a batch of failures that all bottom out in one message —
+`[check-agent-profiles] 17 finding(s) — an instruction a credential-holding agent runs under is
+unreviewable when this tree is wrong`. Measured: 9 failed / 163 passed across
+`test_agent_profiles.py` + `test_wiring.py` + `test_changes_index.py` + `test_check_docs.py`, while
+the same commit's real CI reported `2 failed, 15149 passed` with **zero** `test_agent_profiles`
+failures. The host count (17) is other lanes' unsynced live copies plus your own unsynced edits —
+nothing about the branch.
+
+So before reading any local failure in this family, ask whether the run used the host's real HOME.
+A local suite on a profile-holding host is **not** a proxy for `ci-unit`, and treating it as one
+manufactures defects — which is exactly what this file already says, so the cost of skipping the
+clean-HOME wrapper is a false red, not new information.
