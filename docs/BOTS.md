@@ -1579,6 +1579,9 @@ make openspec-image    # the OpenSpec CLI image, the same way (hash of openspec/
 make ci-image-refs     # print both GHCR refs for the current files
 make ci-<job>          # one CI pipeline job (ci-lint, ci-unit,
                        # ci-agents-read, ci-openspec, ci-cpu-health, ci-top-tier, ci-install): what CI runs
+make ci-scope         # classify a diff into the CI classes/jobs it selects (scripts/ci_scope.py, the
+                       # `scope` workflow's step; issue #824): BASE=<ref> to diff against instead of the
+                       # PR base
                        # ci-install chains, in this order: test-env -> ci-install-run (make install)
                        # -> ci-install-dry (the installed launcher, bare --dry) -> ci-install-dry-args
                        # (the INSTALLED launcher's argument surface over the mocked arch x vram x ram
