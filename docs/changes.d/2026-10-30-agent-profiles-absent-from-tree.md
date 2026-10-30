@@ -1,0 +1,1 @@
+| 2026-10-30 | issue #1069: the agent-profile gate sees a live-only file (reverse direction, `absent-from-tree`) | [2026-10-30-agent-profiles-absent-from-tree.md](agent-wiki/2026-10-30-agent-profiles-absent-from-tree.md) | #1069, #1086, #1087 |

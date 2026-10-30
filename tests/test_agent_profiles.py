@@ -791,6 +791,285 @@ def test_no_live_profile_home_means_the_comparison_is_skipped_not_failed(tmp_pat
     assert cap.shrink_findings(tmp_path, agents, None) == []
 
 
+# ---- the reverse direction: a live file with no tree twin (issue #1069) -----------------------------
+
+
+def _mirror(tmp_path: Path, skill: str = "llgenie-bot-orchestration") -> tuple[Path, Path, Path]:
+    """A tree profile AND its live mirror, identical: (root, agents dir, live profiles home).
+
+    The live side is a whole profile home, not just the skill, because that is what the gate reads on a
+    host — and it is why the reverse comparison has to bound the surface it walks.
+    """
+    root = tmp_path / "tree"
+    agents = root / "agents"
+    (agents / "someone" / "skills" / skill).mkdir(parents=True)
+    (agents / "manifest.json").write_text('{"profiles": [{"name": "someone", "rules": ["never-merge"]}]}')
+    soul = "# S\n\nNever merge anything; every merge needs the owner.\n"
+    (agents / "someone" / "SOUL.md").write_text(soul)
+    (agents / "someone" / "skills" / skill / "SKILL.md").write_text(
+        SKILL_BODY.format(name=skill))
+    (agents / "someone" / "skills" / skill / "references").mkdir()
+    (agents / "someone" / "skills" / skill / "references" / "known.md").write_text("known\n")
+
+    live_home = tmp_path / "profiles" / "someone"
+    (live_home / "skills" / skill / "references").mkdir(parents=True)
+    (live_home / "SOUL.md").write_text(soul)
+    (live_home / "skills" / skill / "SKILL.md").write_text(SKILL_BODY.format(name=skill))
+    (live_home / "skills" / skill / "references" / "known.md").write_text("known\n")
+    return root, agents, live_home.parent
+
+
+def test_a_live_only_reference_file_is_a_finding_naming_profile_and_path(tmp_path):
+    """The measured defect: 21 planner references exist only in the live profile and were invisible."""
+
+    # Given a tree whose skill carries references/known.md, and a live mirror that also carries
+    # references/new-tonight.md
+    root, agents, profiles = _mirror(tmp_path)
+    live = profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "references"
+    (live / "new-tonight.md").write_text("a rule written only on the host\n")
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  exactly one finding names the lane, the skill, the path and the live size
+    assert [i["key"] for i in items] == ["absent-from-tree"], items
+    assert items[0]["where"] == \
+        "someone/skills/llgenie-bot-orchestration/references/new-tonight.md", items[0]
+    assert f"({(live / 'new-tonight.md').stat().st_size} b)" in items[0]["detail"], items[0]["detail"]
+    assert "agents/someone/skills/llgenie-bot-orchestration/" in items[0]["detail"], items[0]["detail"]
+
+
+def test_a_live_only_file_beside_the_skill_md_is_a_finding(tmp_path):
+    """Not only under `references/`: a file at the skill's root is named by its own relative path."""
+
+    # Given a live skill directory carrying a file the tree does not have, beside SKILL.md
+    root, agents, profiles = _mirror(tmp_path)
+    (profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "REFERENCE.md").write_text("x\n")
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  the finding names REFERENCE.md at the skill root
+    assert [i["where"] for i in items] == \
+        ["someone/skills/llgenie-bot-orchestration/REFERENCE.md"], items
+
+
+def test_a_clean_mirror_reports_nothing_and_one_added_file_does(tmp_path):
+    """The control in both directions: an identical mirror is silent, one live-only file is not."""
+
+    # Given a tree and a live profile that are identical
+    root, agents, profiles = _mirror(tmp_path)
+
+    # Then  there is nothing to report
+    assert guard.absent_from_tree_findings(root, agents, profiles) == []
+
+    # When  one file is added live
+    added = profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "references" / "added.md"
+    added.write_text("added\n")
+
+    # Then  it is named
+    assert [i["where"] for i in guard.absent_from_tree_findings(root, agents, profiles)] == \
+        ["someone/skills/llgenie-bot-orchestration/references/added.md"]
+
+    # And when it is removed again the gate is silent once more
+    added.unlink()
+    assert guard.absent_from_tree_findings(root, agents, profiles) == []
+
+
+def test_the_profile_data_is_not_reported_by_the_reverse_direction(tmp_path):
+    """A live profile is a whole Hermes home; its data is not behaviour and must never be a finding.
+
+    Measured: 4,804 live files for llgenie-planner at `ac12cae9` — `state.db`, `sessions/`, `memories/`,
+    `cron/`, `logs/`, `.curator_backups/`, `worker-outboxes/`. Reporting them would bury the 22 files
+    that ARE lane behaviour.
+    """
+
+    # Given a live profile carrying its own data beside its behaviour
+    root, agents, profiles = _mirror(tmp_path)
+    home = profiles / "someone"
+    for rel, text in (("state.db", "sqlite\n"), ("config.yaml", "k: v\n"), (".env", "A=1\n"),
+                      ("sessions/s1.json", "{}\n"), ("memories/m.md", "m\n"), ("logs/run.log", "l\n"),
+                      ("cron/jobs.json", "[]\n"), (".curator_backups/blobs/abc", "b\n"),
+                      ("worker-outboxes/w/pending.json", "{}")):
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text(text)
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  nothing in the profile's data is a finding
+    assert items == [], items
+
+
+def test_the_shared_skill_library_is_not_reported(tmp_path):
+    """Hermes bundles the same ~200 skills into every profile; they are not this lane's behaviour."""
+
+    # Given a live profile whose skills/ also carries skills no tree skill directory names
+    root, agents, profiles = _mirror(tmp_path)
+    for rel in ("productivity/docx/SKILL.md", "creative/p5js/SKILL.md"):
+        path = profiles / "someone" / "skills" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("shared\n")
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  they are not findings: the tree versions no such skill for this lane
+    assert items == [], items
+
+
+def test_bookkeeping_files_beside_a_skill_are_not_reported(tmp_path):
+    """The agent tooling writes hidden scratch files itself — a finding for those would be noise."""
+
+    # Given a live skill directory carrying Hermes's own bookkeeping
+    root, agents, profiles = _mirror(tmp_path)
+    skill = profiles / "someone" / "skills" / "llgenie-bot-orchestration"
+    (skill / ".DS_Store").write_text("x\n")
+    (skill / "__pycache__").mkdir()
+    (skill / "__pycache__" / "m.pyc").write_text("x\n")
+    (skill / ".curator_state").write_text("x\n")
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  none of it is a finding
+    assert items == [], items
+
+
+def test_a_lane_with_no_live_profile_produces_no_reverse_finding(tmp_path):
+    """`absent-live` stays a different condition: a lane this host does not run has no live files."""
+
+    # Given a tree listing two profiles, and a live profiles home holding only the first
+    root = tmp_path / "tree"
+    agents = root / "agents"
+    for name in ("someone", "not-on-this-host"):
+        (agents / name / "skills" / "s").mkdir(parents=True)
+        (agents / name / "SOUL.md").write_text("# S\n")
+        (agents / name / "skills" / "s" / "SKILL.md").write_text(SKILL_BODY.format(name="s"))
+    (agents / "manifest.json").write_text(
+        '{"profiles": [{"name": "someone", "rules": []}, {"name": "not-on-this-host", "rules": []}]}')
+    live_home = tmp_path / "profiles" / "someone"
+    (live_home / "skills" / "s").mkdir(parents=True)
+    (live_home / "SOUL.md").write_text("# S\n")
+    (live_home / "skills" / "s" / "SKILL.md").write_text(SKILL_BODY.format(name="s"))
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, live_home.parent)
+
+    # Then  the absent lane is silent — neither a reverse finding nor an error
+    assert items == [], items
+
+
+def test_the_check_fails_naming_a_live_only_file_and_passes_once_it_is_removed(tmp_path, monkeypatch,
+                                                                             capsys):
+    """The negative control, both directions, through the REAL entry point.
+
+    A gate that fails only in a unit fixture is unproven: this drives `main(["check", …])` against a
+    `HERMES_PROFILES_HOME` fixture, so the exit code a `&&` chain reads is the one asserted.
+    """
+
+    # Given a tree and an identical live profile, read through the gate's own env var
+    root, _agents, profiles = _mirror(tmp_path)
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))
+
+    # Then  the gate passes
+    assert guard.main(["check", "--root", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "no file exists only in the live profile" in out, out
+
+    # When  one file exists only in the live profile
+    added = profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "references" / "added.md"
+    added.write_text("a rule that never reached the tree\n")
+
+    # Then  the gate fails and names it
+    assert guard.main(["check", "--root", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL absent-from-tree: someone/skills/llgenie-bot-orchestration/references/added.md" in out, out
+
+    # And when the file is removed the gate passes again
+    added.unlink()
+    assert guard.main(["check", "--root", str(root)]) == 0
+
+
+def test_report_lists_the_absent_from_tree_finding(tmp_path, monkeypatch):
+    """`report` is the readable entry point, so the key must appear there too."""
+
+    # Given one live-only file
+    root, _agents, profiles = _mirror(tmp_path)
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))
+    (profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "EXTRA.md").write_text("x\n")
+
+    # When  the report is rendered
+    text = guard.report(root)
+
+    # Then  it names the path and counts the finding
+    assert "absent-from-tree: someone/skills/llgenie-bot-orchestration/EXTRA.md" in text, text
+    assert "1 finding(s)" in text, text
+
+
+def test_the_existing_keys_and_counts_are_unchanged_by_the_reverse_direction(tmp_path, monkeypatch):
+    """The three directions coexist: the two older keys keep their counts when the new one fires.
+
+    Measured at `ac12cae9` before this change: 12 `live-longer`, 1 `live-edited-not-tree`. Asserted as a
+    shape (one each in the fixture, all three keys present), never as the host's counts — #1060 adds
+    findings as lanes are versioned, and an exact list would red on that legitimate work.
+    """
+    import os
+
+    # Given a live profile whose rulebook is longer (live-longer), was hand-edited
+    # (live-edited-not-tree) and carries a file the tree has never held (absent-from-tree)
+    root, agents, profiles = _mirror(tmp_path)
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))   # findings() reads the env, not `live=`
+    live_soul = profiles / "someone" / "SOUL.md"
+    live_soul.write_text((agents / "someone" / "SOUL.md").read_text()
+                         + "\n- a live-only rule written by hand\n")
+    src = guard.source_time(agents, "someone", agents / "someone" / "SOUL.md")
+    os.utime(live_soul, (src + 600, src + 600))
+    (profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "references" / "extra.md") \
+        .write_text("extra\n")
+
+    # When  every direction runs over the same tree
+    items = guard.findings(root)
+
+    # Then  all three keys are present, and the two older ones are one finding each
+    keys = [i["key"] for i in items]
+    assert keys.count("live-longer") == 1, items
+    assert keys.count("live-edited-not-tree") == 1, items
+    assert keys.count("absent-from-tree") == 1, items
+    # and `findings()` is the union of its directions: the new one drops nothing the others found
+    assert all(i in items for i in guard.shrink_findings(root, agents, profiles))
+    assert all(i in items for i in guard.live_edited_findings(root, agents, profiles))
+    assert all(i in items for i in guard.absent_from_tree_findings(root, agents, profiles))
+
+
+def test_a_tree_only_checkout_never_reports_the_reverse_key():
+    """CI has no live profiles: the reverse direction must not invent a finding from nothing.
+
+    On the owner's host the same call reports the measured live-only files instead — this asserts the
+    tree-only half, which is the half every CI runner exercises.
+    """
+
+    # Given a checkout whose host has no live profile directory... (this host may have them, so read
+    # the gate's own root: with no profiles home it returns None and the comparison is skipped)
+    import check_agent_profiles as cap
+
+    # When  the comparison explicitly has no live base the reverse direction is empty, not an error
+    assert cap.absent_from_tree_findings(REPO, cap.AGENTS_DIR, None) == [
+        i for i in cap.absent_from_tree_findings(REPO, cap.AGENTS_DIR) if cap.live_root(REPO) is None
+    ]
+    # Then  every key the gate emits at the committed tree is a known one (no typo'd key ship)
+    assert {i["key"] for i in cap.findings(REPO)} <= {
+        "absent-from-tree", "live-longer", "live-lines-missing", "live-edited-not-tree",
+        "skill-reference-missing", "soul-missing", "profile-directory", "profile-unlisted",
+        "manifest-rule", "manifest-missing", "manifest-invalid", "manifest-empty", "manifest-entry",
+        "manifest-rule-unknown", "fleet-block-drift", "fleet-exemption-stale", "fleet-exemptions",
+        "fleet-exemption-unknown", "fleet-block-source", "standing-rule", "standing-rule-quoted",
+        "forbidden-path", "secret", "unreadable", "skill-frontmatter", "skill-name",
+        "skill-description",
+    }
+
+
+
 def test_a_tree_file_that_is_a_content_SUBSET_is_refused_even_when_the_sizes_are_close(tmp_path):
     """Rule from the #791 review: content, not a size ratio.
 
