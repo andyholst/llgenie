@@ -1,6 +1,7 @@
 # The trend-list matrix gate is hermetic: `matrix()` replays a recorded Hub snapshot (#1080)
 
 Issue: #1080 — `ci(unit): check-trend-list-matrix is a live-Hub read inside the hermetic ci-unit gate`.
+PR: #1109 (`fix/1080-trend-target-hermetic`, base `asimov-agent/llgenie:main`, closes #1080).
 Related: #1020 / PR #1077 (the pytest half, `tests/test_trend_list_matrix.py` marked `network`),
 #1000/#1002 (the hermetic/networking split), #1067 (a `raw.githubusercontent.com` fetch in the same
 gate), #974 (the closed data-path half).
