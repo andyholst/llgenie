@@ -86,5 +86,31 @@ Name the class, the two commands that prove it, and the acceptance that closes i
   implementation of "walk both directions" can silently reclassify existing findings while the total
   count stays the same.
 
+## 5. Verify with the check that GATES, not the CLI that resembles it
+
+A repo can ship a CLI and a test suite that check the *same subject* and enforce **different
+strengths**, and only one of them runs in `ci-unit`. Confirming a property with the CLI then proves
+nothing about the suite — and the CLI is the one a human reaches for, because it is one command with
+a readable verdict.
+
+Measured: `scripts/check_docs.py check` returned **rc=0** on a change PR that added a
+`docs/changes.d/` fragment and left `CHANGES.md` alone, so the fragment-only shape looked compliant
+and several lanes were advised to adopt it. `ci-unit` then failed, twice, on:
+
+```
+tests/test_changes_index.py::test_the_real_index_renders_the_committed_changes_md
+  assert committed == rendered, "CHANGES.md is out of date — run `make changes-index`"
+tests/test_check_docs.py::test_the_real_tree_documents_every_user_facing_target
+  assert set(info["changes_links"]) == {stem + ".md" for stem in info["wiki"]}
+```
+
+The CLI asked *"does `CHANGES.md` link a note that does not exist?"* (one-directional). The tests
+asked *"does it link every note, and does the committed file equal the render?"*. Both are reasonable;
+only the second gates.
+
+**Rule:** before repeating "X passes", run the target CI actually invokes — `make ci-unit`, or the
+named test file — not a neighbouring script with a similar name. If a CLI and a suite both exist,
+quote which one produced the rc=0, and treat the suite as authoritative whenever `ci-unit` runs it.
+
 Gate hygiene is never a `do-not-merge` reason: file the issue, link it into any verdict it touches, and
 let the PR under review proceed.

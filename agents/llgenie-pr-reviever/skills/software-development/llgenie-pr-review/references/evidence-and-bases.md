@@ -67,6 +67,23 @@ contested, or when a branch has re-headed and the earlier measurement may no lon
   rather than guessing at intent; "the check is unsatisfiable because its inputs are prose tokens"
   is a different report from "the check is wrong".
 
+## Read the head again immediately before you report it
+
+A report describes the branch **as it is when the message is sent**, not as it was when the work was
+planned. On a live board those two states diverge within minutes, and the failure is quiet: the
+numbers are ones you genuinely measured, so nothing looks wrong.
+
+Measured: a status line said a PR was `13/0/1` with its unit "running 17 min" at `48f03bbf`.
+By the time it was read, `48f03bbf` had **concluded `failure`** (21:27:28Z) and the branch had already
+been fixed at `d43f52b2` with `13/0/1` on a **fresh** leg. The remediation had outpaced the report —
+so the report was not a lie, it was a photograph of a superseded head, which on a review board is the
+same thing to a reader deciding whether to act.
+
+So: `gh pr view <n> --json headRefOid` plus the check-run counts **in the same call that composes the
+report**, and name the head beside the numbers. If the head has changed since you measured, say both
+— "fixed at `<new>`; the `<old>` run concluded failure" — never silently refresh, because the failed
+run is part of the record.
+
 ## A null subfield is not an absent feature
 
 `jq`'s `//` fallback fires on **null**, and many GitHub fields are objects whose interesting values
