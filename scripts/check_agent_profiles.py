@@ -30,7 +30,12 @@ Hermes itself loads) and this gate is what keeps it honest:
   public — and a profile whose entry declares `rules: []`, reported `UNPROTECTED` because an entry
   that gates nothing must not read as an entry that passed;
 * `state.db`, `sessions/`, `memories/`, `config.yaml` or `.env` in the tree — the profile's data is
-  not behaviour, and it must never be committed.
+  not behaviour, and it must never be committed;
+* a file that exists ONLY in the live profile, with no counterpart in the tree (`absent-from-tree`) —
+  the reverse of every comparison above, so a lane's unversioned reference file is named instead of
+  being invisible (issue #1069). The two-way comparison is bounded to the surface the tree mirrors
+  (`SOUL.md` and the skill directories the tree carries), because a live profile is a whole Hermes
+  home whose data and bundled skill library are not that lane's behaviour.
 
 Usage:
     python3 scripts/check_agent_profiles.py check    # exit 1 on any finding, 2 when the tree is unreadable
@@ -499,6 +504,84 @@ def shrink_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_DIR,
     return items
 
 
+def _bookkeeping(rel: Path) -> bool:
+    """Hermes's own bookkeeping beside a skill, never behaviour: hidden files and bytecode caches.
+
+    A live profile is a working directory — the agent tooling writes `.DS_Store`, `.curator_*` and
+    `__pycache__/` without anyone choosing to. Reporting those would red the gate on its own scratch
+    files and teach the reader to ignore the key (issue #1069).
+    """
+    return rel.name == "__pycache__" or any(part.startswith(".") or part == "__pycache__"
+                                            for part in rel.parts)
+
+
+def absent_from_tree_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_DIR,
+                              live: Path | None = None) -> list[dict]:
+    """Every LIVE file with no tree counterpart — behaviour that exists only on the host (issue #1069).
+
+    This is the reverse of every other comparison here. Those walk `tree_profile.rglob("*")` and ask
+    whether the live file differs; a live file the tree has never held was invisible, so a lane could
+    carry whole unversioned reference files and the gate stayed green. Measured at `ac12cae9`:
+    `agents/llgenie-planner/skills/llgenie-bot-orchestration/` has 12 files and its live mirror 33 —
+    21 live-only paths the gate never named.
+
+    **The surface is bounded on purpose.** A live profile directory is a whole Hermes home: its
+    `state.db`, `sessions/`, `memories/`, `cron/`, `logs/`, `.curator_backups/`, `worker-outboxes/`,
+    plus the shared skill library Hermes bundles into every profile (4,804 files for the planner at
+    `ac12cae9`). None of that is lane behaviour, and reporting it would drown the real findings in
+    noise. So only what the tree is the source of truth for is compared: `SOUL.md`, and the files of
+    each skill directory the TREE carries, mirrored at `<live>/skills/<skill>/`. A live skill
+    directory with no tree twin at all is a different question and is issue #1086, not this one.
+
+    The content of a live file is never read or printed — only its path and size. A live profile holds
+    credentials, and this gate prints to a console.
+    """
+    agents = (root / agents_dir) if not agents_dir.is_absolute() else agents_dir
+    base = live if live is not None else live_root(root)
+    if base is None or not agents.is_dir():
+        return []
+    profiles, _ = read_manifest(agents)
+    items: list[dict] = []
+    for profile in profiles:
+        name = profile["name"]
+        live_profile, tree_profile = base / name, agents / name
+        # `absent-live` is the already-handled condition (no profile on this host) and must stay a
+        # different one: a lane the machine does not run has no files to be absent from the tree.
+        if not live_profile.is_dir() or not tree_profile.is_dir():
+            continue
+        soul_live = live_profile / SOUL
+        if soul_live.is_file() and not (tree_profile / SOUL).is_file():
+            items.append({
+                "key": "absent-from-tree",
+                "where": f"{name}/{SOUL}",
+                "detail": f"exists ONLY in the live profile ({soul_live.stat().st_size} b) — the tree "
+                          f"carries no SOUL.md for this lane, so the role it runs under is unversioned: "
+                          f"commit it via an issue+PR under agents/{name}/ (issue #1060)",
+            })
+        skills_dir = tree_profile / SKILLS
+        if not skills_dir.is_dir():
+            continue
+        for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+            live_skill = live_profile / SKILLS / skill_dir.name
+            if not live_skill.is_dir():
+                continue        # no live copy: that is the tree-side direction's business, not this one
+            tree_files = {p.relative_to(skill_dir) for p in skill_dir.rglob("*") if p.is_file()}
+            for path in sorted(p for p in live_skill.rglob("*") if p.is_file()):
+                rel = path.relative_to(live_skill)
+                if rel in tree_files or _bookkeeping(rel):
+                    continue
+                items.append({
+                    "key": "absent-from-tree",
+                    "where": f"{name}/{SKILLS}/{skill_dir.name}/{rel.as_posix()}",
+                    "detail": f"exists ONLY in the live profile ({path.stat().st_size} b) — the tree "
+                              f"has no counterpart, so this instruction is unversioned and "
+                              f"unreviewable: commit it via an issue+PR under "
+                              f"agents/{name}/{SKILLS}/{skill_dir.name}/ (issue #1060), then "
+                              f"`make sync-agent-profile PROFILE={name}` keeps both sides the same",
+                })
+    return items
+
+
 def fleet_block(agents: Path) -> "str | None":
     """The canonical fleet section, exactly as `agents/standing-rules.md` states it."""
     path = agents / FLEET_BLOCK
@@ -641,6 +724,7 @@ def findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_DIR) -> list[dict
     items.extend(manifest_items)
     items.extend(shrink_findings(root, agents_dir))
     items.extend(live_edited_findings(root, agents_dir))
+    items.extend(absent_from_tree_findings(root, agents_dir))
     if not any(REQUIRED_RULE in profile["rules"] for profile in profiles):
         items.append({
             "key": "manifest-rule",
@@ -879,7 +963,10 @@ def main(argv: list[str] | None = None) -> int:
             caveat += " — the live reference moved DURING this run, so the comparison is a snapshot"
         print(f"[check-agent-profiles] OK: {len(profiles)} host-agent profile(s), each with a "
               "SOUL.md stating the rules its manifest declares; every skill's frontmatter name "
-              f"matches its directory and carries no secret value{caveat}")
+              f"matches its directory and carries no secret value"
+              + ("" if live_base is None else
+                 ", and no file exists only in the live profile")
+              + f"{caveat}")
         # Informational, never a failure: a canonical rule stated twice is debt the gate must not
         # stay silent about even when green (one bullet, one place — #972); the removal is a
         # protected SOUL write the owner routes.
