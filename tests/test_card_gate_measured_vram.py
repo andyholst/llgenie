@@ -20,14 +20,15 @@ from __future__ import annotations
 import copy
 import random
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-import model_engine_pick as mp  # noqa: E402
+
+# The conftest seam puts REPO_ROOT on sys.path and `scripts/` is importable through it
+# (tests/conftest.py) — no per-file sys.path.insert, no bare import (issue #796).
+from scripts import model_engine_pick as mp  # noqa: E402
 
 README = REPO / "data" / "trending-README.md"
 RAM = 64.0
