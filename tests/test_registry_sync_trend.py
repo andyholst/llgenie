@@ -73,6 +73,24 @@ def _fits_card(model: dict, gb: float, arch: str | None = None) -> bool:
     return mp.fits(model, gb, arch=arch)
 
 
+def _tier_order(readme_text: str, gb: int) -> list[str]:
+    """The model names the README's `### Up to N GB` table ranks for this card, in its order
+    — parsed straight from the vendored markdown, the same source `card_order`/`tier_tables`
+    read (issue #669: "the card's order is the published tier ranking"), so this is an
+    independent oracle of the SAME document, not the product's own output."""
+    import re as _re
+    if "## 🔥 Trending for your card" not in readme_text:
+        return []
+    section = readme_text.split("## 🔥 Trending for your card", 1)[1].split("\n## ", 1)[0]
+    parts = _re.split(r"^### Up to (\d+) GB$", section, flags=_re.M)
+    tables = {int(parts[i]): _re.findall(r"^\| \[\*\*(.+?)\*\*\]", parts[i + 1], _re.M)
+              for i in range(1, len(parts), 2)}
+    if not tables:
+        return []
+    tier = min((tt for tt in sorted(tables) if gb <= tt), default=max(tables))
+    return tables[tier]
+
+
 @pytest.fixture(scope="module")
 def live_sync(tmp_path_factory):
     """One real upstream download for every test that ranks the new registry."""
@@ -107,6 +125,16 @@ def test_october_5_fixture_prefers_a_known_card_over_a_card_less_box():
     assert reg["generated_utc"] == OCTOBER_5
     expected = [m["name"] for m in reg["models"]
                 if mp.fits(m, 16, arch="cuda") and mp.rank_engines(m, "cuda", gb=16)]
+    # order = the VENDORED README's tier-local ranking for this card (issue #669: "the card's
+    # order is the published tier ranking"), then the rows it does not rank in the store's
+    # trend order — the same document `card_order`/`tier_tables` read, parsed independently.
+    _tier_txt = (REPO / "data" / "trending-README.md").read_text()
+    _tier = _tier_order(_tier_txt, 16)
+    _ranked = [n for n in _tier if n in set(expected)]
+    _today = mp.registry_today(reg)
+    _by = {m["name"]: m for m in reg["models"]}
+    _rest = sorted((_by[n] for n in expected if n not in set(_ranked)), key=lambda m: mp.trend_key(m, _today))
+    expected = _ranked + [m["name"] for m in _rest]
     assert [row[1] for row in rows] == expected
     assert len(expected) > 5, "the snapshot must still list a real 16 GB set"
     assert by_id["qwen3.8-27b"][2:6] == ("llama.cpp", "llama.cpp", 43.7, "CUDA")
@@ -201,8 +229,14 @@ def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_syn
     # the list is the README order narrowed by the product's own gate, never by one field:
     # `vram_min` decides whenever the store states one (issue #669)
     by_name = {m["name"]: m for m in new["models"]}
-    assert [m["name"] for m in fitting] == [
-        name for name in sr.readme_order(readme) if mp.fits(by_name[name], 48)]
+    _fit = [n for n in by_name if mp.fits(by_name[n], 48, arch="cuda")]
+    # order = the VENDORED README's tier-local ranking for this card (issue #669: "the card's
+    # order is the published tier ranking"), then the rows it does not rank in trend order.
+    _tier = _tier_order((REPO / "data" / "trending-README.md").read_text(), 48)
+    _ranked = [n for n in _tier if n in set(_fit)]
+    _today = mp.registry_today(new)
+    _rest = sorted((by_name[n] for n in _fit if n not in set(_ranked)), key=lambda m: mp.trend_key(m, _today))
+    assert [m["name"] for m in fitting] == _ranked + [m["name"] for m in _rest]
     assert any(not mp.fits(m, 48) for m in new["models"])
     assert all(mp.fits(m, 48) for m in fitting)
     added = [m["id"] for m in fitting if m["id"] not in {row["id"] for row in old["models"]}]
