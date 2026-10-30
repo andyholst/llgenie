@@ -1,0 +1,1 @@
+| 2026-10-29 | each host llgenie bot pins its cli toolsets and the skills it keeps; the rebase lane is the only one that may force-push | [2026-10-29-host-bot-capabilities.md](agent-wiki/2026-10-29-host-bot-capabilities.md) | #1038 |

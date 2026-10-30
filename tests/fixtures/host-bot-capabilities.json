@@ -1,0 +1,123 @@
+{
+  "issue": 1038,
+  "force_push_entry": "git force push (rewrites remote history)",
+  "orchestrator_profile": "llgenie-planner",
+  "base_toolsets": [
+    "clarify",
+    "file",
+    "memory",
+    "session_search",
+    "skills",
+    "terminal",
+    "todo"
+  ],
+  "known_builtin_toolsets": [
+    "browser",
+    "clarify",
+    "code_execution",
+    "computer_use",
+    "connections",
+    "context_engine",
+    "cronjob",
+    "delegation",
+    "discord",
+    "discord_admin",
+    "file",
+    "image_gen",
+    "kanban",
+    "memory",
+    "session_search",
+    "skills",
+    "terminal",
+    "todo",
+    "tts",
+    "video",
+    "video_gen",
+    "vision",
+    "web",
+    "x_search",
+    "yuanbao"
+  ],
+  "profiles": {
+    "llgenie-architect": {
+      "extra_toolsets": ["web"],
+      "keep_skills": ["github", "llgenie-architecture-issue-pass"],
+      "lane_skill": "llgenie-architecture-issue-pass",
+      "allow_force_push": false,
+      "description": "Files refactor issues for the other llgenie bots. Does not implement or merge."
+    },
+    "llgenie-ci-pipelines-maintainer": {
+      "extra_toolsets": [],
+      "keep_skills": ["github", "llgenie-pipeline-maintenance"],
+      "lane_skill": "llgenie-pipeline-maintenance",
+      "allow_force_push": false,
+      "description": "Keeps the llgenie GitHub Actions pipelines honest and opens a fix PR when one is wrong. Does not merge or weaken a gate."
+    },
+    "llgenie-documentation-maintainer": {
+      "extra_toolsets": [],
+      "keep_skills": ["github", "llgenie-docs-maintainer"],
+      "lane_skill": "llgenie-docs-maintainer",
+      "allow_force_push": false,
+      "description": "Keeps llgenie docs aligned with the tree. Does not change scripts, tests, or workflows."
+    },
+    "llgenie-engine-improver": {
+      "extra_toolsets": ["code_execution"],
+      "keep_skills": ["github", "llgenie-engine-improver"],
+      "lane_skill": "llgenie-engine-improver",
+      "allow_force_push": false,
+      "description": "Verifies trending-engine sync and serving parameters on this host. Does not merge."
+    },
+    "llgenie-issse-implementer": {
+      "extra_toolsets": ["code_execution"],
+      "keep_skills": [
+        "bulk-mechanical-migration",
+        "github",
+        "github-issue-triage",
+        "github-workflow-admission"
+      ],
+      "lane_skill": "bulk-mechanical-migration",
+      "allow_force_push": false,
+      "description": "Implements one llgenie issue at a time as a ready-for-review PR."
+    },
+    "llgenie-planner": {
+      "extra_toolsets": [],
+      "keep_skills": [
+        "github",
+        "github-issue-triage",
+        "github-workflow-admission",
+        "llgenie-bot-orchestration"
+      ],
+      "lane_skill": "llgenie-bot-orchestration",
+      "allow_force_push": false,
+      "description": "Triages, refines, and dispatches llgenie work. Does not implement or merge."
+    },
+    "llgenie-pr-merge-conflict": {
+      "extra_toolsets": [],
+      "keep_skills": ["github", "llgenie-pr-rebase"],
+      "lane_skill": "llgenie-pr-rebase",
+      "allow_force_push": true,
+      "description": "Rebases conflicting llgenie pull requests onto main. Does not review product scope or merge."
+    },
+    "llgenie-pr-reviever": {
+      "extra_toolsets": [],
+      "keep_skills": ["github", "llgenie-pr-review"],
+      "lane_skill": "llgenie-pr-review",
+      "allow_force_push": false,
+      "description": "Reviews llgenie pull requests with a run id and a sha. Does not implement, approve, or merge."
+    },
+    "llgenie-security": {
+      "extra_toolsets": [],
+      "keep_skills": ["github", "security-scan-ops"],
+      "lane_skill": "security-scan-ops",
+      "allow_force_push": false,
+      "description": "Keeps the vulnerability scan honest and files tagged issues. Does not implement the fixes."
+    },
+    "llgenie-tester": {
+      "extra_toolsets": ["code_execution"],
+      "keep_skills": ["containerized-repo-verification", "github", "llgenie-pr-testing"],
+      "lane_skill": "llgenie-pr-testing",
+      "allow_force_push": false,
+      "description": "Tests llgenie pull requests against the issue acceptance criteria and reports the evidence. Does not take another lane's fix."
+    }
+  }
+}
