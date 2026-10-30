@@ -202,6 +202,7 @@ def test_registry_sync_workflow_is_weekly_and_accounts_for_unskilled_engines():
     assert "workflow_dispatch" in text
 
 
+@pytest.mark.network  # real Hub download via the live_sync fixture (issue #1000)
 def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_sync):
     """Download the live registry and rank it against the October 5 snapshot.
 
@@ -298,6 +299,7 @@ def test_live_sync_adopts_a_higher_skilled_tps_for_models_that_fit_48gb(live_syn
         assert any(name in err for err in strict)
 
 
+@pytest.mark.network  # real Hub download via the live_sync fixture (issue #1000)
 def test_rank_follows_the_given_vram_ram_and_arch(live_sync):
     """Card size, system RAM, and architecture are arguments to the real functions.
 
