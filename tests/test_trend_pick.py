@@ -85,10 +85,33 @@ def _readme_rows() -> list[tuple[str, int]]:
     return rows
 
 
-def _fits_names(gb: float, ram_gb: float = 64.0) -> list[str]:
-    """The registry's models this host fits, in README order — the product's own decision
-    (VRAM floor AND the stated system-RAM floor, issue #669/#414), never the README alone."""
-    return [m["name"] for m in mp.load_registry()["models"] if mp.fits(m, gb, ram_gb)]
+def _card_order(gb: float) -> list[str]:
+    """The order a card's list is in, derived INDEPENDENTLY of the production call: the
+    vendored README's tier-local `### Up to N GB` ranking for that card first (issue #669),
+    then the rows it does not rank in the store's own trend order (`mp.trend_key`, computed
+    from the store's fields — never the file's positions)."""
+    import re
+    text = README.read_text().split("## 🔥 Trending for your card", 1)[1].split("\n## ", 1)[0]
+    parts = re.split(r"^### Up to (\d+) GB$", text, flags=re.M)
+    tables = {int(parts[i]): re.findall(r"^\| \[\*\*(.+?)\*\*\]", parts[i + 1], re.M)
+              for i in range(1, len(parts), 2)}
+    tier = min((t for t in sorted(tables) if gb <= t), default=max(tables))
+    return tables[tier]
+
+
+def _fits_names(gb: float, ram_gb: float = 64.0, arch: str | None = "cuda") -> list[str]:
+    """The registry's models this host fits, in the CARD's order — membership is the product's
+    own decision (measured evidence + the stated RAM floor, issue #669/#414), and the order is
+    the published tier ranking, then the computed store order. Never one field, never the
+    file's line numbers. `arch` defaults to cuda (the offer these tests assert) so Apple-only
+    models are excluded from both sides consistently."""
+    reg = mp.load_registry()
+    fit = {m["name"]: m for m in reg["models"] if mp.fits(m, gb, ram_gb, arch)}
+    ranked = [n for n in _card_order(gb) if n in fit]
+    today = mp.registry_today(reg)
+    rest = sorted((fit[n] for n in fit if n not in set(ranked)),
+                  key=lambda m: mp.trend_key(m, today))
+    return ranked + [m["name"] for m in rest]
 
 
 def _offer(tmp_path: Path, backend: str, gb: int, ram_gb: float | None = None) -> list[dict]:
@@ -597,7 +620,7 @@ def test_every_registry_engine_name_maps_to_its_skill_or_has_no_image():
 
 
 @pytest.mark.parametrize("arch,engine,variant", [
-    ("cuda", "llama.cpp", "cuda"), ("cuda", "llama.cpp-prism", "cuda"),      # prism/cuda enabled (#823)
+    ("cuda", "llama.cpp", "cuda"), ("cuda", "llama.cpp-prism", "cpu"),      # prism/cuda disabled (#103)
     ("cuda", "strata", "cuda"), ("rocm", "strata", "rocm"),
     ("cuda", "litert", "cpu"), ("cuda", "mlx", "cuda"), ("rocm", "mlx", "cpu"),
     ("vulkan", "vllm", "cpu"), ("rocm", "freetoken", "rocm"), ("cpu", "ollama", "cpu")])
@@ -858,7 +881,7 @@ def test_bands_match_the_readme_status_column():
 
 def test_llgenie_no_args_is_the_interactive_trend_pick(tmp_path):
     # Given the vendored registry, an empty models dir and a 16 GB cpu host
-    env = _env(tmp_path, "cpu", 16)
+    env = _env(tmp_path, "cpu", 16, LLGENIE_SYSTEM_RAM_BYTES=RAM64)
     rows = _offer(tmp_path, "cpu", 16)
     pickable = [r for r in rows if not r["why"]]
     top = pickable[0]
@@ -1028,7 +1051,7 @@ def test_host_engines_use_the_backend_variant_with_cpu_fallback():
     for e in rows.values():
         assert not ei.disabled(e["id"], e["variant"])
     assert rows["llama.cpp"]["variant"] == "cuda"
-    assert rows["llama.cpp-prism"]["variant"] == "cuda"  # prism/cuda enabled (#823)
+    assert rows["llama.cpp-prism"]["variant"] == "cpu"  # prism/cuda disabled (#103)
     assert "sglang" in rows and "sglang" not in {e["id"] for e in mp.host_engines("cpu")}
 
 
@@ -1116,7 +1139,7 @@ def test_local_marker_and_reuse_in_the_trend_list(tmp_path):
 
 def test_model_pick_reprompts_on_invalid_input(tmp_path):
     # Given the trend list in a terminal
-    env = _env(tmp_path, "cpu", 16)
+    env = _env(tmp_path, "cpu", 16, LLGENIE_SYSTEM_RAM_BYTES=RAM64)
     n = len([r for r in _offer(tmp_path, "cpu", 16) if not r["why"]])
     p = Pty([sys.executable, str(SERVE), "--dry"], env, cwd=str(REPO))
     try:
