@@ -73,11 +73,17 @@ line-by-line `missing: 0` check — never eyeball a split, and never split by co
 
 ## Standing rules for this repo (they override generic review habits)
 
-The rules that override generic review habits live in
-**`references/standing-rules-for-this-repo.md`** — 628 lines covering never-approve/never-merge,
-the author gate, hold discipline, push and rebase behaviour, and the CI-read rules. Load it before
-acting on any of those; the always-on summary a review needs without a second lookup is below in
-`## What actually blocks a PR`, `## Verdicts` and the evidence block.
+**The one rule that must never need a second lookup: this lane does not approve and does not merge.**
+No squash, no auto-merge, no `gh pr merge`, no approval review — `reviewDecision` stays
+`REVIEW_REQUIRED` on everything this lane touches, and a green PR is handed off in one line to the lane
+that owns it. `agents/manifest.json` declares `never-merge` for this profile, and rule 16's carve-out
+applies: report `auto=none (lane owner instruction)` and name where that instruction lives.
+
+The rest of the standing rules live in
+**`references/standing-rules-for-this-repo.md`** — 628 lines covering the author gate, hold discipline,
+push and rebase behaviour, and the CI-read rules. Load it before acting on any of those; the always-on
+summary a review needs without a second lookup is below in `## What actually blocks a PR`,
+`## Verdicts` and the evidence block.
 
 ## Fleet rules 13–16, verbatim (from #873's body at commit time — do not paraphrase when citing)
 
