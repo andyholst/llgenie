@@ -1,0 +1,116 @@
+# Base integrity and merge integrity
+
+Rules for keeping a review verdict tied to a real base, and for confirming a finding
+actually landed after a merge.
+
+## Never rebase a branch stacked on a squash-merged ancestor
+
+When the base PR landed as a **squash**, `main` carries one commit while your branch carries
+the base PR's whole lineage. `git rebase <new-base>` therefore replays all of it and conflicts
+on files that are **not yours** — measured once as `Makefile` plus a dozen foreign `agents/*`
+files, none of which the branch had touched.
+
+Correct shape:
+
+```bash
+git rebase --abort                     # first, if you already started one
+git checkout -B <branch> <new-base>    # sit on the real base
+git diff <old-base> <old-head> > p.patch   # YOUR change only
+git apply --check p.patch              # clean iff new-base blobs == old-base blobs
+git apply p.patch
+# re-sync anything sourced from a live copy, then verify and commit
+```
+
+`git apply --check` passing is the assertion worth making: it means the new base's blobs equal
+your old base's, so your diff is the only delta. If it fails, inspect which path diverged — do
+not force it through.
+
+## Re-verify your findings against the merged sha
+
+A defect found on a branch is only fixed once it is fixed **on main**. After a merge, re-run the
+specific check that failed and say which of your findings survived:
+
+- a stale golden that was regenerated pre-merge shows as the suite passing on `main`;
+- an issue closed as "ruling recorded" is **not** evidence that behaviour changed — re-measure the
+  numbers the ruling cites at the merged commit.
+
+Report both outcomes explicitly. "Merged" answers a different question from "the defect is gone".
+
+## A versioned skill is the first time a live skill meets CI
+
+A lane's live skill lives under the agent home, where **nothing lints it**. The first time it is
+versioned under `agents/<lane>/skills/`, the repo's gates (`lint_linefeeds.py`, `check-docs`,
+`check_wiring`) run over it for the first time — so a live copy can be lint-red indefinitely and
+nobody learns until a PR versions it.
+
+Concretely: a `<!-- host-bot-tools:begin -->` marker sitting directly above `## Tools` with no
+blank line reds `lint_linefeeds.py` at that heading, because a marker line is not blank. Fix it
+in the **live** copy and re-sync, never only in the tree copy: patching the tree alone re-creates
+the live-vs-tree drift the versioning PR exists to remove, and the next sync silently reverts it.
+
+Run the repo lints locally before pushing a versioning PR (`python3 scripts/lint_linefeeds.py`,
+`make check-docs`) — and expect the first push to find something, because the host copy has never
+been checked.
+
+## Do not push while a run at the head is in progress
+
+A CI run at the current head plus a push equals a cancelled run when the workflow sets
+`cancel-in-progress`. That turns a legitimate fix into a destroyed matrix: the old run is neither
+green nor red, it is **no verdict**, and the reviewer's own rule forbids reading it either way.
+Wait for the head's run to conclude, or say explicitly that the push supersedes and a new run is
+required. Recording a lesson in a live skill does **not** require pushing it — do that, and defer
+the sync to a moment when no run is in flight.
+
+## Diff a PR against its MERGE-BASE, not against `main`
+
+`git diff main...HEAD` and `git diff main..HEAD` both misreport a branch that is merely **behind**
+`main`: the two-dot form shows every file that landed on main since the branch forked, so a PR's
+own change is buried among dozens of unrelated files and a real finding can be attributed to the
+wrong PR (measured twice in one evening: two PRs each looked like they touched 20+ `agent-wiki/`
+files that had actually arrived via another PR's merge).
+
+Use the merge-base:
+
+```bash
+MB=$(git merge-base refs/remotes/live/main HEAD)
+git diff --name-only "$MB" HEAD        # what THIS branch changed
+git diff "$MB" HEAD                    # the same, with content
+```
+
+Then state the merge-base sha next to `main`, e.g. "measured against merge-base `36cfa8c1`
+(main is `ac12cae9`)" — a reviewer reading a file list needs to know which base produced it.
+The three-dot form (`main...HEAD`) is equivalent to the merge-base call and is fine, but naming
+the sha removes the ambiguity entirely.
+
+A branch being behind `main` is **not** itself a `CONFLICTING` state, so per the fleet's rebase
+rule it is not a reason to rewrite — but it does mean CI at that head ran against a superseded
+base, which changes how a red may be attributed.
+
+## A rebase can clear the conflict and leave the cause
+
+`mergeStateStatus` going `DIRTY → BLOCKED` after a rebase is **not** evidence that the problem was
+fixed. A rebase re-applies your change onto the new base; if the base's version of the contested
+file moved, the same hunk can now apply without a textual collision. The commit still carries it.
+
+Measured: a PR `DIRTY` on `CHANGES.md` was rebased onto the new `main`, went `BLOCKED`, and
+`git diff --name-only "$(git merge-base main HEAD)" HEAD | grep -c '^CHANGES.md$'` still returned
+`1` with the same appended row. It will go `DIRTY` again the next time that file changes on main.
+
+So after a rebase that “clears” a conflict, re-run the same check that found it:
+
+```bash
+MB=$(git merge-base refs/remotes/live/main HEAD)
+git diff --name-only "$MB" HEAD      # is the offending path still in the diff?
+git merge-tree --write-tree refs/remotes/live/main HEAD   # does it merge RIGHT NOW?
+```
+
+"Merges right now" and "no longer carries the defect" are different claims. Report them separately,
+and credit the rebase for clearing a real conflict while saying the underlying change is still
+there — otherwise `BLOCKED` reads as repaired and the defect ships.
+
+## Quote the base at the moment of the claim
+
+Every finding, control and verdict is relative to a base sha. Read it (`git fetch origin
+refs/heads/main:refs/remotes/live/main` then `gh api .../commits/main --jq .sha`, and require them
+to match) *in the same turn* as the claim. A clean merge at a superseded base proves nothing about
+the base you will target; a control run against yesterday's main proves nothing about today's.
