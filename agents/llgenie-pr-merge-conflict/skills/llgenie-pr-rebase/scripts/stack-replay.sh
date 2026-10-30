@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Replay a stacked PR's own commits onto the CURRENT tip of its stack base, then gate and push.
+# `git rebase --onto` is wrong here: a stacked branch contains its base's commits, so replaying them
+# re-conflicts. `git cherry <base> HEAD` names only the '+' commits, which are this PR's own work.
+set -u
+P=/home/asimov/repository/git/llgenie
+BASE_BRANCH=${STACK_BASE:-feat/agent-profile-implementer-skill}
+RESOLVER=/home/asimov/.hermes/profiles/llgenie-pr-merge-conflict/cache/scratch/resolve-fleet-triple.py
+cd "$P" || exit 1
+git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --quiet
+BASE=refs/remotes/origin/$BASE_BRANCH
+
+for spec in "$@"; do
+  N=${spec%%:*}; BR=${spec#*:}
+  WT="$P/../llgenie-wt/s$N"
+  echo "=== #$N $BR ==="
+  git worktree remove --force "$WT" 2>/dev/null; git worktree prune >/dev/null 2>&1
+  git fetch origin "$BR:refs/remotes/origin/$BR" --quiet || { echo "  fetch failed"; continue; }
+  BEFORE=$(git rev-parse --short "origin/$BR")
+  PLUS=$(git cherry "$BASE" "origin/$BR" | grep '^+' | awk '{print $2}')
+  if [ -z "$PLUS" ]; then echo "  no unique commits — already contained in the stack base"; continue; fi
+  git worktree add -B "s$N" "$WT" "$BASE" --force >/dev/null 2>&1 || { echo "  worktree failed"; continue; }
+  cd "$WT" || continue
+  OK=1
+  for c in $PLUS; do
+    git cherry-pick "$c" >/dev/null 2>&1 && continue
+    echo "  conflict at $(echo "$c" | cut -c1-8): $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+    # CHANGES.md is generated: take the base's copy, then regenerate from docs/changes.d fragments
+    for f in $(git diff --name-only --diff-filter=U); do
+      case "$f" in
+        CHANGES.md) git checkout "$BASE" -- "$f" 2>/dev/null ;;
+      esac
+    done
+    python3 "$RESOLVER" . >/tmp/res-$N.log 2>&1
+    # any file the resolver does not know how to union: keep the base side, never a side we cannot read
+    for f in $(git diff --name-only --diff-filter=U); do git checkout --ours "$f" 2>/dev/null; done
+    git add -A
+    if [ -n "$(git grep -l -E '^(<<<<<<<|>>>>>>>)' -- . 2>/dev/null)" ]; then echo "  MARKERS REMAIN — aborting"; OK=0; break; fi
+    GIT_EDITOR=true git cherry-pick --continue >/dev/null 2>&1 || { echo "  continue failed — aborting"; OK=0; break; }
+  done
+  [ "$OK" = 0 ] && { git cherry-pick --abort 2>/dev/null; cd "$P"; continue; }
+  make changes-index >/dev/null 2>&1
+  if [ -n "$(git status --porcelain)" ]; then
+    git add -A; git -c user.name='Andy Holst' -c user.email='andy.holst@protonmail.com' commit -q --amend --no-edit
+  fi
+  NOTES=$(git ls-tree -r --name-only HEAD agent-wiki/ | grep -c '\.md$')
+  ROWS=$(git show HEAD:CHANGES.md | grep -cE '^\| [0-9]{4}-[0-9]{2}-[0-9]{2} \|')
+  echo "  replayed $BEFORE -> $(git rev-parse --short HEAD) · notes=$NOTES rows=$ROWS"
+  [ "$NOTES" != "$ROWS" ] && { echo "  NOTES!=ROWS — not pushing"; cd "$P"; continue; }
+  ROOT=$(pwd)
+  if timeout 400 docker run --rm -u root -v "$ROOT":/repo:rw -v "$P":"$P":rw -w /repo llgenie/test \
+      python -m pytest tests/test_changes_index.py tests/test_check_docs.py -p no:cacheprovider -q >/tmp/st-$N.log 2>&1; then
+    echo "  gates: $(tail -1 /tmp/st-$N.log)"
+  else
+    echo "  GATES FAILED: $(grep -E '^FAILED' /tmp/st-$N.log | head -2 | tr '\n' ' ')"; cd "$P"; continue
+  fi
+  LEASE=$(git rev-parse "origin/$BR")
+  git push --force-with-lease="refs/heads/$BR:$LEASE" origin "HEAD:refs/heads/$BR" >/tmp/sp-$N.log 2>&1 \
+    && echo "  pushed $(git rev-parse --short HEAD) (was $BEFORE)" \
+    || echo "  PUSH REFUSED: $(tail -1 /tmp/sp-$N.log)"
+  cd "$P"
+done
