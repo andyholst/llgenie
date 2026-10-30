@@ -26,6 +26,15 @@ their real detection path (card_gb / system_ram_gb / host_arch) for every (arch,
 ram) before any engine starts.
 
 The ONLY thing mocked is the inference server start.
+
+ROUTING (issue #1059): every test in this file is a real-Hub scope — `_live_matrix` reads the live
+repo trees through `mp.matrix`, the probe answers a real ranged GET, and the wired `llgenie` CLI is
+run over that same live matrix — so each test carries `@pytest.mark.network` (`pytest.ini`, the
+#1000/#1002 seam) and `make test-unit` runs `-m "not network"`, i.e. this file contributes ZERO
+network I/O to the hermetic gate. It runs in the network pipeline (`make test-unit-network`). The
+offline half of the pick matrix is `tests/test_pick_matrix.py` + `tests/test_pick_matrix_arch_perms.py`
+(synthetic registry, stubbed Hub tree), which stay in the gate — no assertion was deleted to route
+this file, only moved to the seam that owns live I/O.
 """
 from __future__ import annotations
 
@@ -132,6 +141,7 @@ _IDS = [f"{p[0]}::{p[1]}::{p[2]}::v{p[3]}::r{p[4]}" for p in _PERMS]
 
 
 @pytest.mark.parametrize("p", _PERMS, ids=_IDS)
+@pytest.mark.network
 def test_pick_matrix_any_offer_is_a_real_fitting_hf_url(p):
     """System rule, every (model x engine x arch x vram x ram), LIVE Hub:
     an engine IS offered iff (a) the model fits VRAM, (b) the engine has a runnable
@@ -202,6 +212,7 @@ def _catalog_urls(model_id):
 
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("model_id", [m["id"] for m in real_models()], ids=[m["id"] for m in real_models()])
+@pytest.mark.network
 def test_pick_matrix_real_quant_links_exist(model_id, arch, vram=24, ram=64):
     """Every engine offered for a real trending model on this architecture must resolve
     to real quantized Hugging Face files that (a) are in the committed quant catalog and
@@ -235,6 +246,7 @@ def test_pick_matrix_real_quant_links_exist(model_id, arch, vram=24, ram=64):
 # subset of the quants the selected engine supports" surface.
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("model_id", [m["id"] for m in real_models()], ids=[m["id"] for m in real_models()])
+@pytest.mark.network
 def test_pick_matrix_engine_supported_quants_catalog(model_id, arch, vram=24, ram=64):
     """Every engine that can serve a real trending model on this arch must support at
     least one real quantized file within the budget, and its full supported-quant list
@@ -274,6 +286,7 @@ _UC_IDS = [f"{p[0]}::{p[1]}::{p[2]}" for p in _UC_PERMS]
 
 
 @pytest.mark.parametrize("p", _UC_PERMS, ids=_UC_IDS)
+@pytest.mark.network
 def test_pick_matrix_llgenie_cli_agrees_with_business_logic(p, tmp_path):
     """The whole system through the REAL `llgenie` CLI, only the engine start mocked:
     `llgenie --pick <model> --engine <engine> --dry` (scripts/llgenie_serve.py, the launcher
@@ -306,6 +319,7 @@ def test_pick_matrix_llgenie_cli_agrees_with_business_logic(p, tmp_path):
         assert r.returncode in (0, 1), (mid, eng, arch, r.stdout[-600:], r.stderr[-600:])
 
 
+@pytest.mark.network
 def test_pick_matrix_offers_only_engines_the_gap_says_have_an_image():
     """The LIVE permutation grid and `data/engine-skill-gap.json` agree (issue #229):
     an engine the gap says has no image is never offered on any architecture, and a model
@@ -442,6 +456,7 @@ _EDGE_IDS = [f"{a}::{m}::v{v}::r{r}" for a, m, v, r in _EDGE_CASES]
 
 
 @pytest.mark.parametrize("arch,model_id,vram,ram", _EDGE_CASES, ids=_EDGE_IDS)
+@pytest.mark.network
 def test_pick_matrix_edge_case_golden(arch, model_id, vram, ram, tmp_path):
     """The GOLDEN edge-case rule, through the REAL wired `llgenie` CLI
     (`scripts/llgenie_serve.py main`, the launcher the user runs): `llgenie --matrix
@@ -519,6 +534,7 @@ _RAM_IDS = [f"{a}::{m}::{e}::v{v}::r{r}" for a, m, e, v, r in _RAM_CASES]
 
 
 @pytest.mark.parametrize("arch,model_id,engine,vram,ram", _RAM_CASES, ids=_RAM_IDS)
+@pytest.mark.network
 def test_pick_matrix_edge_case_golden_ram(arch, model_id, engine, vram, ram, tmp_path):
     """The RAM-ladder rule through the REAL wired `llgenie` CLI: at a fixed VRAM, the quant
     `llgenie --matrix` chooses for a RAM-sensitive engine never SHRINKS as RAM grows, and
@@ -538,6 +554,7 @@ def test_pick_matrix_edge_case_golden_ram(arch, model_id, engine, vram, ram, tmp
         f"{arch}/{model_id}/{engine} r{ram}: offered with an empty plan — {cell}")
 
 
+@pytest.mark.network
 def test_the_ram_ladder_never_shrinks_the_chosen_quant(tmp_path):
     """The rule behind the ladder, asserted once over the whole ladder rather than per rung:
     a RAM-sensitive engine's chosen download never gets smaller as system RAM grows."""
