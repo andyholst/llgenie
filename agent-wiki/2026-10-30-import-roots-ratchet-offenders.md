@@ -50,4 +50,4 @@ Measured in this worktree on `main@36cfa8c1` (before = the old script, after = t
 - the new naming test fails on the old script (`KeyError: 'sites'`) and passes on this one, so the
   test locks the behaviour rather than the message text.
 
-Issue: #1066
+Issue: #1066 — PR: #1082
