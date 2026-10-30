@@ -1,0 +1,4 @@
+{
+  "note": "Profiles whose SOUL does not yet state the canonical fleet block from agents/standing-rules.md (issue #873). An entry is legitimate only while it describes a REAL gap: once the profile states the block, `make check-agent-profiles` reports the entry STALE and it must be deleted. Each entry names the lane that owns the file, because only a lane may edit its own SOUL \u2014 and a gap with no owner is a gap nobody closes. The list is EMPTY because every profile now states the canonical block verbatim (#873, #948).",
+  "exemptions": []
+}

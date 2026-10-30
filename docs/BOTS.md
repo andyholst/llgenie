@@ -405,6 +405,98 @@ name resolved and each skill's content is in the prompt the model receives. It r
 `skills/engines/` is **not** this: those describe inference servers, are read by
 `make generate-engine-params`, and are never loaded by an agent.
 
+### The host agents' SOUL and skills live under `agents/` (issue #791)
+
+The two **host** agents are not CI legs. They are Hermes profiles on the owner's machine —
+`llgenie-planner` (the orchestrator: triage, refine, dispatch) and `llgenie-issse-implementer` (the
+implementer; the triple `s` is in the real profile name) — and they keep the same two kinds of file
+Hermes loads: `SOUL.md` and `skills/<name>/SKILL.md`. They used to live only in
+`~/.hermes/profiles/<profile>/`, so the most consequential instruction in this repository — the one
+the agent holding the write credentials runs under — had no diff, no review and no copy in the tree.
+`git log --all --oneline -- '*SOUL*'` returned nothing.
+
+`agents/` is their home now, one directory per profile, mirroring the layout Hermes reads:
+
+```
+agents/
+  manifest.json                                    # which profiles this tree is the source of truth for
+  llgenie-planner/
+    SOUL.md
+    skills/llgenie-bot-orchestration/SKILL.md       # + references/ that skill names
+  llgenie-issse-implementer/
+    SOUL.md
+```
+
+```bash
+make sync-agent-profile PROFILE=llgenie-planner                       # copy agents/<p>/ into the profile's Hermes home
+make sync-agent-profile PROFILE=llgenie-planner CHECK=1               # compare instead; names the first differing path
+make check-agent-profiles                                             # CI (ci-unit): the tree is honest
+make agent-profiles-report                                            # every profile, its SOUL, skills and rules
+make profile-drift                                                   # host-only: tree copies that are PREFIXES of the live rulebook (#928)
+make profile-drift-alarm                                             # the SCHEDULED caller: file ONE issue on drift (#928)
+```
+
+`make sync-agent-profile` (`scripts/agent_profile_sync.py`, stdlib only) writes each file the tree
+carries into the profile's home and **reads every one back**, the write-then-verify shape
+`scripts/hermes_skills_register.py` uses — a copy that is not read back cannot be trusted, and a
+profile that silently kept an older `SOUL.md` is the drift this change exists to end. The destination
+is `--dest`, else `$HERMES_PROFILE_HOME` (the profile's own home, not a `profiles/` directory), else
+`~/.hermes/profiles/<profile>/`. It never deletes: it writes only the files the tree carries, so the
+profile's other skills, memory, `state.db` and `.env` are untouched and no sync can remove behaviour
+nobody reviewed. An unknown profile (one `agents/manifest.json` does not list) exits **2**, never a
+silent pass.
+
+**One of its findings cannot run in CI, and says so instead of passing** (issue #928): the *live* comparison —
+a tree copy that is a prefix of the rulebook under `~/.hermes/profiles/` — needs those profiles, and a runner has
+none. The gate therefore prints a counted line rather than a bare green:
+
+```
+[check-agent-profiles] live comparisons: 0 (no profiles directory on this host — the live rulebooks were NOT compared)
+```
+
+On a host that has them the same line carries the real count, and `make profile-drift` (`check --only live-longer`)
+is the caller for that half: it exits non-zero listing each stale copy with both sizes, so drift has something to
+run it other than memory. In CI, `--summary` writes the count into the job summary for the same reason.
+
+`make profile-drift-alarm` (`scripts/profile_drift_alarm.py`) is the caller a timer can run: exit `0` clean,
+`3` drift, `2` could-not-compare, and with `--file-issue` it opens **one** issue titled
+`profile drift: N tree copy(ies) are truncated seeds` — or comments on the open one — so a recurring condition
+does not become a stream of duplicates. The body is a table of tree size, live size and the gap, plus the
+direction of the fix: **take the tree copy from the live file**, by allowlist, never the other way round.
+
+`make check-agent-profiles` (`scripts/check_agent_profiles.py`) fails when:
+
+- a profile the manifest lists has no directory, or a profile directory the manifest does not list;
+- a listed profile has no `SOUL.md`;
+- a skill's frontmatter `name` disagrees with its directory (Hermes resolves a skill by the
+  frontmatter name, so the profile would load nothing), it has no frontmatter block, or its
+  `description:` is empty;
+- a skill's body names a `references/<file>.md` the tree does not carry;
+- any committed file of the tree carries a secret-shaped value (`ghp_…`, `hf_…`, `sk-…`, a private
+  key …) — these files are read by an agent that holds write credentials;
+- a `SOUL.md` no longer states a standing rule its manifest entry declares. The orchestrator declares
+  both `never-implement` and `never-merge`; a manifest that declares `never-merge` for **no** profile
+  is itself a failure, so the rule cannot be emptied out of the manifest;
+- a `SOUL.md` that mentions a declared rule **only inside a quotation** — a fenced code block, a
+  blockquote line or a `"…"` span. A rule is read from the file's own voice: quoting the owner's
+  instruction (or another lane's block) documents that instruction without putting this profile under
+  it, so the `standing-rule-quoted` finding is what a deleted statement looks like (issue #922). A SOUL
+  that states the rule *and* quotes it is correct and passes;
+- `state.db`, `sessions/`, `memories/`, `logs/` or `.env` appears in the tree — a profile's data is
+  not its behaviour, and it is never committed.
+
+A manifest entry with `rules: []` declares no rule, so nothing in that profile's `SOUL.md` is gated.
+`check` and `report` name it `UNPROTECTED` instead of counting it as a pass — "no rule to check" and
+"the rule held" must not read the same line (issue #922). It is a report, not a failure: a profile may
+legitimately declare no rule, and a permanently red gate is a filtered gate.
+
+**Changing a host agent's behaviour is a change like any other**: its own issue, its own branch, an
+OpenSpec change, the text committed under `agents/<profile>/`, a PR a human approves, then
+`make sync-agent-profile` to make the profile the repository's copy. `tests/test_agent_profiles.py`
+(discovered by `make test-unit`) carries one rejection per rule above and drives the real scripts
+against fixture trees and a temporary `HERMES_PROFILE_HOME`.
+
+
 ## The issue-implementer (issue #248)
 
 Nothing takes an issue and produces its first PR — until now. The
