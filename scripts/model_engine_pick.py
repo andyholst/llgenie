@@ -1078,9 +1078,12 @@ class HubSnapshotMissing(RuntimeError):
 
 _SNAPSHOTS: dict[tuple[str, int], dict] = {}
 _RECORDING: dict[str, dict] | None = None
+_SNAPSHOT_OVERRIDE: Path | None = None
 
 
 def _snapshot_path() -> Path | None:
+    if _SNAPSHOT_OVERRIDE is not None:
+        return _SNAPSHOT_OVERRIDE
     value = (os.environ.get(HUB_SNAPSHOT_ENV) or "").strip()
     return Path(value) if value else None
 
@@ -1147,18 +1150,15 @@ def hub_snapshot_file(path):
     the same for a whole process. Recording and replaying are refused together: one source of Hub
     answers is the point.
     """
+    global _SNAPSHOT_OVERRIDE
     if _RECORDING is not None:
         raise ValueError("[model_engine_pick] a block that records Hub answers cannot replay a recording")
-    previous = os.environ.get(HUB_SNAPSHOT_ENV)
-    os.environ[HUB_SNAPSHOT_ENV] = str(path)
+    previous, _SNAPSHOT_OVERRIDE = _SNAPSHOT_OVERRIDE, Path(path)
     _reset_tree_memo()
     try:
         yield Path(path)
     finally:
-        if previous is None:
-            os.environ.pop(HUB_SNAPSHOT_ENV, None)
-        else:
-            os.environ[HUB_SNAPSHOT_ENV] = previous
+        _SNAPSHOT_OVERRIDE = previous
         _reset_tree_memo()
 
 

@@ -35,6 +35,20 @@ THEN it SHALL exit 0 and reproduce `tests/fixtures/trend-list-matrix.json` byte-
 - **Then** `HubSnapshotMissing` propagates instead of the broad `except Exception` returning `[]`
 - **Test:** `tests/test_hub_snapshot.py::test_the_mlx_and_tensorfold_searches_propagate_a_gap`
 
+#### Scenario: the environment selects the recording for a whole process
+
+- **Given** `LLGENIE_HUB_SNAPSHOT` naming a recording, and no context manager in sight
+- **When** a URL that recording does not carry is read
+- **Then** `HubSnapshotMissing` is raised, so the switch is not tied to the script that uses it
+- **Test:** `tests/test_hub_snapshot.py::test_the_env_var_selects_the_recording_for_a_whole_process`
+
+#### Scenario: a stale Hub disk cache cannot leak into a replay
+
+- **Given** a Hub disk-cache entry for a URL the matrix reads, holding an answer the recording does not
+- **When** that URL is read under the recording
+- **Then** the recorded answer is returned, the cache is never read, and replay writes no cache entry
+- **Test:** `tests/test_hub_snapshot.py::test_the_replay_ignores_the_hub_disk_cache`
+
 #### Scenario: the default live read is unchanged
 
 - **Given** no recording and no flag

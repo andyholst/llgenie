@@ -167,6 +167,24 @@ def test_a_url_missing_from_the_recording_is_loud(monkeypatch, tmp_path):
     assert url in str(excinfo.value)
 
 
+def test_the_env_var_selects_the_recording_for_a_whole_process(monkeypatch, tmp_path):
+    """`LLGENIE_HUB_SNAPSHOT` is the process-wide spelling of the same switch."""
+
+    # Given a recording with one URL removed, named by the environment
+    doc = _snapshot_doc()
+    url = _first_tree_url(doc)
+    repo = url.split("/api/models/", 1)[1].split("/tree/", 1)[0]
+    doc["trees"].pop(url)
+    monkeypatch.setenv(mp.HUB_SNAPSHOT_ENV, str(_tmp_snapshot(tmp_path, doc)))
+    _no_network(monkeypatch)
+    monkeypatch.setattr(mp, "_TREE_CACHE", {})
+
+    # When  that URL is read with no context manager in sight
+    # Then  the environment alone put `_hub_json` in replay mode, and the gap is loud
+    with pytest.raises(mp.HubSnapshotMissing):
+        mp._tree(repo)
+
+
 def test_the_mlx_and_tensorfold_searches_propagate_a_gap(monkeypatch, tmp_path):
     """The searches' broad `except Exception` cannot swallow a gap in a recording."""
 
