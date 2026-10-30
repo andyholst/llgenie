@@ -89,10 +89,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -416,10 +416,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -759,10 +759,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -1118,10 +1118,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -1469,10 +1469,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -1565,11 +1565,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -1605,11 +1605,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -1764,11 +1764,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 129.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -1940,10 +1940,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -2060,11 +2060,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -2108,11 +2108,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -2307,11 +2307,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 129.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -2491,10 +2491,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -2619,11 +2619,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -2667,11 +2667,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -2866,11 +2866,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 129.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -3058,10 +3058,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -3186,11 +3186,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -3234,11 +3234,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -3561,10 +3561,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -3673,11 +3673,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -3713,11 +3713,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -3888,11 +3888,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -4104,10 +4104,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -4240,11 +4240,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -4288,11 +4288,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -4503,11 +4503,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -4735,10 +4735,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -4887,11 +4887,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -4935,11 +4935,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -5150,11 +5150,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -5390,10 +5390,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -5542,11 +5542,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -5590,11 +5590,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 18 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -5933,10 +5933,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -6053,11 +6053,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -6093,11 +6093,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -6276,11 +6276,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -6500,10 +6500,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -6652,11 +6652,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -6700,11 +6700,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -6939,11 +6939,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -7187,10 +7187,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -7355,11 +7355,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -7403,11 +7403,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -7642,11 +7642,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 300.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -7898,10 +7898,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -8066,11 +8066,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -8114,11 +8114,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 37 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
@@ -41649,11 +41649,11 @@
         },
         {
           "model": "Bonsai 2 27B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 129.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold; the registry states it runs off storage (expert layers offloaded to CPU/SSD on 4GB-VRAM machines)"
         },
         {
           "model": "LFM2.5-24B-A2B",
@@ -41833,10 +41833,10 @@
         },
         {
           "model": "Bonsai 2 4B",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 128.0,
+          "server": "llama.cpp",
+          "tps": 6.0,
           "measured_on": "CUDA",
-          "variant": "cpu",
+          "variant": "cuda",
           "why": ""
         },
         {
@@ -41961,11 +41961,11 @@
         },
         {
           "model": "Qwen3.8-27B Bonsai 2 (ternary)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 50.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Qwen2.5-1.5B-Instruct",
@@ -42009,11 +42009,11 @@
         },
         {
           "model": "Bonsai 2 27B (RTX 3090, restored MTP head)",
-          "server": "llama.cpp (PrismML fork)",
-          "tps": 40.0,
-          "measured_on": "CUDA",
-          "variant": "cpu",
-          "why": ""
+          "server": "",
+          "tps": 0,
+          "measured_on": "",
+          "variant": "",
+          "why": "smallest GGUF is 6 GB > 12 GB this host can hold"
         },
         {
           "model": "Youtu-Parsing-Omni",
