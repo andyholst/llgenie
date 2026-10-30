@@ -178,7 +178,20 @@ def classify(paths: list[str]) -> tuple[list[str], list[str], str | None]:
 
 
 def select(classes: list[str]) -> list[tuple[str, bool, str]]:
-    """One `(job, runs, why)` row per job of `ci.yml`, decided by the classes the diff selected."""
+    """One `(job, runs, why)` row per job of `ci.yml`, decided by the classes the diff selected.
+
+    An unknown class name is a caller bug, not a narrowing (issue #1061): `wanted` is intersected
+    with each job's `needs`, so a name that is not a key of `CLASSES` matches nothing and every job
+    needing it used to be dropped in silence — the quiet empty set `classify()` already refuses to
+    hide (#860), one layer down. Refuse it here, where every caller sees it, rather than trusting
+    each to have validated its own list. An EMPTY list stays legal: it is the documented
+    `--paths ''` case, meaning the always-on jobs only.
+    """
+    unknown = sorted(set(classes) - set(CLASSES))
+    if unknown:
+        raise ValueError(
+            f"unknown class {', '.join(unknown)} — valid classes are {', '.join(CLASSES)}"
+        )
     wanted = set(classes)
     rows: list[tuple[str, bool, str]] = []
     for job, needs in JOBS:

@@ -256,3 +256,41 @@ def test_the_library_and_the_cli_agree_on_an_unreadable_diff():
     assert wide, "the reason is what the log prints"
     # And the empty case is exit 0, not a red: nothing to fix, but everything selected.
     assert set(cs.classify([])[0]) == set(cs.CLASSES)
+
+
+# ---- issue #1061: an unknown class is a caller bug, not a narrowing --------------
+
+def test_select_refuses_an_unknown_class_naming_it_and_the_valid_set():
+    """A mistyped class used to select 2 of 10 jobs with no error (issue #1061)."""
+    with pytest.raises(ValueError) as excinfo:
+        cs.select(["tests_typo"])
+
+    message = str(excinfo.value)
+    assert "tests_typo" in message, message
+    # Every real class is named, so the caller does not have to read the source to fix the typo.
+    valid = [name for name in cs.CLASSES if name not in "tests_typo"]
+    assert all(name in message for name in valid), message
+
+
+def test_select_names_every_unknown_entry_not_just_the_first():
+    with pytest.raises(ValueError) as excinfo:
+        cs.select(["unit", "docs", "enginez"])
+
+    message = str(excinfo.value)
+    assert "unit" in message and "enginez" in message, message
+
+
+def test_select_an_empty_class_list_is_legal_and_selects_the_always_on_jobs():
+    """`--paths ''` is the documented always-jobs case: an empty list must not raise."""
+    rows = cs.select([])
+    always = {job for job, needs in cs.JOBS if needs is None}
+
+    assert {job for job, runs, _ in rows if runs} == always
+    assert len(always) < len(cs.JOBS)
+
+
+def test_select_every_real_class_still_returns_every_job():
+    rows = cs.select(list(cs.CLASSES))
+
+    assert len(rows) == len(cs.JOBS)
+    assert all(runs for _, runs, _ in rows)
