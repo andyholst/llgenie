@@ -93,10 +93,44 @@ def test_the_real_tree_documents_every_user_facing_target():
     assert len(info["documented"]) == len(info["targets"])
     assert len(info["wiki"]) > 20, len(info["wiki"])
     assert set(info["fragments"]) == set(info["wiki"]), "every note has exactly one index row"
-    assert set(info["changes_links"]) == {stem + ".md" for stem in info["wiki"]}, \
-        "the rendered CHANGES.md links every note once"
+
+    # And the committed index may LAG the fragments (issue #1100): a change adds its note and its
+    # `docs/changes.d/` row and never edits `CHANGES.md`, which `make changes-index` renders later.
+    # What the gate does require is membership — an index row that links a note nobody wrote is a
+    # defect — so the comparison is a subset, and the tree may keep growing under it.
+    assert set(info["changes_links"]) <= {stem + ".md" for stem in info["wiki"]}, \
+        info["changes_links"]
     assert "docs/BOTS.md" in info["surface"], info["surface"]
     assert info["change_headings"] == [], info["change_headings"]
+
+
+def test_a_fragment_only_change_is_green_and_the_index_may_lag_the_fragments(tmp_path):
+    """Issue #1100: a change adds `agent-wiki/<note>.md` and `docs/changes.d/<note>.md` and never
+    edits `CHANGES.md` (issue #934 / #1063). The library and the CLI the gate runs must answer the
+    same question about that shape — green — while a row naming a note nobody wrote stays red."""
+
+    # Given a note with its own index row, and a committed CHANGES.md that has not picked it up yet
+    root = _tree(tmp_path, "install: ## Install\n\t@true\n", "# llgenie\n\n```\nmake install\n```\n",
+                 wiki={"2026-10-30-new.md": "# New\n\nIssue #1100.\n"},
+                 changes="# Changes\n\n| Date | Change | Record | Issue / PR |\n|---|---|---|---|\n")
+
+    # When the documentation is checked, through the library and through the CLI the gate runs
+    problems = cd.problems(cd.graph(root))
+    cli = _run(root, "check")
+
+    # Then both agree: a fragment-only change is green, and a stale index is not a defect
+    assert problems == [], problems
+    assert cli.returncode == 0 and "ok:" in cli.stdout, cli.stdout + cli.stderr
+
+    # And an index row that links a note nobody wrote is still a defect, named by both
+    (root / "CHANGES.md").write_text(
+        "# Changes\n\n| Date | Change | Record | Issue / PR |\n|---|---|---|---|\n"
+        "| 2026-10-30 | gone | [n](agent-wiki/2026-10-30-gone.md) | #1100 |\n")
+    problems = cd.problems(cd.graph(root))
+    assert len(problems) == 1, problems
+    assert "CHANGES.md: links agent-wiki/2026-10-30-gone.md, which does not exist" in problems[0]
+    red = _run(root, "check")
+    assert red.returncode != 0 and "which does not exist" in red.stderr, red.stderr
 
 
 def test_the_report_names_documented_missing_work_records_and_the_index():

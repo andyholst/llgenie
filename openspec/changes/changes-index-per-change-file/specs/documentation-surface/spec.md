@@ -64,12 +64,16 @@ WHEN the fragments change
 THEN `make changes-index` rewrites `CHANGES.md` to exactly the rendered table, and rendering twice
 produces byte-identical output.
 
-#### Scenario: the committed table is the renderer's output
-Given the real checkout,
-When   `changes_index.py render` runs,
-Then   its output equals the committed `CHANGES.md`.
+The gate MUST NOT require the committed table to be current (issue #1100): a change that added only
+its note and its fragment is green, and `make changes-index-report` says how far behind the index is.
+Only a row that disagrees with the fragments — one linking a note nobody wrote — fails.
 
-- **Test:** `tests/test_changes_index.py::test_the_real_index_renders_the_committed_changes_md`
+#### Scenario: the committed table is the renderer's output, or is reported behind it
+Given the real checkout,
+When   the fragments are rendered, checked and reported,
+Then   every fragment parses, one row stands for every note, and `CHANGES.md` is accepted whether it already carries every row or reads `N row(s) behind`.
+
+- **Test:** `tests/test_changes_index.py::test_the_real_index_accepts_a_committed_changes_md_that_lags_the_fragments`
 
 #### Scenario: the gate still fails when the README cannot reach the index
 Given a README with no link to `CHANGES.md`,
