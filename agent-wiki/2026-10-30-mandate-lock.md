@@ -1,0 +1,23 @@
+# Author mandate lock (issues #976/#988/#1031, PR #1033)
+
+What was verified: `tests/test_pr_authors.py` carries a regression lock asserting the author
+rule keeps the post-#840 wording —
+
+- `AGENTS_MANDATE` equals `## A PR's commits are authored through an allowed email — no one else`
+  (the shipped string, not the older exact-pair "by Andy Holst or Asimov Agent — no one else")
+- `AGENTS.md` carries "The EMAIL is the gate" and "they PASS" (not "they FAIL")
+
+It reds the tree the moment the #977 author-gate revert hunk (which had restored the old wording
+as a doc-vs-code contradiction) lands. Verified: `pytest tests/test_pr_authors.py` → 29 passed
+including the lock.
+
+Spec / issue / PR: issues #976, #988, #1031; PR #1033.
+
+Measured verification at head `7eb2d84c` (after the push that landed this record):
+- holds gate run 40974911311 → completed/success (no do-not-merge label present)
+- CI run 40974911595 → in_progress (no completed-run verdict yet at this head; not claimed)
+- local gates: `check_pr_authors` over `f244efe8..7eb2d84c` → OK; `make check-docs` → ok (a local pass, not a CI run)
+- executed suite at head `75c83814` (final pushed head of this record): `pytest tests/test_pr_authors.py` → **29 passed in 2.97s, exit 0**
+- pushed+verified fork ref (resolves the local-only report): `git ls-remote --heads https://github.com/andyholst/llgenie.git fix/1031-author-alias-mandate` → **`b7a406f1`** (change-record on the pushed head)
+- fresh CI at final pushed head `e29035e2`: run **40975428531** in_progress (openspec, guard, holds, ci-images, top-tier pass; linux/unit, lint, install, agents-read, scanner pending) — no completed-run verdict yet, not claimed
+

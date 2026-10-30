@@ -570,3 +570,32 @@ def test_every_spec_scenario_has_given_when_then_and_a_test():
         assert match, f"scenario {head!r} names no test"
         name = match[0].split("::")[-1].strip().strip("`")
         assert f"def {name}(" in this_file, f"scenario {head!r} names {name!r}, which is not a test here"
+
+
+# ---------------------------------------------------------------------------
+# Requirement: the author rule's mandate and AGENTS.md text must not regress
+# to the pre-#840 exact-pair wording (issues #976/#988/#1031, #977 revert guard)
+# ---------------------------------------------------------------------------
+SHIPPED_MANDATE = "## A PR's commits are authored through an allowed email — no one else"
+def test_the_author_mandate_and_agents_md_keep_the_allowed_email_wording():
+    """The gate's mandate and AGENTS.md must keep the post-#840 wording.
+
+    #977 attempted to revert AGENTS.md/AGENTS_MANDATE to the older
+    "by Andy Holst or Asimov Agent — no one else" + "they FAIL" phrasing, which is
+    false against the ALIASES gate (Andy/andyholst/Mr. Asimov pass) and regresses
+    what #840/#993 shipped. This test reds if that revert ever lands.
+    """
+    # Given the gate's mandate
+    # When  the sentence is compared to the shipped wording
+    # Then  it must not name the old exact-pair phrase
+    assert cpa.AGENTS_MANDATE == SHIPPED_MANDATE, (
+        "the mandate must be the shipped 'allowed email' phrasing, not a revert "
+        f"to an exact-pair wording ({cpa.AGENTS_MANDATE!r})"
+    )
+    # And the AGENTS.md section must keep the address-identity rule, not "they FAIL"
+    agents = (REPO_ROOT / "AGENTS.md").read_text()
+    assert "The EMAIL is the gate" in agents, "AGENTS.md must carry the email-as-identity bullet"
+    assert "they PASS" in agents, "AGENTS.md must not regress to the old 'they FAIL' wording"
+    assert cpa.AGENTS_MANDATE in agents, (
+        "the mandate sentence must appear in AGENTS.md so the two cannot drift"
+    )
