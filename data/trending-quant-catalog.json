@@ -1073,7 +1073,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
@@ -5871,7 +5870,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
@@ -5933,7 +5931,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
@@ -15864,7 +15861,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
@@ -21903,7 +21899,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
@@ -22765,7 +22760,6 @@
       "llama.cpp (PrismML fork)": {
         "arch": [
           "cpu",
-          "cuda",
           "metal",
           "vulkan"
         ],
