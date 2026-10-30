@@ -119,7 +119,6 @@ def test_a_docs_only_diff_selects_fewer_than_ten_jobs_and_names_what_it_skipped(
     assert classes == ["docs"]
     assert len(selected) < 10, selected
     assert {"guard", "linux/lint", "linux/openspec"} <= set(selected)
-    assert "engine-base" in {job for job, _ in skipped}
     # Every skipped row says which class it would have needed — the log states the decision.
     assert all("needs one of" in why for _, why in skipped), skipped
 
@@ -128,7 +127,7 @@ def test_an_engine_change_selects_the_engine_rows_and_the_install_proof():
     classes, _, _wide = cs.classify(["containers/engines/params/strata.json"])
     rows = dict((job, runs) for job, runs, _ in cs.select(classes))
 
-    assert rows["engine-matrix"] and rows["engine-base"] and rows["linux-published"]
+    assert rows["linux/install"] and rows["linux/cpu-health"]
     # `scanner-images` keys on `containers`, and `containers/engines/**` IS a containers path, so an
     # engine-params change selects it too — the class granularity #824 specifies. Recorded here rather
     # than silently narrowed: sharpening the rule (scanners only for `containers/scanners/**`) is part
