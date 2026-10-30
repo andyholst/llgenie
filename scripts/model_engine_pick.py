@@ -35,6 +35,7 @@ model and its top engine. Stdlib only.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -1006,6 +1007,7 @@ def repo_for(model: dict) -> str:
 
 
 HUB_CACHE_TTL = int(os.environ.get("LLGENIE_HUB_CACHE_TTL", "3600"))  # seconds; 0 = off
+HUB_SNAPSHOT_ENV = "LLGENIE_HUB_SNAPSHOT"  # a recorded Hub answer file: replay, never read (issue #1080)
 
 
 def _hub_cache_dir() -> Path:
@@ -1066,32 +1068,188 @@ def _hub_open(req: urllib.request.Request, timeout: float):
     return hub_open(req, timeout=timeout, opener=_ipv4_urlopen)
 
 
-def _hub_json(url: str):
-    """GET a Hub API URL as JSON. Answers are cached on disk for HUB_CACHE_TTL.
+class HubSnapshotMissing(RuntimeError):
+    """A Hub URL the recording does not carry (issue #1080).
 
-    The transient budget is the shared one (`hf_auth.hub_open`, issue #339): a 429
-    waits the Hub's own window (twice at most), 5xx and transport errors retry on the
-    doubling ladder, and a definitive status — a missing or gated repo — raises on the
-    first answer. This used to be a second ladder of its own (3 tries), which is how
-    the macos unit lane turned one exhausted 429 into "this repo has no files".
+    Raised in replay mode instead of reading the Hub: the recording IS the source of answers, so a
+    URL missing from it is a defect in the recording (regenerate it), never a reason to go online.
+    """
+
+
+_SNAPSHOTS: dict[tuple[str, int], dict] = {}
+_RECORDING: dict[str, dict] | None = None
+
+
+def _snapshot_path() -> Path | None:
+    value = (os.environ.get(HUB_SNAPSHOT_ENV) or "").strip()
+    return Path(value) if value else None
+
+
+def _load_snapshot(path: Path) -> dict:
+    """The recording at `path`, cached by path + mtime so a rewrite inside one process is seen."""
+    try:
+        key = (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        raise HubSnapshotMissing(
+            f"[model_engine_pick] no Hub recording at {path} ({HUB_SNAPSHOT_ENV}); "
+            "run `make render-trend-list-matrix` to record one") from None
+    if key not in _SNAPSHOTS:
+        _SNAPSHOTS[key] = json.loads(path.read_text())
+    return _SNAPSHOTS[key]
+
+
+def _hub_compact(url: str, data, status: int | None = None) -> dict:
+    """One Hub answer in the recorded shape — only what the consumers read (issue #1080).
+
+    A tree answer is `[[path, size], ...]` for its file entries (dirs and oids are never read by
+    `gguf_weights`, `_snapshot` or `plan_download`); a search answer is `[repo id, ...]`; a definitive
+    refusal — the Hub's own 404 for a missing or gated repo — is `{"error": {"status": 404}}`, so the
+    recording carries the whole conversation and replay answers exactly as the Hub did.
+    """
+    if status is not None:
+        return {"error": {"status": status}}
+    if not isinstance(data, list):
+        raise ValueError(f"[model_engine_pick] {url}: a Hub answer of type {type(data).__name__} cannot be recorded")
+    if "/tree/" in url:
+        return {"tree": [[f.get("path", ""), int(f.get("size") or 0)] for f in data if f.get("type") == "file"]}
+    return {"ids": [h.get("id") for h in data]}
+
+
+def _hub_recorded(url: str, snapshot: dict) -> list:
+    """The answer for `url` rebuilt from a recording, or `HubSnapshotMissing`."""
+    entry = snapshot.get("trees", {}).get(url)
+    if entry is not None:
+        return [{"path": p, "size": s, "type": "file"} for p, s in entry]
+    entry = snapshot.get("searches", {}).get(url)
+    if entry is not None:
+        return [{"id": i} for i in entry]
+    error = snapshot.get("errors", {}).get(url)
+    if error is not None:
+        from email.message import Message
+        code = int(error.get("status") or 0)
+        raise urllib.error.HTTPError(url, code, f"recorded Hub answer {code}", Message(), None)
+    raise HubSnapshotMissing(
+        f"[model_engine_pick] {url} is not in the Hub recording; "
+        "run `make render-trend-list-matrix` to record it")
+
+
+def _reset_tree_memo() -> None:
+    """`_TREE_CACHE` is keyed by repo@revision alone, so another Hub source must not be served from it."""
+    _TREE_CACHE.clear()
+
+
+@contextlib.contextmanager
+def hub_snapshot_file(path):
+    """Replay the Hub answers recorded at `path` for the duration of the block (issue #1080).
+
+    Inside the block `_hub_json` reads the recording only: no HTTP request and no Hub disk cache, and
+    a URL the recording does not carry raises `HubSnapshotMissing`. `LLGENIE_HUB_SNAPSHOT=<file>` does
+    the same for a whole process. Recording and replaying are refused together: one source of Hub
+    answers is the point.
+    """
+    if _RECORDING is not None:
+        raise ValueError("[model_engine_pick] a block that records Hub answers cannot replay a recording")
+    previous = os.environ.get(HUB_SNAPSHOT_ENV)
+    os.environ[HUB_SNAPSHOT_ENV] = str(path)
+    _reset_tree_memo()
+    try:
+        yield Path(path)
+    finally:
+        if previous is None:
+            os.environ.pop(HUB_SNAPSHOT_ENV, None)
+        else:
+            os.environ[HUB_SNAPSHOT_ENV] = previous
+        _reset_tree_memo()
+
+
+@contextlib.contextmanager
+def hub_recording():
+    """Record every Hub answer read inside the block, for `write_hub_snapshot` (issue #1080).
+
+    Yields the `{url: answer}` dict it fills. The reads themselves are the ordinary live reads, so a
+    recording can only ever contain what the code path actually consumed.
+    """
+    global _RECORDING
+    if _RECORDING is not None:
+        raise ValueError("[model_engine_pick] a Hub recording is already in progress")
+    if _snapshot_path() is not None:
+        raise ValueError(f"[model_engine_pick] {HUB_SNAPSHOT_ENV} is set: this block replays a "
+                         "recording, it cannot record one")
+    _RECORDING = {}
+    _reset_tree_memo()
+    try:
+        yield _RECORDING
+    finally:
+        _RECORDING = None
+        _reset_tree_memo()
+
+
+def write_hub_snapshot(path, answers: dict, note: str = "") -> Path:
+    """Write a recording (`{url: answer}`) as the JSON file `hub_snapshot_file` reads (issue #1080)."""
+    trees, searches, errors = {}, {}, {}
+    for url, entry in answers.items():
+        if "tree" in entry:
+            trees[url] = entry["tree"]
+        elif "error" in entry:
+            errors[url] = entry["error"]
+        else:
+            searches[url] = entry["ids"]
+    doc = {"note": note or f"Hub answers replayed by {HUB_SNAPSHOT_ENV}; regenerate with "
+                          "`make render-trend-list-matrix`",
+           "trees": dict(sorted(trees.items())),
+           "searches": dict(sorted(searches.items())),
+           "errors": dict(sorted(errors.items()))}
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=1) + "\n")
+    return path
+
+
+def _hub_json(url: str):
+    """GET a Hub API URL as JSON — or read it from the recording (issue #1080).
+
+    DEFAULT (no `LLGENIE_HUB_SNAPSHOT`, no `hub_snapshot_file`): the live read, cached on disk for
+    HUB_CACHE_TTL. The transient budget is the shared one (`hf_auth.hub_open`, issue #339): a 429
+    waits the Hub's own window (twice at most), 5xx and transport errors retry on the doubling
+    ladder, and a definitive status — a missing or gated repo — raises on the first answer. This used
+    to be a second ladder of its own (3 tries), which is how the macos unit lane turned one exhausted
+    429 into "this repo has no files".
+
+    REPLAY: the answer comes from the recording and the Hub is never touched — no request, no disk
+    cache, and a URL the recording does not carry raises `HubSnapshotMissing` instead of falling back
+    to the network (a silent fallback would put the Hub back inside a gate that claims to be hermetic).
     """
     import hashlib
     import time
+    snapshot = _snapshot_path()
+    if snapshot is not None:
+        return _hub_recorded(url, _load_snapshot(snapshot))
     cache = _hub_cache_dir() / (hashlib.sha256(url.encode()).hexdigest() + ".json")
+    data = None
     if HUB_CACHE_TTL and cache.exists() and time.time() - cache.stat().st_mtime < HUB_CACHE_TTL:
         try:
-            return json.loads(cache.read_text())
+            data = json.loads(cache.read_text())
         except ValueError:
-            pass
-    req = authorize(urllib.request.Request(url, headers={"User-Agent": "llgenie"}))
-    with _hub_open(req, 30) as r:
-        data = json.load(r)
-    if HUB_CACHE_TTL and data is not None:
+            data = None
+    if data is None:
+        req = authorize(urllib.request.Request(url, headers={"User-Agent": "llgenie"}))
         try:
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(data))
-        except OSError:
-            pass
+            with _hub_open(req, 30) as r:
+                data = json.load(r)
+        except urllib.error.HTTPError as e:
+            # a definitive refusal is part of the conversation, so a recording replays it; a transient
+            # blip is re-raised and NOT recorded (the next call must still try) — issue #1080
+            if _RECORDING is not None and e.code not in TRANSIENT_HTTP:
+                _RECORDING[url] = _hub_compact(url, None, status=e.code)
+            raise
+        if HUB_CACHE_TTL and data is not None:
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_text(json.dumps(data))
+            except OSError:
+                pass
+    if _RECORDING is not None:
+        _RECORDING[url] = _hub_compact(url, data)
     return data
 
 
@@ -1653,6 +1811,8 @@ def mlx_repos(model: dict) -> list[str]:
     try:
         hits = _hub_json(f"{HF}/api/models?search={urllib.parse.quote(name)}&filter=mlx"
                          f"&sort=downloads&direction=-1&limit=50")
+    except HubSnapshotMissing:
+        raise  # a gap in a recording is not "this model has no MLX conversions" (issue #1080)
     except Exception:  # noqa: BLE001  (Hub down: no conversions)
         return []
     want = (name + "-mlx").lower()
@@ -1672,6 +1832,8 @@ def tensorfold_repos(model: dict) -> list[str]:
         return []
     try:
         hits = _hub_json(f"{HF}/api/models?author={TENSORFOLD_ORG}&search={urllib.parse.quote(name)}&limit=100")
+    except HubSnapshotMissing:
+        raise  # a gap in a recording is not "TensorFold publishes none of it" (issue #1080)
     except Exception:  # noqa: BLE001
         return []
     want = f"{TENSORFOLD_ORG}/{name}-MLX-".lower()

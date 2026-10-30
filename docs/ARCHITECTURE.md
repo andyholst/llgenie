@@ -74,7 +74,11 @@ previews). Nothing is published without drift, and the bot never merges.
    `scripts/trend_list_matrix.py` renders the same list per `(arch, vram, ram)` into
    `tests/fixtures/trend-list-matrix.json`, which `make check-trend-list-matrix` guards and
    `llgenie --matrix` reproduces for one `(vram, ram, arch)`; `trend_rows` asks `trend_list`
-   for the RAM gate too, so it never renders a row `matrix()` did not consider.
+   for the RAM gate too, so it never renders a row `matrix()` did not consider. The guard is
+   hermetic (issue #1080): the `why` strings ask the Hub for a repo's real GGUF/MLX file sizes,
+   so the render records those answers into `tests/fixtures/hub-snapshot.json` and the check
+   replays them — `matrix()` on the vendored registry is a pure function, and a URL the
+   recording does not carry fails loudly instead of reading the Hub.
 5. **Engine skill** — `skills/engines/<id>/SKILL.md` is the one engine description: install
    steps, `container:` blocks per backend (`apt`, `cmake`, base image), the `detect`
    command, and the native `metal` path. `scripts/engine_skills.py` is the generic loader and
@@ -612,7 +616,9 @@ trend matrix lives under `tests/fixtures/`:
   401/403/404 is definitive on the first attempt. Before that the check sent the token to the
   model's HTML page, which the Hub answered with 429, and 18 live links read as dead.
 - `tests/fixtures/trend-list-matrix.json` is the rendered trend matrix
-  (`make render-trend-list-matrix`, checked by `make check-trend-list-matrix`).
+  (`make render-trend-list-matrix`, checked by `make check-trend-list-matrix`), and
+  `tests/fixtures/hub-snapshot.json` is the Hub answers that render consumed — the check replays
+  them, so the gate reads no network (issue #1080).
 
 ## CI
 
@@ -1065,6 +1071,9 @@ issue #750),
 a listed row is either served or says why — never a blank server beside a blank reason, which
 is what the `system_ram_min` floor produced while `trend_rows` asked without the RAM — issues
 #669, #750),
+`tests/test_hub_snapshot.py` (the gate rebuilds that committed matrix from the recorded Hub
+answers with every HTTP entry point refusing to run, a URL the recording lacks raises instead of
+reading the Hub, and the default live read is unchanged — issue #1080),
 `tests/test_hub_probe.py` (401/403 is `gated`, i.e. the file exists but this credential may
 not read it, so a gated link verifies instead of reading as missing — issues #418, #750), and
 `tests/test_registry_review.py` (the review's real `selection()` over a real store in a

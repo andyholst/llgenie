@@ -315,10 +315,10 @@ sync-quant-catalog: ## Regenerate data/trending-quant-catalog.json + its test fi
 	python3 scripts/gen_trending_quant_catalog.py
 check-quant-catalog: ## CI: fail when data/trending-quant-catalog.json differs from what the generator produces (the HF class table is a committed, generator-maintained artifact — not llgenie runtime logic)
 	python3 scripts/gen_trending_quant_catalog.py --check
-render-trend-list-matrix: ## Rewrite tests/fixtures/trend-list-matrix.json from matrix(registry, vram, ram, arch) for the vendored registry
+render-trend-list-matrix: ## Rewrite tests/fixtures/trend-list-matrix.json from matrix(registry, vram, ram, arch) for the vendored registry, and record the Hub answers it read into tests/fixtures/hub-snapshot.json
 	python3 scripts/trend_list_matrix.py
-check-trend-list-matrix: ## CI: fail when the committed trend-list matrix differs from matrix() on the vendored registry
-	python3 scripts/trend_list_matrix.py --check
+check-trend-list-matrix: ## CI: fail when the committed trend-list matrix differs from matrix() on the vendored registry — hermetic: it replays tests/fixtures/hub-snapshot.json (issue #1080; LIVE=1 for the live comparison)
+	python3 scripts/trend_list_matrix.py --check $(if $(LIVE),--live,)
 render-engine-skill-gap: ## Rewrite data/engine-skill-gap.json (per-engine status + the models only unskilled engines serve) from the vendored registry, the skills and the dated decisions
 	python3 scripts/engine_skill_gap.py render
 check-engine-skill-gap: ## CI: fail when a registry engine has no skill and no dated decision in data/unsupported-engines.json, or when data/engine-skill-gap.json is stale
