@@ -24,4 +24,4 @@
       field admits a model, what the order is, what a bigger card's figure is not); `CHANGES.md`
       indexes the note.
 - [x] `make openspec-validate NAME=card-gate-measured-vram` green.
-- [ ] `make test-unit` green with the new rule, and `make lint` / `make check-docs` green.
+- [x] `make test-unit` green with the new rule, and `make lint` / `make check-docs` green.
