@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -16,12 +15,25 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
 
-import hf_auth  # noqa: E402
-import hf_download  # noqa: E402
-import llgenie_serve  # noqa: E402
-import model_engine_pick as mp  # noqa: E402
+from scripts import hf_auth
+from scripts import hf_download
+from scripts import llgenie_serve
+from scripts import model_engine_pick as mp
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_budget(monkeypatch):
+    """Every retry test asserts one whole 429 budget, so each starts from a clean counter.
+
+    `scripts.hf_auth._rate_limited` is a module global that `hub_open` increments
+    across calls and only a non-429 resets. Under the one-import root (issue #796)
+    `test_hf_download_retry.py` shares that same module object with `test_hf_auth.py`,
+    whose stderr-announce test drives a 429 opener to exhaustion and leaves the
+    counter at RATE_LIMIT_WAITS+1. Without a per-test reset the first 429 here raises
+    immediately (issue #953 regression, measured: 2 failed under alphabetical order).
+    """
+    monkeypatch.setattr(hf_auth, "_rate_limited", 0)
 
 
 def _too_many(seconds):

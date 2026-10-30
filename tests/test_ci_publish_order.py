@@ -24,8 +24,6 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 PIPELINE = REPO / ".github" / "workflows" / "pipeline.yml"
-sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "scripts"))
 
 import base_ref  # noqa: E402  (the base ref resolver, issue #925)
 import scripts.install_engine_launchers as iel  # noqa: E402
