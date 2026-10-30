@@ -827,7 +827,7 @@ def rank_models(registry: dict, arch: str | None = None, gb: float | None = None
     """trend_list() models that have a runnable engine here, README order kept."""
     ids = engine_ids()
     rows = []
-    for m in trend_list(registry, gb):
+    for m in trend_list(registry, gb, arch=arch):
         engines = rank_engines(m, arch, ids, gb)
         if engines:
             rows.append({"model": m, "engines": engines, "tps": engines[0]["tps"]})

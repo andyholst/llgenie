@@ -154,7 +154,10 @@ def test_ac1_rows_are_the_readme_models_that_fit_in_readme_order(tmp_path, platf
     # followed by the rows that table does not rank in the store's own trend order — never
     # the store file's positions.
     reg = mp.load_registry()
-    fit = {m["name"]: m for m in reg["models"] if mp.fits(m, gb, ram)}
+    # `offer`/`recommend` thread the host arch into the gate (#669): a measured run admits
+    # a model only if THIS host's arch can reproduce it, so Apple/Metal runs never gate a
+    # cuda/rocm/vulkan/cpu host. The oracle must call fits with the same arch the product uses.
+    fit = {m["name"]: m for m in reg["models"] if mp.fits(m, gb, ram, arch=backend)}
     ranked = [n for n in _tier_table(gb) if n in fit]
     today = mp.registry_today(reg)
     rest = sorted((fit[n] for n in fit if n not in set(ranked)), key=lambda m: mp.trend_key(m, today))

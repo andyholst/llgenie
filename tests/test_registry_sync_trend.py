@@ -65,11 +65,12 @@ HARDWARE = (
 )
 
 
-def _fits_card(model: dict, gb: float) -> bool:
+def _fits_card(model: dict, gb: float, arch: str | None = None) -> bool:
     """The product's own fit decision, never a re-derivation from one field: `rank_models`
     gates on `mp.fits` (the store's measured `vram_min`, else the README's `vram_tier`,
-    issue #669), so a test that restates the gate must call it."""
-    return mp.fits(model, gb)
+    issue #669), so a test that restates the gate must call it WITH the arch the product
+    threads in (#669): an Apple/Metal run never gates a cuda/rocm/vulkan/cpu host."""
+    return mp.fits(model, gb, arch=arch)
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +106,7 @@ def test_october_5_fixture_prefers_a_known_card_over_a_card_less_box():
     # to the gate re-derives this list instead of failing on a stale name.
     assert reg["generated_utc"] == OCTOBER_5
     expected = [m["name"] for m in reg["models"]
-                if mp.fits(m, 16) and mp.rank_engines(m, "cuda", gb=16)]
+                if mp.fits(m, 16, arch="cuda") and mp.rank_engines(m, "cuda", gb=16)]
     assert [row[1] for row in rows] == expected
     assert len(expected) > 5, "the snapshot must still list a real 16 GB set"
     assert by_id["qwen3.8-27b"][2:6] == ("llama.cpp", "llama.cpp", 43.7, "CUDA")
@@ -289,7 +290,7 @@ def test_rank_follows_the_given_vram_ram_and_arch(live_sync):
             for model in reg["models"]:
                 engines = mp.rank_engines(model, arch, gb=vram)
                 listed = next((r for r in rows if r["model"]["id"] == model["id"]), None)
-                if not _fits_card(model, vram) or not engines:
+                if not _fits_card(model, vram, arch) or not engines:
                     assert listed is None
                     continue
                 assert listed is not None
