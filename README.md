@@ -332,9 +332,11 @@ make check-quant-catalog  # CI: fail if the committed quant catalog differs from
                           # GATED (401/403 — the file exists, the token may not read it) is reported as
                           # `gated=N` and does not fail the sync, and only a DEAD link (404/410, 5xx, a
                           # failed read) reds it
-make render-trend-list-matrix  # rewrite tests/fixtures/trend-list-matrix.json: the trending
-                              # list for every arch x vram x ram, from `llgenie --matrix`
-make check-trend-list-matrix   # CI: fail if that file differs from a fresh matrix() call
+make render-trend-list-matrix  # rewrite tests/fixtures/trend-list-matrix.json (the trending list for
+                              # every arch x vram x ram, from `llgenie --matrix`) AND record the Hub
+                              # answers that build read into tests/fixtures/hub-snapshot.json
+make check-trend-list-matrix   # CI: fail if that file differs from matrix() — hermetic: it replays
+                              # the recorded Hub answers, so no route is needed (LIVE=1 = live read)
 make registry-change-report    # print what the working-tree store changed vs HEAD: added/removed/
                                # renamed models, new engines, contract keys, README rows, table counts
 make sync-change-issue         # open ONE issue stating that change (the weekly sync runs it; it

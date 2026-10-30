@@ -18,6 +18,14 @@ The committed copy is tests/fixtures/trend-list-matrix.json. `make
 render-trend-list-matrix` rewrites it after a registry sync. The unit test
 compares `matrix()` to that file, so a sync that forgets the rewrite fails
 CI and the pull-request diff is the new list.
+
+`--check` is HERMETIC (issue #1080): it replays the Hub answers recorded in
+tests/fixtures/hub-snapshot.json, so `matrix()` — whose `why` strings ask the Hub
+for a repo's real file sizes (`gguf_weights`/`mlx_repos`) — is a pure function of
+the vendored registry plus that recording and the gate needs no route at all.
+`--check --live` is the old live comparison; the render path records the snapshot
+and writes both files in one run, so the fixture can never describe a Hub answer
+the recording does not carry. Regenerating: `make render-trend-list-matrix`.
 """
 from __future__ import annotations
 
@@ -30,6 +38,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import model_engine_pick as mp  # noqa: E402
 
 FIXTURE = REPO / "tests" / "fixtures" / "trend-list-matrix.json"
+SNAPSHOT = REPO / "tests" / "fixtures" / "hub-snapshot.json"
 ARCHS = ("cuda", "rocm", "vulkan", "metal", "cpu")
 VRAMS = (8, 16, 24, 48)
 RAMS = (8, 32, 60, 64)
@@ -86,18 +95,29 @@ def build() -> dict:
 
 
 def main() -> int:
-    check = "--check" in sys.argv[1:]
-    fresh = json.dumps(build(), indent=2) + "\n"
+    args = sys.argv[1:]
+    check = "--check" in args
+    live = "--live" in args
     if check:
+        if live:
+            fresh = json.dumps(build(), indent=2) + "\n"
+        else:
+            with mp.hub_snapshot_file(SNAPSHOT):
+                fresh = json.dumps(build(), indent=2) + "\n"
         have = FIXTURE.read_text() if FIXTURE.exists() else ""
         if have != fresh:
             print(f"[trend-list-matrix] {FIXTURE.relative_to(REPO)} is stale. "
                   "Run make render-trend-list-matrix.", file=sys.stderr)
             return 1
-        print(f"[trend-list-matrix] OK {FIXTURE.relative_to(REPO)} ({len(CASES)} cases)")
+        source = "live" if live else f"recorded {SNAPSHOT.relative_to(REPO)}"
+        print(f"[trend-list-matrix] OK {FIXTURE.relative_to(REPO)} ({len(CASES)} cases, {source})")
         return 0
+    with mp.hub_recording() as recorded:
+        fresh = json.dumps(build(), indent=2) + "\n"
     FIXTURE.write_text(fresh)
-    print(f"[trend-list-matrix] wrote {FIXTURE.relative_to(REPO)} ({len(CASES)} cases)")
+    mp.write_hub_snapshot(SNAPSHOT, recorded)
+    print(f"[trend-list-matrix] wrote {FIXTURE.relative_to(REPO)} ({len(CASES)} cases) and "
+          f"{SNAPSHOT.relative_to(REPO)} ({len(recorded)} Hub answers)")
     return 0
 
 
