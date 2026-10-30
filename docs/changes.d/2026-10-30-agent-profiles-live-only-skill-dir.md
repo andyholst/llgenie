@@ -1,0 +1,1 @@
+| 2026-10-30 | issue #1086: the agent-profile gate sees a whole live-only skill directory (`absent-from-tree`, one finding per directory) | [2026-10-30-agent-profiles-live-only-skill-dir.md](agent-wiki/2026-10-30-agent-profiles-live-only-skill-dir.md) | #1086, #1060 |

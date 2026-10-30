@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -798,7 +799,9 @@ def _mirror(tmp_path: Path, skill: str = "llgenie-bot-orchestration") -> tuple[P
     """A tree profile AND its live mirror, identical: (root, agents dir, live profiles home).
 
     The live side is a whole profile home, not just the skill, because that is what the gate reads on a
-    host — and it is why the reverse comparison has to bound the surface it walks.
+    host — and it is why the reverse comparison has to bound the surface it walks. The Hermes home's
+    own `skills/` (the library every profile is seeded from) is created beside `profiles/`, because
+    that is where the gate looks for it when it decides what is a lane's own skill.
     """
     root = tmp_path / "tree"
     agents = root / "agents"
@@ -816,7 +819,234 @@ def _mirror(tmp_path: Path, skill: str = "llgenie-bot-orchestration") -> tuple[P
     (live_home / "SOUL.md").write_text(soul)
     (live_home / "skills" / skill / "SKILL.md").write_text(SKILL_BODY.format(name=skill))
     (live_home / "skills" / skill / "references" / "known.md").write_text("known\n")
+    write_shared_library(tmp_path)
     return root, agents, live_home.parent
+
+
+def write_shared_library(tmp_path: Path, names: tuple[str, ...] = ("docx", "p5js")) -> Path:
+    """The Hermes home's own `skills/`: the library every profile on the host is seeded from.
+
+    It sits beside the `profiles/` directory, which is the only structural way to tell a lane's own
+    skill from the ~116 skills the machine installs into every profile (issue #1086).
+    """
+    library = tmp_path / "skills"
+    for name in names:
+        d = library / "productivity" / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(SKILL_BODY.format(name=name))
+    return library
+
+
+def _lane_tree(tmp_path: Path, tree_skills: dict[str, str] | None = None) -> tuple[Path, Path, Path]:
+    """A tree profile whose `skills/` is EMPTY (the five-lane shape) and a live profile mirroring it.
+
+    `tree_skills` maps a relative skill path to a file the tree carries there; the live side gets the
+    same path plus whatever the test adds. Returns (root, agents dir, live profiles home).
+    """
+    root = tmp_path / "tree"
+    agents = root / "agents"
+    (agents / "someone").mkdir(parents=True)
+    (agents / "manifest.json").write_text('{"profiles": [{"name": "someone", "rules": ["never-merge"]}]}')
+    soul = "# S\n\nNever merge anything; every merge needs the owner.\n"
+    (agents / "someone" / "SOUL.md").write_text(soul)
+    for rel in (tree_skills or {}):
+        path = agents / "someone" / "skills" / rel / "SKILL.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(SKILL_BODY.format(name=path.parent.name))
+    live_home = tmp_path / "profiles" / "someone"
+    live_home.mkdir(parents=True)
+    (live_home / "SOUL.md").write_text(soul)
+    for rel in (tree_skills or {}):
+        path = live_home / "skills" / rel / "SKILL.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(SKILL_BODY.format(name=path.parent.name))
+    write_shared_library(tmp_path)
+    return root, agents, live_home.parent
+
+
+def test_a_whole_live_only_skill_directory_is_one_finding_naming_lane_path_and_count(tmp_path):
+    """The measured defect (#1086): five lanes carry no `skills/` in the tree, so nothing was gated."""
+
+    # Given a tree profile with no skills/ at all, and a live profile that runs a whole lane skill
+    root, agents, profiles = _lane_tree(tmp_path)
+    skill = profiles / "someone" / "skills" / "software-development" / "llgenie-lane-skill"
+    (skill / "references").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(SKILL_BODY.format(name="llgenie-lane-skill"))
+    (skill / "references" / "a.md").write_text("a\n")
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  ONE finding names the lane, the directory's path and its file count — not one per file
+    assert [i["key"] for i in items] == ["absent-from-tree"], items
+    assert items[0]["where"] == "someone/skills/software-development/llgenie-lane-skill", items[0]
+    assert "2 file(s)" in items[0]["detail"], items[0]["detail"]
+    assert "agents/someone/skills/" in items[0]["detail"], items[0]["detail"]
+
+
+def test_a_whole_live_only_skill_directory_beside_the_skill_md_is_named(tmp_path):
+    """A warning whose presence depends on how it is spelled is the test being wrong, not the gate:
+    assert the path the message carries, never one sentence shape."""
+
+    # Given a tree skill the lane has versioned, and a second live skill directory beside it
+    root, agents, profiles = _lane_tree(tmp_path, {"llgenie-bot-orchestration": ""})
+    (profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "SKILL.md").write_text(
+        SKILL_BODY.format(name="llgenie-bot-orchestration"))
+    extra = profiles / "someone" / "skills" / "llgenie-second-skill"
+    extra.mkdir(parents=True)
+    (extra / "SKILL.md").write_text(SKILL_BODY.format(name="llgenie-second-skill"))
+
+    # When  the gate runs
+    wheres = [i["where"] for i in guard.absent_from_tree_findings(root, agents, profiles)]
+
+    # Then  only the unmirrored directory is named, at its own path
+    assert wheres == ["someone/skills/llgenie-second-skill"], wheres
+
+
+def test_the_library_hermes_installs_is_not_a_lane_skill(tmp_path):
+    """The bundle manifest and the hub lock are Hermes's own records of what it installed (structural,
+    not a name list): a skill either record names is the machine's library, never this lane's."""
+
+    # Given a live profile whose skills/ carries a bundled skill, a hub package, and the shared library
+    root, agents, profiles = _lane_tree(tmp_path)
+    skills = profiles / "someone" / "skills"
+    skills.mkdir(parents=True, exist_ok=True)
+    (skills / ".bundled_manifest").write_text("docx:5dec2bad528191d2a82c1b0d4270d6a3\n")
+    (skills / ".hub").mkdir()
+    (skills / ".hub" / "lock.json").write_text(json.dumps({"installed": {"notion": {"source": "hub"}}}))
+    for name in ("docx", "notion"):
+        d = skills / "productivity" / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(SKILL_BODY.format(name=name))
+    shared = profiles / "skills" / "health" / "shared-only"
+    shared.mkdir(parents=True)
+    (shared / "SKILL.md").write_text(SKILL_BODY.format(name="shared-only"))
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  none of the library is a finding — the manifest, the lock and the shared home all count
+    assert items == [], items
+
+
+def test_a_skill_symlinked_out_of_the_profile_is_not_a_lane_skill(tmp_path):
+    """A profile symlinks host-wide skills in (`diagnose-crash -> /usr/share/omarchy/…`); the file
+    lives outside the profile and was never this lane's to version."""
+
+    # Given a live profile whose skills/ holds a symlink to a directory outside it
+    root, agents, profiles = _lane_tree(tmp_path)
+    target = tmp_path / "usr-share" / "diagnose-crash"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text(SKILL_BODY.format(name="diagnose-crash"))
+    (profiles / "someone" / "skills").mkdir(parents=True, exist_ok=True)
+    (profiles / "someone" / "skills" / "diagnose-crash").symlink_to(target, target_is_directory=True)
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  the symlink is not a finding
+    assert items == [], items
+
+
+def test_a_tree_category_directory_is_not_a_skill(tmp_path):
+    """The 52-finding false positive: `skills/software-development/` is Hermes's CATEGORY, not a skill.
+
+    Measured at `d5fb875c`: the tree carries `agents/llgenie-pr-reviever/skills/software-development/
+    llgenie-pr-review/`, and treating the category as a skill made the reverse direction report the
+    whole live category — 52 `absent-from-tree` findings, all shared library, burying the real ones.
+    """
+
+    # Given a tree skill nested in a category, and a live category carrying the same skill plus the
+    # shared library beside it
+    root, agents, profiles = _lane_tree(tmp_path, {"software-development/llgenie-pr-review": ""})
+    live = profiles / "someone" / "skills" / "software-development"
+    for name in ("docx", "p5js"):
+        d = live / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(SKILL_BODY.format(name=name))
+
+    # When  the gate runs
+    items = guard.absent_from_tree_findings(root, agents, profiles)
+
+    # Then  the mirrored skill and the library are silent
+    assert items == [], items
+
+    # And a file the live mirrored skill carries but the tree does not is named, not the category
+    (live / "llgenie-pr-review" / "REFERENCE.md").write_text("x\n")
+    assert [i["where"] for i in guard.absent_from_tree_findings(root, agents, profiles)] == \
+        ["someone/skills/software-development/llgenie-pr-review/REFERENCE.md"]
+
+
+def test_the_check_fails_naming_a_live_only_directory_and_passes_once_it_is_removed(tmp_path,
+                                                                                    monkeypatch, capsys):
+    """The negative control the issue asks for, both directions, through the REAL entry point."""
+
+    # Given a tree and a live profile that agree
+    root, _agents, profiles = _lane_tree(tmp_path)
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))
+    assert guard.main(["check", "--root", str(root)]) == 0
+    capsys.readouterr()
+
+    # When  a whole skill directory exists only in the live profile
+    live = profiles / "someone" / "skills" / "software-development" / "llgenie-lane-skill"
+    live.mkdir(parents=True)
+    (live / "SKILL.md").write_text(SKILL_BODY.format(name="llgenie-lane-skill"))
+
+    # Then  the gate fails and names the path
+    assert guard.main(["check", "--root", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL absent-from-tree: someone/skills/software-development/llgenie-lane-skill" in out, out
+
+    # And when it is removed the gate passes again
+    (live / "SKILL.md").unlink()
+    live.rmdir()
+    assert guard.main(["check", "--root", str(root)]) == 0
+
+
+def test_no_shared_library_means_the_directory_comparison_is_skipped_not_guessed(tmp_path,
+                                                                                 monkeypatch, capsys):
+    """Without the library the gate cannot tell a lane's skill from the machine's, so it must say it
+    did not compare instead of naming the whole library (a skip must be audible, never silent)."""
+
+    # Given a live profiles home with NO shared library beside it
+    root, _agents, profiles = _lane_tree(tmp_path)
+    shutil.rmtree(profiles.parent / "skills")
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))
+    d = profiles / "someone" / "skills" / "llgenie-lane-skill"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(SKILL_BODY.format(name="llgenie-lane-skill"))
+
+    # When  the gate runs
+    code = guard.main(["check", "--root", str(root)])
+
+    # Then  it does not invent the finding, and the skip is printed
+    err = capsys.readouterr().err
+    assert "live-only skill DIRECTORIES were NOT compared" in err, err
+    assert guard.absent_from_tree_findings(root, _agents, profiles) == []
+    assert code == 0, code
+
+
+def test_findings_is_the_union_of_the_reverse_directions_with_the_new_key(tmp_path, monkeypatch):
+    """`findings()` must carry the directory finding too: `check` and `report` both read that list."""
+
+    # Given a live-only file and a live-only whole directory under one lane
+    root, agents, profiles = _mirror(tmp_path)
+    monkeypatch.setenv("HERMES_PROFILES_HOME", str(profiles))
+    (profiles / "someone" / "skills" / "llgenie-bot-orchestration" / "EXTRA.md").write_text("x\n")
+    whole = profiles / "someone" / "skills" / "llgenie-lane-skill"
+    whole.mkdir(parents=True)
+    (whole / "SKILL.md").write_text(SKILL_BODY.format(name="llgenie-lane-skill"))
+
+    # When  every direction runs over the same tree
+    items = guard.findings(root)
+
+    # Then  both shapes are in `findings()`, and the union drops nothing
+    wheres = {i["where"] for i in items if i["key"] == "absent-from-tree"}
+    assert {"someone/skills/llgenie-bot-orchestration/EXTRA.md",
+            "someone/skills/llgenie-lane-skill"} <= wheres, items
+    assert all(i in items for i in guard.absent_from_tree_findings(root, agents, profiles))
+
+
 
 
 def test_a_live_only_reference_file_is_a_finding_naming_profile_and_path(tmp_path):

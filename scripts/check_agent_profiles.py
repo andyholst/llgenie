@@ -35,7 +35,14 @@ Hermes itself loads) and this gate is what keeps it honest:
   the reverse of every comparison above, so a lane's unversioned reference file is named instead of
   being invisible (issue #1069). The two-way comparison is bounded to the surface the tree mirrors
   (`SOUL.md` and the skill directories the tree carries), because a live profile is a whole Hermes
-  home whose data and bundled skill library are not that lane's behaviour.
+  home whose data and bundled skill library are not that lane's behaviour;
+* a whole live skill DIRECTORY with no tree counterpart at the same path (`absent-from-tree`, one
+  finding per directory — issue #1086): five manifest lanes carry no `skills/` in the tree at all, so
+  every skill they run under was invisible. What separates a lane's behaviour from the library Hermes
+  installs into every profile is structural, never a name list: the records Hermes itself writes
+  (`skills/.bundled_manifest`, `skills/.hub/lock.json`), the shared library the profiles are seeded
+  from (`<hermes-home>/skills`, the sibling of the `profiles/` directory), and a symlink out of the
+  profile. None of those is lane behaviour and none is reported.
 
 Usage:
     python3 scripts/check_agent_profiles.py check    # exit 1 on any finding, 2 when the tree is unreadable
@@ -509,10 +516,76 @@ def _bookkeeping(rel: Path) -> bool:
 
     A live profile is a working directory — the agent tooling writes `.DS_Store`, `.curator_*` and
     `__pycache__/` without anyone choosing to. Reporting those would red the gate on its own scratch
-    files and teach the reader to ignore the key (issue #1069).
+    files and teach the reader to ignore the key (issue #1069). A hidden DIRECTORY is bookkeeping too:
+    `.archive/` holds the skills the curator retired, and `.hub/` holds the installer's own records.
     """
     return rel.name == "__pycache__" or any(part.startswith(".") or part == "__pycache__"
                                             for part in rel.parts)
+
+
+#: What Hermes ITSELF records as installed in a profile's `skills/` — the bundle it ships
+#: (`<skill>:<hash>` lines) and the hub packages it fetched (`installed` in its lock file). A skill
+#: either record names is the library, never this lane's behaviour (issue #1086).
+BUNDLED_MANIFEST = ".bundled_manifest"
+HUB_LOCK = (".hub", "lock.json")
+
+
+def installed_library_names(skills_root: Path) -> "set[str]":
+    """The skill names Hermes's own install records name for this profile (bundle + hub)."""
+    names: "set[str]" = set()
+    manifest = skills_root / BUNDLED_MANIFEST
+    if manifest.is_file():
+        try:
+            text = manifest.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            name = line.split(":", 1)[0].strip()
+            if name:
+                names.add(name)
+    lock = skills_root.joinpath(*HUB_LOCK)
+    if lock.is_file():
+        try:
+            data = json.loads(lock.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        installed = data.get("installed") if isinstance(data, dict) else None
+        if isinstance(installed, dict):
+            names.update(name for name in installed if isinstance(name, str))
+    return names
+
+
+def shared_library(live: "Path | None") -> "Path | None":
+    """The skill library every profile under *live* is seeded from, or None when this host has none.
+
+    `live` is the **profiles** directory (`~/.hermes/profiles`); the library is the Hermes home's own
+    `skills/`, its sibling (`~/.hermes/skills`) — Hermes copies it into each profile it creates, next
+    to the bundle it ships. That is the structural answer to "which live skill is the lane's own
+    behaviour": everything in the library, the bundle and the hub belongs to the machine, and only a
+    skill that exists in the library in neither form is the lane's. Measured at `d5fb875c`: 116 live
+    skills per lane profile, 59 in the bundle, 12 in the hub lock, 116 in the shared library — the
+    library covers every one of them, and each lane's own skills are the remainder.
+    """
+    if live is None:
+        return None
+    library = live.parent / SKILLS
+    return library if library.is_dir() else None
+
+
+def _skill_dirs(skills_root: Path) -> "list[Path]":
+    """Every skill directory under a `skills/` root — a directory carrying a `SKILL.md`, at any depth.
+
+    A `skills/` root holds two kinds of directory: the skill itself (`skills/<skill>/SKILL.md`) and
+    Hermes's category (`skills/software-development/<skill>/SKILL.md`). Only the directory carrying a
+    `SKILL.md` is a skill. Treating a category as one made the reverse direction walk a whole live
+    category and report the shared library inside it — measured at `d5fb875c`: 52 false
+    `absent-from-tree` findings under `llgenie-pr-reviever/skills/software-development/`, which buried
+    the real ones. The mirror rule is the sync's own: the same relative path on both sides
+    (`agent_profile_sync.py` writes `dest / rel`).
+    """
+    if not skills_root.is_dir():
+        return []
+    return sorted({p.parent for p in skills_root.rglob(SKILL_FILE) if not p.parent.is_symlink()})
 
 
 def absent_from_tree_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_DIR,
@@ -529,9 +602,10 @@ def absent_from_tree_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_
     `state.db`, `sessions/`, `memories/`, `cron/`, `logs/`, `.curator_backups/`, `worker-outboxes/`,
     plus the shared skill library Hermes bundles into every profile (4,804 files for the planner at
     `ac12cae9`). None of that is lane behaviour, and reporting it would drown the real findings in
-    noise. So only what the tree is the source of truth for is compared: `SOUL.md`, and the files of
-    each skill directory the TREE carries, mirrored at `<live>/skills/<skill>/`. A live skill
-    directory with no tree twin at all is a different question and is issue #1086, not this one.
+    noise. So only what the tree is the source of truth for is compared: `SOUL.md`, the files of each
+    skill directory the TREE carries (mirrored at the same relative path), and — since issue #1086 —
+    a whole live skill directory whose path the tree does not carry, once it is known to be the
+    lane's own behaviour rather than library (see `shared_library()` / `installed_library_names()`).
 
     The content of a live file is never read or printed — only its path and size. A live profile holds
     credentials, and this gate prints to a console.
@@ -541,6 +615,7 @@ def absent_from_tree_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_
     if base is None or not agents.is_dir():
         return []
     profiles, _ = read_manifest(agents)
+    library = shared_library(base)
     items: list[dict] = []
     for profile in profiles:
         name = profile["name"]
@@ -559,26 +634,50 @@ def absent_from_tree_findings(root: Path = REPO_ROOT, agents_dir: Path = AGENTS_
                           f"commit it via an issue+PR under agents/{name}/ (issue #1060)",
             })
         skills_dir = tree_profile / SKILLS
-        if not skills_dir.is_dir():
-            continue
-        for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-            live_skill = live_profile / SKILLS / skill_dir.name
+        tree_skills = {p.relative_to(skills_dir) for p in _skill_dirs(skills_dir)}
+        for rel in sorted(tree_skills):
+            skill_dir = skills_dir / rel
+            live_skill = live_profile / SKILLS / rel
             if not live_skill.is_dir():
                 continue        # no live copy: that is the tree-side direction's business, not this one
             tree_files = {p.relative_to(skill_dir) for p in skill_dir.rglob("*") if p.is_file()}
             for path in sorted(p for p in live_skill.rglob("*") if p.is_file()):
-                rel = path.relative_to(live_skill)
-                if rel in tree_files or _bookkeeping(rel):
+                file_rel = path.relative_to(live_skill)
+                if file_rel in tree_files or _bookkeeping(file_rel):
                     continue
                 items.append({
                     "key": "absent-from-tree",
-                    "where": f"{name}/{SKILLS}/{skill_dir.name}/{rel.as_posix()}",
+                    "where": f"{name}/{SKILLS}/{rel.as_posix()}/{file_rel.as_posix()}",
                     "detail": f"exists ONLY in the live profile ({path.stat().st_size} b) — the tree "
                               f"has no counterpart, so this instruction is unversioned and "
                               f"unreviewable: commit it via an issue+PR under "
-                              f"agents/{name}/{SKILLS}/{skill_dir.name}/ (issue #1060), then "
+                              f"agents/{name}/{SKILLS}/{rel.as_posix()}/ (issue #1060), then "
                               f"`make sync-agent-profile PROFILE={name}` keeps both sides the same",
                 })
+        # A whole live skill directory the tree does not mirror (issue #1086). Without the library
+        # there is no way to tell a lane's skill from the ~116 the machine installs into the profile,
+        # so the comparison is skipped rather than guessed — `main()` says so audibly.
+        if library is None:
+            continue
+        live_skills = live_profile / SKILLS
+        library_names = installed_library_names(live_skills) | \
+            {p.parent.name for p in library.rglob(SKILL_FILE)}
+        for skill_dir in _skill_dirs(live_skills):
+            rel = skill_dir.relative_to(live_skills)
+            if _bookkeeping(rel) or skill_dir.name in library_names or rel in tree_skills:
+                continue
+            files = [p for p in skill_dir.rglob("*")
+                     if p.is_file() and not _bookkeeping(p.relative_to(skill_dir))]
+            items.append({
+                "key": "absent-from-tree",
+                "where": f"{name}/{SKILLS}/{rel.as_posix()}",
+                "detail": f"a whole skill directory exists ONLY in the live profile "
+                          f"({len(files)} file(s), "
+                          f"{sum(p.stat().st_size for p in files)} b) — the tree carries no skill at "
+                          f"this path, so every instruction in it is unversioned and unreviewable: "
+                          f"commit it via an issue+PR under agents/{name}/{SKILLS}/ (issue #1060), "
+                          f"then `make sync-agent-profile PROFILE={name}` keeps both sides the same",
+            })
     return items
 
 
@@ -944,6 +1043,13 @@ def main(argv: list[str] | None = None) -> int:
     if live_base is None:
         print("[check-agent-profiles] live-profile comparison SKIPPED: no profiles directory at "
               f"{live_source} — tree checks only, and the live rulebooks were NOT compared", file=sys.stderr)
+    elif shared_library(live_base) is None:
+        # The directory-level reverse direction needs the library to tell a lane's skill from the ~116
+        # skills Hermes installs into every profile. Without it the gate would name the whole library,
+        # so it says it did not compare instead of burying the real findings (issue #1086).
+        print("[check-agent-profiles] live-only skill DIRECTORIES were NOT compared: no shared skill "
+              f"library at {live_base.parent / SKILLS} — without it a lane's own skill cannot be told "
+              "from the library every profile is seeded from", file=sys.stderr)
     items = findings(root, agents_dir)
     profiles, _ = read_manifest((root / agents_dir) if not agents_dir.is_absolute() else agents_dir)
     for name in unprotected(profiles):
