@@ -183,3 +183,62 @@ diverged worktrees" is a report; "mostly done" is not.
 3. **version-here:** this behaviour is versioned by issue + PR under agents/llgenie-pr-merge-conflict/, then sync-agent-profile PROFILE=llgenie-pr-merge-conflict CHECK=1 comes back byte-identical.
 4. **one lane, one PR:** before a sweep touches a PR, check bot-claim: and agent/issue-<n>-* branch; a claimed PR is another lane's (issue #994 rule 1).
 
+
+## After ANY strategy-flag rebase, diff the tree against main and read what you did not intend
+
+`-X theirs` (and `-X ours`) is a statement about **conflicts**, not about correctness. It resolves
+every conflicting hunk in the chosen direction — and the damage it does is precisely in hunks that
+*never showed up as conflicts*, so nothing flags them.
+
+Measured on a 128-commit stack root: `-X theirs` silently reverted main's `ci_images.py latest
+agent` back to an older `ref agent` in the `fix-loop-image` recipe. The only symptom was a unit test
+asserting a command string (`tests/test_fix_loop.py:284`), which cost a 35-minute matrix on the PR
+six others were stacked behind. The regression was real and later repaired by its own commit; the
+*detection* came from a human diffing two trees by hand, which does not scale.
+
+The check costs one command per file you did not mean to touch:
+
+```bash
+git diff origin/main -- Makefile        # expect: NO hunks, or only the ones you added
+grep -c 'the exact string main has'    Makefile
+```
+
+Rules that follow:
+- **Resolve a shared recipe/Makefile/CI file per hunk against main**, not by a strategy flag.
+- **After any `-X` rebase, diff every non-generated file against main** and confirm the absent hunks
+  are the ones you meant to be absent. Generated files (`CHANGES.md`, census) are regenerated, so
+  they are excluded from this check by construction.
+- **A test asserting a command string is a regression detector for a bad resolution**, not noise —
+  when one fails after a rebase, read the string it expected before editing the test.
+
+## Sibling PRs that touch the same doc for DIFFERENT subjects are a union, not a class
+
+When two PRs merge in sequence and both edit `README.md`, `docs/ENGINES.md` and the same test file,
+it is tempting to call the collision "one class, take main's side". That is wrong whenever the two
+PRs describe **different subjects** — measured: #1050 built **sglang** from source and #1049 built
+**vllm**'s three cells from source, and both legitimately edited the same three files. Taking either
+side deletes a real engine's documentation, and every gate stays green because the result is
+well-formed prose about one engine instead of two.
+
+Sort the conflicted files into two shapes before resolving anything:
+
+| shape | files | resolution |
+|---|---|---|
+| **aggregate** | `CHANGES.md`, a rendered index | take main's file, then regenerate from fragments (`make changes-index`); the branch's own row lives in its `docs/changes.d/<note>.md` fragment, which is the correct vehicle. Hand-merging the aggregate re-creates the collision for the next PR. |
+| **sibling content** | `README.md`, `docs/ENGINES.md`, a shared test | **merge both intents**, per hunk. Read both sides. |
+
+Never use a blanket `-X ours`/`-X theirs` on the sibling-content files. Prove the union by grepping
+for both subjects after the rebase:
+```bash
+git show HEAD:README.md | grep -ci vllm    # both must be non-zero
+git show HEAD:README.md | grep -ci sglang
+git diff origin/main -- README.md docs/ENGINES.md tests/test_engine_skills.py
+```
+Confirm that every hunk you kept is one you meant to keep — a green test suite does not prove a
+docs union, because a doc that lost one engine's paragraph still parses and still passes.
+
+**A replayed commit that applies cleanly can still regress the base — gate the whole replay, not just the conflicts.** Stacked-replay failures are not only `UU` conflicts and empty cherry-picks: a replayed commit re-deriving a file whose canonical newer form is already on the base tip applies without conflict yet silently undoes the newer content (measured on a SOUL fleet-block copy: the older generation deleted the base's newer rule-16 bullet, reddening the very gate the branch is about). After a stacked replay, run the branches' own gate; a red in the branch's own territory is the signal to check whether one replayed commit is an older generation — drop it (keep the base's file) rather than hand-reconcile, because its intent is already satisfied by the base.
+
+*detection* needed a hand diff of two trees, which does not scale — so `post-rebase-verify.sh` now
+by `scripts/test-revert-detector.sh`, which the pytest suite runs.
+runs that diff as **check 11** (every tracked text file that lost a line the base still has), proven
