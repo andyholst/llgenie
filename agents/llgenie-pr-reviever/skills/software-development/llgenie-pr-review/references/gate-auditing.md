@@ -112,5 +112,22 @@ only the second gates.
 named test file — not a neighbouring script with a similar name. If a CLI and a suite both exist,
 quote which one produced the rc=0, and treat the suite as authoritative whenever `ci-unit` runs it.
 
+## 6. A red test is not always a complaint about the change
+
+When a test reds inside a PR's diff, the default reading is "the change broke something". The inverse
+happens too: the assertion may be the change's **own safety check**, catching the way that kind of
+change is normally done wrong. A verbatim relocation of a shared block is the canonical case — copying
+text exactly is precisely the operation that duplicates a bullet when source and target both keep it.
+
+So before filing a red as a symptom, read **which assertion fired** and what property it names. Two
+reds sharing one cause is a defect; a red that names the operation the PR just performed is the gate
+working, and the honest report credits it instead of counting it as damage. Same file and line,
+opposite verdicts — the whole difference is whether you read the assertion's subject or only its
+result.
+
+This also changes what a fix should be. "Make the red go away" and "relocate this block
+conservatively" produce different diffs, and only the second keeps the gate meaningful; a fix that
+silences a safety check converts a caught mistake into an unguarded one.
+
 Gate hygiene is never a `do-not-merge` reason: file the issue, link it into any verdict it touches, and
 let the PR under review proceed.

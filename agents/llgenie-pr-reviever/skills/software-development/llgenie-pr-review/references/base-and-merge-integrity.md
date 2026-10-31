@@ -128,6 +128,40 @@ python3 -m pytest <the aggregate's own test> -q    # the render is only correct 
 Corollary: if a rebase is required for any reason, re-render afterwards even when you rendered
 before — the earlier render is now a claim about a base that no longer exists.
 
+## Test the MERGED RESULT, not the merge
+
+A textual `git merge-tree` answers *"do these two hunks collide"*, not *"is the result correct"*. An
+invariant that holds over a **rendered file** — a committed aggregate equal to its render, a manifest
+equal to its inventory — can fail on the merged tree even when the merge is textually clean, because
+each side rendered against its own base and the composition of two correct renders is not necessarily
+a correct render.
+
+So when `main` moves under an open PR, do not stop at `merge-tree`. Build the merge and run the check
+on the result:
+
+```bash
+git worktree add --detach /tmp/mg refs/remotes/live/main
+cd /tmp/mg && git merge --no-commit <head>
+python3 -m pytest <the invariant's own test> -q
+```
+
+"No conflicts" and "the merged result passes" are different claims. The first is cheap; the second is
+the one that decides whether a re-cut is needed — and it frequently answers *no* when intuition says
+yes, which is a matrix saved rather than a risk taken. Do not let "the base moved" stand in for
+"the merged result fails": only the second is a rebase trigger.
+
+## An arm records a time, never a head
+
+`autoMergeRequest.enabledAt` is stamped when someone enables auto-merge and is **not** cleared by a
+later push. Measured: one arm timestamp survived **three** head moves, including a head where the
+deciding gate had been cancelled and never executed.
+
+So the field answers *"was an arm requested"*, never *"is this head armed"*. Report arm state with the
+head beside it, and treat an arm older than the current head as **unverified** rather than as intent to
+merge the current one. When you read someone else's "it's armed" claim, the same gap applies: a live
+`enabledAt` says nothing about which sha it applies to, so neither party can conclude from it that the
+present head will merge.
+
 ## Quote the base at the moment of the claim
 
 Every finding, control and verdict is relative to a base sha. Read it (`git fetch origin
