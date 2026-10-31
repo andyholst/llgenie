@@ -41,6 +41,13 @@ for spec in "$@"; do
   echo "  worktree: $WT (left in place — never removed by this script)"
   cd "$WT" || continue
   OK=1
+  # Commit preservation: a cherry-pick that silently skips or drops one of this PR's own commits
+  # (a rebase-resolution error) is invisible to every content gate — the tree parses, the tests
+  # pass, one semantic change is just gone. Record the subjects of the commits we MEANT to replay
+  # (the cherry-pick rewrites shas, so subjects are the stable identity), then assert after the
+  # loop that each still exists in the replayed history. Measured: two lanes lost a fix to a
+  # silent discard this way and only a human diff found it.
+  WANTED=$(printf '%s\n' $PLUS | while read -r c; do git log -1 --format=%s "$c"; done)
   for c in $PLUS; do
     git cherry-pick "$c" >/dev/null 2>&1 && continue
     echo "  conflict at $(echo "$c" | cut -c1-8): $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
@@ -51,13 +58,34 @@ for spec in "$@"; do
       esac
     done
     python3 "$RESOLVER" . >/tmp/res-$N.log 2>&1
-    # any file the resolver does not know how to union: keep the base side, never a side we cannot read
-    for f in $(git diff --name-only --diff-filter=U); do git checkout --ours "$f" 2>/dev/null; done
+    # Anything the resolver did not union must NOT be resolved by picking a side: during a
+    # cherry-pick `--ours` is the BASE side, so `git checkout --ours` silently DROPS the replayed
+    # commit's own change -- a member of the exact silent-revert class this lane repairs. Measured
+    # by reading this file: the fallback kept base lines for every conflicted file the resolver
+    # could not judge, and the commit still proceeded. Refuse and abort instead; the author should
+    # reconcile the two real intents, never inherit one silently.
+    remaining=$(git diff --name-only --diff-filter=U)
+    if [ -n "$remaining" ]; then
+      echo "  unresolved conflict(s) the resolver did not union: $remaining"
+      echo "  REFUSING to silently take a side (--ours would drop the replayed commit's own change)"
+      OK=0; break
+    fi
     git add -A
     if [ -n "$(git grep -l -E '^(<<<<<<<|>>>>>>>)' -- . 2>/dev/null)" ]; then echo "  MARKERS REMAIN — aborting"; OK=0; break; fi
     GIT_EDITOR=true git cherry-pick --continue >/dev/null 2>&1 || { echo "  continue failed — aborting"; OK=0; break; }
   done
   [ "$OK" = 0 ] && { git cherry-pick --abort 2>/dev/null; cd "$P"; continue; }
+  # Verify no replayed commit was dropped: every subject we set out to replay must be in the new
+  # history. `git log --format=%s` is order-insensitive set comparison, so a squashing or a skip
+  # shows as a missing subject and refuses the push.
+  GOT=$(git log --format=%s "$(git rev-parse --short HEAD)" 2>/dev/null | sort -u)
+  LOST=$(printf '%s\n' "$WANTED" | while read -r s; do
+    [ -n "$s" ] && ! printf '%s\n' "$GOT" | grep -Fxq "$s" && printf '%s\n' "$s"; done)
+  if [ -n "$LOST" ]; then
+    echo "  COMMIT LOST during replay — not pushing:"
+    printf '      %s\n' "$LOST" | sed 's/^/    /'
+    cd "$P"; continue
+  fi
   make changes-index >/dev/null 2>&1
   if [ -n "$(git status --porcelain)" ]; then
     git add -A; git -c user.name='Andy Holst' -c user.email='andy.holst@protonmail.com' commit -q --amend --no-edit

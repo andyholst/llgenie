@@ -242,3 +242,37 @@ docs union, because a doc that lost one engine's paragraph still parses and stil
 *detection* needed a hand diff of two trees, which does not scale — so `post-rebase-verify.sh` now
 by `scripts/test-revert-detector.sh`, which the pytest suite runs.
 runs that diff as **check 11** (every tracked text file that lost a line the base still has), proven
+
+
+## Quote headRefOid from the API, never a remembered sha — and prove it is reachable
+
+A sha that is a valid git OBJECT but on no REF is a local-only leftover (a tree or an old head),
+and quoting it as "the pushed head" makes a report uncheckable: the reader greps, finds nothing, and
+has to distrust the whole row. Measured: `5a62dd08` was a local-only object quoted as #1117's head
+when its true head was `3a2357f6` (merged to `7640feae`). The reachability test resolves it in
+seconds:
+
+    git cat-file -t <sha>          # is it even an object?
+    git ls-remote origin | grep <sha>   # WANT non-empty -- on a remote ref
+    git for-each-ref | grep <sha>       # WANT non-empty -- on a local ref
+
+Empty remote AND empty local refs with `cat-file` answering = it is NOT a published head; do not
+quote it as one. Re-derived at read time, and confirmed by the merge event: auto-merge cannot fire
+on an unmerged verdict, so the deciding gate concluded at the true merged head before the merge
+timestamp. Run ids from that window may be culled by GitHub after hours (head-retention); the merge
+event is the durable proof.
+
+
+## A merged PR reports as MERGED — it has no mergeable, armed, or draft
+
+All three fields are alive-PR concepts, and a merged PR has none of them: `gh pr view` on a merged
+PR returns `state=MERGED` and `mergeable=UNKNOWN` (GitHub computes no merge ref for a closed PR).
+Carrying "MERGEABLE / armed / not draft / 0 failing checks" onto the report of a merged PR is how a
+board reads as "blocked on approvals" when nothing is waiting. Measured: #1117 was reported as
+"@ 3a2357f6 MERGEABLE armed" twice after it merged at 00:53:33Z to 7640feae -- the work was on main
+the whole time.
+
+Report shape when read fresh, all from ONE `gh pr view --json state,mergedAt,headRefOid,mergeable`:
+  merged:   state=MERGED mergedAt=<ts> head=<sha> merge_commit=<sha>        (no arm/draft lines)
+  open:     state=OPEN head=<sha> mergeable=<m> armed=<bool> draft=<bool>
+Never carry a cached alive-state onto a PR whose merged_at has since arrived; re-read the API.

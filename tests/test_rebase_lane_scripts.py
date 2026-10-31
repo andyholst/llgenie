@@ -162,8 +162,21 @@ def test_the_shipped_tools_exist_and_are_independent_implementations():
     """
     sh = (SCRIPTS / "salvage-audit.sh").read_text()
     py = (SCRIPTS / "salvage-four-bucket.py").read_text()
-    assert "salvage-four-bucket" not in sh, "shell audit delegates to the python one"
-    assert "salvage-audit.sh" not in py.replace("# ", ""), "python audit delegates to the shell"
+
+    # Delegation is an EXECUTION property, not a mention. An earlier version asserted the other
+    # program's NAME was absent from the file, which failed the moment the python tool printed a
+    # reconciliation line naming the shell one -- a text assertion rejecting a correct change, and
+    # exactly what this lane's rules forbid a test from doing. Only a line that both names the other
+    # program AND invokes it counts as delegation.
+    def invokes(src: str, other: str) -> bool:
+        for line in src.splitlines():
+            code = line.split("#", 1)[0]
+            if other in code and any(t in code for t in ("subprocess", "os.system", "run(", "exec ")):
+                return True
+        return False
+
+    assert not invokes(sh, "salvage-four-bucket"), "shell audit delegates to the python one"
+    assert not invokes(py, "salvage-audit.sh"), "python audit delegates to the shell"
     assert "MUST BE PRESERVED" in sh and "must be preserved" in py, \
         "both must report the same two conclusion lines for a reader to compare"
 
@@ -326,3 +339,235 @@ def test_the_phony_resolver_writes_a_makefile_make_accepts(tmp_path):
                            timeout=60, cwd=tmp_path)
         assert p.returncode == 0, (
             "make rejects the resolver's own output:\n" + (p.stdout + p.stderr)[-500:])
+
+
+def test_the_standing_rules_reference_exists_and_carries_the_current_rules(tmp_path):
+    """The splice tool must read its rules from the versioned tree, not a scratch file.
+
+    Measured defect: `splice-fleet-block.py` resolved its source to `/tmp/873.md`, a file that
+    exists on one machine until the next reboot. On this host that copy was TWO GENERATIONS STALE,
+    and running the tool on a correct SOUL rewrote four standing rules to older wording while
+    printing `block in soul: True`. A tool that silently degrades the text it exists to propagate
+    is the same defect as a `-X` strategy resolution.
+    """
+    ref = SCRIPTS.parent / "references" / "standing-rules.md"
+    assert ref.is_file(), (
+        "references/standing-rules.md is missing — the splice tool would fall back to a scratch "
+        "path and may splice an older generation of the rules")
+    text = ref.read_text()
+    for probe in ("Never hold a PR without a remedy",
+                  "Announce the work where the work lives",
+                  "Start from a fresh upstream main",
+                  "Arm auto-merge when the work is done"):
+        assert probe in text, f"the canonical rules file lacks a current rule: {probe!r}"
+
+
+def test_the_fleet_splice_is_idempotent_and_refuses_an_older_source(tmp_path):
+    """Behaviour, not text: a correct SOUL must be unchanged, and a stale source must be refused."""
+    splice = SCRIPTS / "splice-fleet-block.py"
+    ref = SCRIPTS.parent / "references" / "standing-rules.md"
+    if not splice.exists() or not ref.is_file():
+        return
+    soul_src = REPO / "agents" / "llgenie-pr-merge-conflict" / "SOUL.md"
+    soul = tmp_path / "SOUL.md"
+    soul.write_text(soul_src.read_text())
+
+    # 1. with the versioned source it must be a no-op
+    before = soul.read_text()
+    r = subprocess.run([str(splice), str(soul)], capture_output=True, text=True, timeout=120,
+                       env={**os.environ, "REBASE_STANDING_RULES": str(ref)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert soul.read_text() == before, (
+        "the splice rewrote a SOUL that already carried the canonical block:\n"
+        + r.stdout[-400:])
+    assert "MISSING" not in r.stdout, f"a current rule was reported missing:\n{r.stdout}"
+
+    # 2. with an older source it must refuse and write nothing
+    stale = tmp_path / "stale.md"
+    stale.write_text(
+        "```\n## Standing rules (fleet, learned 2026-10-28)\n"
+        "- **Never hold a PR without a remedy.**\n"
+        "- **Announce the work where the work lives.**\n"
+        "- **Start from a fresh upstream main.**\n"
+        "- **Arm when done, and only on a base of main.**\n```\n")
+    before = soul.read_text()
+    r = subprocess.run([str(splice), str(soul)], capture_output=True, text=True, timeout=120,
+                       env={**os.environ, "REBASE_STANDING_RULES": str(stale)})
+    assert r.returncode != 0, "a source missing a current rule was accepted"
+    assert "REFUSING" in r.stderr, r.stderr[-400:]
+    assert soul.read_text() == before, "the refused splice still wrote the file"
+
+
+def _load_salvage():
+    """Import the shipped script WITHOUT writing bytecode into the tree.
+
+    Measured: importing it normally creates `scripts/__pycache__/*.pyc` inside agents/. Those are
+    git-ignored, so no gate notices -- but `make sync-agent-profile` walks the working tree, hit the
+    .pyc, and died with `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7`. A test must not
+    change the tree it is testing: suppress bytecode writing for the duration of the import.
+    """
+    import importlib.util
+    import sys as _sys
+    src = SCRIPTS / "salvage-four-bucket.py"
+    if not src.exists():
+        return None
+    prev = _sys.dont_write_bytecode
+    _sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location("salvage_four_bucket", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        _sys.dont_write_bytecode = prev
+
+
+
+def test_the_salvage_audit_states_the_orphan_predicate():
+    """`orphan: N` alone is a count without its predicate.
+
+    Measured on this host: the orphan bucket held 124 branches and only 21 of them added a path
+    main lacks; the other 103 were lossless. The headline therefore read as 124 pieces of work to
+    rescue when the number a reader must act on was 21. The split is a pure function so it can be
+    asserted without gh or a real repository.
+    """
+    mod = _load_salvage()
+    if mod is None or not hasattr(mod, "orphan_split"):
+        return
+    rows = [
+        dict(bucket="orphan", branch="u1", added=["a/b.md"]),
+        dict(bucket="orphan", branch="u2", added=[]),
+        dict(bucket="orphan", branch="u3", added=["c.md", "d.md"]),
+        dict(bucket="orphan", branch="h1", added=["e.md"], held_by_pr=1147),
+        dict(bucket="merged-and-clean", branch="m1", added=[]),
+        dict(bucket="unmerged-with-a-PR", branch="p1", added=["x.md"]),
+    ]
+    uniq, held, lossless = mod.orphan_split(rows)
+    assert [r["branch"] for r in uniq] == ["u1", "u3"], uniq
+    assert [r["branch"] for r in held] == ["h1"], held
+    assert [r["branch"] for r in lossless] == ["u2"], lossless
+    # A PR-carrying or merged branch must never be counted as an orphan it has to preserve.
+    assert all(r["bucket"] == "orphan" for r in uniq + held + lossless), "orphan_split leaked a non-orphan"
+    # Content carried by an open PR head is NOT unique: deleting the branch loses nothing
+    # reviewable. This is the predicate that made the two shipped audit tools disagree (6 vs 21).
+    assert not any(r.get("held_by_pr") for r in uniq), "a PR-carried branch was called unique"
+
+
+def test_loading_the_shipped_scripts_leaves_no_bytecode_in_the_tree():
+    """A test must not mutate the tree it tests.
+
+    Measured: importing `salvage-four-bucket.py` normally writes `scripts/__pycache__/*.pyc` under
+    agents/. They are git-ignored, so no review and no gate sees them -- but `make sync-agent-profile`
+    copies every file under the profile directory into the live profile, so the .pyc were shipped
+    there (sync went from 18 files to 20), and once one was half-written the sync died outright:
+
+        UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa7 in position 0
+
+    which blocked the sanctioned tree -> live direction for this lane.
+    """
+    _load_salvage()
+    strays = [str(p) for p in (REPO / "agents").rglob("__pycache__")]
+    assert not strays, (
+        "loading a shipped script wrote bytecode into the tree, which sync-agent-profile then "
+        "copies into the live profile: " + ", ".join(strays[:3]))
+
+
+def test_the_pre_push_gate_runs_ratchet_not_check_for_import_roots():
+    """The gate must use the `ratchet` subcommand, never `check`.
+
+    Measured: on a pristine clean main, `check` returns rc=1 (84 grandfathered root findings)
+    while `ratchet` returns rc=0 -- because `check` is a raw shape scan and `ratchet` compares the
+    COUNT to the baseline. CI runs `ratchet`. If this gate used `check` it would DO NOT PUSH on
+    every clean tree, teaching the reader to disarm it. Pinned here because the one-line change
+    `check` -> `ratchet` (or back) reds exactly this behaviour and there is no cheaper assertion:
+    asserting the exit code would require a full tree with fixtures.
+    """
+    v = (SCRIPTS / "post-rebase-verify.sh").read_text()
+    assert "ratchet" in v, "the pre-push gate must invoke the import-roots RATCHET (the CI path)"
+    # The subcommand must be used, not merely mentioned: a comment saying 'use ratchet' with the
+    # code calling `check` is exactly the foot-gun in check_import_roots.py:18.
+    call_line = [l for l in v.splitlines() if "check_import_roots.py" in l and "ratchet" in l]
+    assert call_line, "the gate must CALL check_import_roots.py ratchet:\n" + \
+        "\n".join(l for l in v.splitlines() if "check_import_roots" in l)
+
+
+def test_no_replay_script_resolves_a_conflict_by_silently_choosing_a_side():
+    """A stacked-replay driver must never `git checkout --ours` a conflict it cannot union.
+
+    Measured by reading stack-replay.sh and then proving it in a throwaway cherry-pick:
+    `--ours` during a cherry-pick means the BASE side, so its fallback silently DROPPED the
+    replayed commit's own change (base.txt `--ours` -> 'mainline-change', losing 'pr-own-work')
+    and the commit still proceeded. That is the silent-revert class this lane exists to repair,
+    inverted. The fix refuses when the resolver leaves an unmerged file, so the author reconciles
+    two real intents instead of inheriting one silently.
+    """
+    for f in ("stack-replay.sh", "batch-rebase.sh"):
+        src = (SCRIPTS / f).read_text()
+        # drop comments FIRST, then look for a real `--ours` side-choice in CODE: a comment that
+        # merely names the foot-gun (this file's own note does) must not count as the defect.
+        call_lines = [code for code in (ln.split("#", 1)[0] for ln in src.splitlines())
+                      if "git checkout" in code and "--ours" in code]
+        assert not call_lines, (
+            f"{f} resolves a conflict with `--ours`, which silently drops the replayed commit's "
+            f"own change: {call_lines}")
+        # the refusal path for the resolver, if the script does replay
+        if "cherry-pick" in src:
+            assert "REFUSING" in src, f"{f} has no refusal when the resolver cannot union a file"
+
+
+def test_the_rebase_drivers_verify_commit_preservation():
+    """A rebase that silently drops one of the branch's own commits must refuse the push.
+
+    Measured: two lanes lost a fix to a silent discard this way and only a HUMAN diff found it --
+    the tree parses, the tests pass, one semantic change is just gone, so no content gate notices.
+    The drivers capture the branch's own commit subjects before the replay and assert each is still
+    in the history afterwards (rewrites change shas, so subjects are the stable identity). A check
+    that is never wired to stop the push is a ritual, so assert the refusal message is reachable.
+    """
+    for f in ("stack-replay.sh", "batch-rebase.sh"):
+        src = (SCRIPTS / f).read_text()
+        assert "OWN=" in src or "WANTED=" in src, f"{f} does not capture the pre-rebase own commits"
+        assert "COMMIT LOST" in src, f"{f} has no preservation refusal when a commit is dropped"
+        assert "grep -Fxq" in src, f"{f} compares subjects, not shas (rewrites change shas)"
+
+
+def test_the_commit_preservation_control_runs_and_catches_a_drop():
+    """The shipped negative control for the rebase drivers' preservation check must bite.
+
+    It builds a throwaway repo, replays one commit, and asserts the subject set-compare responds:
+    preserved -> LOST empty, dropped -> LOST names the commit. A checker that cannot fail pins
+    nothing, so the control itself asserts the DROP case (rc and the named subject), not just that
+    the script reached a PASS line (which an exit-0-without-running-the-cases script would also do).
+    """
+    ctrl = SCRIPTS / "test-commit-preservation.sh"
+    if not ctrl.exists():
+        return
+    r = subprocess.run(["bash", str(ctrl)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # the verdict must be the DROP case being caught, not merely a PASS banner
+    assert "LOST=[the PRs own change]" in r.stdout, (
+        "the control must have exercised and caught the dropped commit:\n" + r.stdout)
+
+
+def test_every_shipped_control_is_tracked_executable():
+    """A shipped script's MODE in the git index is part of its contract.
+
+    Measured: the new commit-preservation control shipped with mode 100755 in git, but the sync
+    had copied it into the live profile as 0644 in BOTH profile copies -- so the documented direct
+    invocation (./scripts/test-commit-preservation.sh) would have failed Permission denied for
+    anyone running it from the profile. Git is the source of truth: assert every *.sh control under
+    scripts/ is tracked with the executable bit; it is what a reinstall restores and what the sync
+    should preserve.
+    """
+    # NODOC: two previous drafts were unreliable. (1) An aggregate pathspec-glob
+    # (`git ls-files -s scripts/*.sh`) returned EMPTY in the container, so the test PASSED with
+    # no files scanned -- a vacuum. (2) Per-path `git -C ls-files` then returned NOTHING for every
+    # file because git refuses "dubious ownership" inside the container (repo owned by another uid)
+    # -- so it wrongly flagged every script. The faithful, container-safe check is os.access on the
+    # checkout: git's recorded 100755 mode BECOMES the worktree mode on checkout, so a non-exec
+    # tracked script is a non-exec worktree file, and this test IS what git would restore.
+    non_exec = [str(sh) for sh in sorted(SCRIPTS.glob("*.sh")) if not os.access(sh, os.X_OK)]
+    assert SCRIPTS.glob("*.sh"), "no .sh scripts found to scan -- the lane scripts dir is empty"
+    assert not non_exec, (
+        "these shipped scripts are tracked non-executable, so their documented form fails "
+        "Permission denied on every checkout: " + ", ".join(sorted(non_exec)))

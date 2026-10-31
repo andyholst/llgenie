@@ -30,3 +30,85 @@ no longer accept new lessons. Content is verbatim.
 3. **version-here:** this behaviour is versioned by issue + PR under agents/llgenie-pr-merge-conflict/, then sync-agent-profile PROFILE=llgenie-pr-merge-conflict CHECK=1 comes back byte-identical.
 2. **new-PR -> reviewer:** the planner sends new reviewable PRs to @llgenie-pr-reviever; this lane never reviews its own PR.
 1. **report-back:** rebase/resolve to done (last push, gates green, head fixed) -> post head sha + PR number + what stands to @llgenie-planner.
+
+## A line number is a property of a SHA, not of a file
+
+A dispatch that says "insert one blank line above line 39" is only actionable against the exact
+commit those line numbers were read from. Measured: three separate requests to fix
+`agents/<lane>/SOUL.md:39` named a heading that on the current main sat at line **49** — the
+referenced commit's copy was **84 lines** and main's was **94**, because other lanes' merges had
+added rules to the same file in between. Following the number literally would have inserted a blank
+line four rules early, in a file whose real defect was already fixed.
+
+Before acting on any line-numbered instruction:
+
+    git show <the-sha-in-the-request>:<file> | sed -n '<n-1>,<n+1>p'   # does it match the quote?
+    git show origin/main:<file>            | sed -n '<n-1>,<n+1>p'     # where is it NOW?
+    git rev-parse <sha>:<file> ; git rev-parse origin/main:<file>      # blob identity
+
+If the two blobs are equal, the fix is already in the tree and the request is answered by evidence,
+not by an edit. Report the pair of line numbers and the blob ids: that is what lets the asker
+retract the request instead of repeating it.
+
+Related, same class: an identifier match is not a record match. `grep architect@llgenie.local` over
+a commit range found 2 hits; `grep -i '^co-authored-by'` filtered to that address found 0 — the
+hits were PROSE describing the trailer rule inside commits about it. A trailer is a line-anchored
+construct, so the only valid check anchors at column 0. An unanchored grep for an identifier finds
+documentation about the identifier and reads it as an instance.
+
+## A ratchet red on a rebase is "your new file added roots", not "re-record the baseline"
+
+An import-roots ratchet (#953) records a baseline and refuses any file that raises the count. When
+a rebase brings this branch onto a main that carries the gate, a branch-side file written before
+the gate landed will red it — measured twice tonight: a branch adding `sys.path.insert(0, …/scripts)`
+plus bare `import check_agent_profiles` pushed bare 52→54 and sys-path 32→33, and the same class came
+back as a later dispatch.
+
+The two fixes are NOT interchangeable:
+  - on `main`, a NEWER file with grandfathered roots, carried in by a REBASE, is the case for
+    re-recording the baseline to the new count (the file predates the convention);
+  - on a BRANCH, a brand-new file adding its own roots is EXACTLY what the gate exists to refuse
+    (#796) — fix the file to use the established seam (`import scripts.<module>`, or the conftest
+    root), and re-running the gate must return to the ORIGINAL baseline, never a raised one.
+
+Choosing wrong re-records an inflated baseline and silently disables the ratchet for the next new
+file too. After the fix, `make check-import-roots` must print counts at or below the recorded
+baseline — not "OK: counts at a new higher baseline". The seam is the fix; the baseline is not.
+
+## A gate's SUBCOMMAND can change its verdict: call the one CI runs, not the one the help names first
+
+`scripts/check_import_roots.py` exposes `{check, report, ratchet}`. On a pristine clean main,
+`check` returns rc=1 (84 findings) while `ratchet` returns rc=0 (`OK {sys-path:32, bare:52}`) — the
+SAME tree, two verdicts, because `check` is a raw SHAPE scan (any vestige is a finding) and
+`ratchet` compares the COUNT to a baseline and fails only when it rose. `make check-import-roots`
+calls `ratchet`; CI gates on that. Reported twice tonight as a false green-is-red, and the cause is
+the script's own docstring naming the ratchet's behavior "`check` fails when they RISE" — a reader
+runs `check` expecting a baseline comparison and concludes the gate is broken.
+
+Two rules:
+  - when an assertion or a driver wraps a gate with several subcommands, CALL THE SAME SUBCOMMAND CI
+    RUNS. `ratchet` here; anything else either reds a clean tree (and teaches the reader to disarm
+    the gate) or silently checks a weaker/different predicate.
+  - in a report, name the subcommand with the verdict. "import-roots 84 finding(s)" is unreadable
+    until the reader knows whether that is `check` (a scan) or `ratchet` (a rise vs baseline) — the
+    same predicate-less-count failure as quoting a number without the branch that produced it.
+
+## A ratchet red is the BRANCH'S defect when main passes the same baseline — do not rebase it
+
+When a PR's `linux/unit` fails `check-import-roots` with a count over the recorded baseline
+(`bare: 54 now, 52 recorded`), decide WHOSE defect it is before acting. The decisive measurement is
+a clean archive of `main`:
+
+    git archive origin/main | (mkdir -p /tmp/t && cd /tmp/t && tar -xf - && make check-import-roots)
+
+If that returns `OK: counts at or below the recorded baseline`, main is clean, so the two extra
+bare sites live on the BRANCH — and a rebase onto clean main leaves them exactly where they are:
+still red on the same count. The remedy is converting the branch's over-baseline sites to the
+baseline pattern, not rebasing.
+
+An earlier drafting of this lesson said "on a BRANCH, a brand-new file adding roots is refused —
+fix the file to the conftest seam." This is the same rule applied to the whole branch, and it must
+not be read as an invitation to move main (re-record) to accommodate the branch. Measured on #1128:
+the 429 in the same job was a SUCCEEDED retry (a red herring), and the failing step was
+`make ci-unit` -> check-import-roots — read the exact failing STEP, not the job name, before
+naming a cause.
