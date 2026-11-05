@@ -8,7 +8,7 @@ when every criterion was genuinely proven and byte-exact on `main`. The generic 
 "the criteria aren't there", so a merged-and-proven issue sat at `0/5` on the wire with no canary
 and no actionable remedy, and #1644's tick never landed.
 
-This fix, measured at `37ab0621`:
+This fix, measured at `37ab0621` (rebased to `fddee091` for the base-race):
 
 - `acceptance_writeback.acceptance_items()` and `_bounds()` now match a `## Acceptance criteria`
   heading **by prefix** (`_is_acceptance_heading`), so `## Acceptance criteria (what closing
@@ -33,5 +33,5 @@ Technical note).
 This closes the #1792 / issue-form failure class at the seam side: a proven merge always lands as
 a ticked issue, and a non-canonical-but-harmless acceptance heading no longer strands `0/5`.
 
-Branch: `agent/issue-1802-acceptance-prefix-match` from `37ab0621`. Changed: `scripts/acceptance_writeback.py`,
+Branch: `agent/issue-1802-acceptance-prefix-match` from `fddee091` (origin/main at the rebased head). Changed: `scripts/acceptance_writeback.py`,
 `tests/test_acceptance_writeback.py`, this note + fragment, CHANGES.md re-render. Closes #1802.
