@@ -295,6 +295,34 @@ def test_disk_gate_frees_the_giant_layer_cache_before_the_build():
     assert "rm -rf" in step
 
 
+def test_the_disk_floor_is_per_cell_not_a_flat_constant():
+    """Issue #1915: the flat 30G #1893 floor was a false-green for oversized cells — tensorrt-llm/cuda
+    passed 107G free then ENOSPC'd 17 minutes later (run 42326740375, head 05a4f2fd). The workflow
+    must read the PER-CELL floor from the matrix, and the matrix must carry it from the committed
+    OVERSIZED_DISK_GB policy in engine_image.py, so an oversized cell that cannot fit the runner reds
+    fast with the df line instead of after a 13-minute ENOSPC."""
+
+    # Given the workflow and its job env
+    text = workflow()
+    step = text.split("Disk headroom", 1)[1].split("- uses:", 1)[0]
+    # When  the floor env is read
+    # Then  it is a per-cell matrix field, not a hard-coded 30
+    assert "LLGENIE_DISK_FLOOR_GB: ${{ matrix.disk_floor_gb }}" in step, \
+        "the floor must come from the matrix row, not a flat constant"
+
+    # And the matrix rows carry it from engine_image's committed policy
+    from scripts import engine_image as ei
+    rows = ei.matrix(ci=True)
+    real = [r for r in rows if r["engine"] != "none"]
+    assert real and all("disk_floor_gb" in r for r in real), "every buildable row must carry a disk_floor_gb"
+    # The measured-oversized cells name the policy that would have failed tensorrt-llm/cuda fast
+    tl = next(r for r in real if r["engine"] == "tensorrt-llm" and r["variant"] == "cuda")
+    assert tl["disk_floor_gb"] >= 120, tl
+    # The default for ordinary cells stays 30, so ordinary cells are not newly reddened
+    assert next(r for r in real if r["engine"] == "ollama" and r["variant"] == "cpu")["disk_floor_gb"] == 30
+
+
+
 
 
 

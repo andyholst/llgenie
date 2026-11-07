@@ -185,15 +185,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: ${{ matrix.engine != 'none' }}
-      - name: Disk headroom (CUDA/ROCm / oversized prebuilt bases like sglang carry multi-GB baked trees; a too-small runner must fail fast with the df line, never 13 minutes later with ENOSPC — issue #1893)
+      - name: Disk headroom (CUDA/ROCm / oversized prebuilt bases like sglang carry multi-GB baked trees; a too-small runner must fail fast with the df line, never 13 minutes later with ENOSPC — issue #1893; issue #1915 makes the floor PER-CELL from the matrix so an oversized cell names what its own build must hold, instead of a flat 30G that cannot see a 107G pass then an ENOSPC)
         if: ${{ matrix.engine != 'none' }}
         env:
-          # A free-space floor, in GiB, for the cell's build + export. An oversized cell whose
-          # runner cannot guarantee it below this floor reds HERE (a second, readable df verdict)
-          # instead of spending the build writing layers and hitting `no space left on device`
-          # mid-export. Tunable; the measured failure had 104G free and still exhausted the disk
-          # (sglang-cuda prebuilt base), so the floor is a durable headroom policy, not a retry.
-          LLGENIE_DISK_FLOOR_GB: "30"
+          # Durable per-cell floor in GiB (issue #1915): the matrix carries it so the
+          # workflow can fail an oversized cell fast with a readable df verdict when the
+          # runner cannot hold its real build+export (tensorrt-llm/cuda passed 107G free
+          # on the flat 30G floor then ENOSPC'd, run 42326740375). The default 30 stays
+          # for ordinary cells; OVERSIZED_DISK_GB in engine_image.py names the rest.
+          LLGENIE_DISK_FLOOR_GB: ${{ matrix.disk_floor_gb }}
         run: |
           set -euo pipefail
           # Free every reclaimable byte first: the docker/buildx layer cache (a previous cell's
@@ -207,10 +207,10 @@ jobs:
           free_gb=$(( avail / 1024 / 1024 / 1024 ))
           echo "free_gb=${free_gb}"
           echo "FREE_DISK_GB=${free_gb}" >> "$GITHUB_OUTPUT"
-          echo "::notice::engine=${{ matrix.engine }} variant=${{ matrix.variant }} free_disk_gb=${free_gb} floor_gb=${LLGENIE_DISK_FLOOR_GB} (issue #1893 disk-headroom policy)"
+          echo "::notice::engine=${{ matrix.engine }} variant=${{ matrix.variant }} free_disk_gb=${free_gb} floor_gb=${LLGENIE_DISK_FLOOR_GB} (issues #1893/#1915 disk-headroom policy, per-matrix-cell)"
           df -h /
           if [ "$free_gb" -lt "${LLGENIE_DISK_FLOOR_GB}" ]; then
-            echo "::error::engine=${{ matrix.engine }}/${{ matrix.variant }} free disk ${free_gb}G below the ${LLGENIE_DISK_FLOOR_GB}G oversized-cell floor — fail fast instead of a 13-minute ENOSPC (issue #1893)"
+            echo "::error::engine=${{ matrix.engine }}/${{ matrix.variant }} free disk ${free_gb}G below its ${LLGENIE_DISK_FLOOR_GB}G per-cell floor — fail fast instead of a 13-minute ENOSPC (issues #1893/#1915)"
             exit 1
           fi
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3

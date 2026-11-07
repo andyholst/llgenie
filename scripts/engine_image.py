@@ -1065,6 +1065,31 @@ def chat_testable(engine: str, variant: str) -> bool:
     return variant == "cpu" or engine in CPU_FALLBACK
 
 
+# Engine x arch cells whose build + export genuinely exceed a stock GitHub-hosted
+# runner's free disk at the #1893 gate, so their per-cell disk floor must be the
+# durable policy (issue #1915). Measured on run 42326740375 (head 05a4f2fd): the
+# flat 30 GiB floor reported `free_disk_gb=107` for tensorrt-llm/cuda and the cell
+# still ENOSPC'd 17 minutes later on the 145 GiB host (`no space left on device`
+# writing `tensorrt_llm/libs/libth_common.so`). The floor is only honest when it
+# names what the cell's build must hold, so oversized cells carry their own floor
+# here and the disk-headroom step fails FAST with the df line instead of a
+# 13-minute ENOSPC (the #1893 intent, which a flat floor cannot express). The
+# `none` placeholder row is never built and never needs a floor.
+# NOTE: the rocm cell (freetoken-rocm) is intentionally absent — the ROCm build is
+# routed to issue #1696 and must NOT be re-scoped here.
+OVERSIZED_DISK_GB = {
+    ("tensorrt-llm", "cuda"): 120,  # 107 GiB free was insufficient (run 42326740375) — needs a host that holds >145 GiB
+    ("sglang", "cuda"): 120,        # prebuilt base carries a multi-GB baked tree (the #1893 104-GiB failure)
+    ("strata", "cuda"): 120,        # fat CUDA prebuilt base; same oversized-build class
+    ("tensorfold", "cuda"): 90,     # flag probe is resource-sensitive; give the build honest headroom
+}
+
+
+def disk_floor_gb(engine: str, variant: str) -> int:
+    """The free-disk floor this cell must guarantee before its build starts (GiB)."""
+    return OVERSIZED_DISK_GB.get((engine, variant), 30)
+
+
 def disabled(engine: str, variant: str) -> str:
     """The tracking reason when this engine x arch image is disabled, else ''."""
     return DISABLED.get((engine, variant), "")
@@ -1140,7 +1165,8 @@ def matrix(ci: bool = False, changed: str = "", params_dir=None,
             serve = key == "cpu" and params["id"] not in SMOKE_SKIP
             out.append({"engine": params["id"], "backend": v["backend"], "variant": key,
                         "smoke": serve, "test": "serve" if serve else "detect",
-                        "chat": "yes" if chat_testable(params["id"], key) else ""})
+                        "chat": "yes" if chat_testable(params["id"], key) else "",
+                        "disk_floor_gb": disk_floor_gb(params["id"], key)})
     if not out:
         # GitHub fails a workflow whose matrix include list is empty BEFORE the
         # job's if: is evaluated (run 38105450418). One placeholder row keeps the
