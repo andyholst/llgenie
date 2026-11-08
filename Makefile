@@ -88,7 +88,7 @@ SERVER_BIN_STAMP := $(HOME)/.llgenie/server.bin.path
 	ci-openspec ci-cpu-health ci-top-tier ci-install ci-install-dry-args ci-free-disk ci-slow-rows ci-scope ci-verdict verdict-roster test-engine-stage bot-sync-main bot-sync-branch ci-wait-engine-images \
 	ci-install-dry ci-install-run ci-install-uninstall test-env test-top-tier test-top-tier-ci test-top-tier-cli-ci test-top-tier-serve test-top-tier-serve-ci \
 	check-agent-model model-pin-report check-agent-skills agent-skills-report test-agent-skills-live hermes-skills-register \
-	sync-agent-profile check-agent-profiles agent-profiles-report tester-fold-live \
+	sync-agent-profile check-agent-profiles agent-profiles-report tester-fold-live check-tick-prompt \
 	test-hub-live test-strata-live test-engine-bump-live test-native-engines test-native-engine-light test-variant-image \
 	bash-check engine-bump engine-bump-daily engine-bump-plan engine-derive generate-requirements openspec-tasks-check check-registry-keys ci-engines all-pipelines-sweep bots-restore-health targets-coverage
 
@@ -465,6 +465,10 @@ profile-drift: ## Fail when a tree copy is a PREFIX of the live rulebook (issue 
 .PHONY: profile-drift
 agent-profiles-report: ## Print every host-agent profile with its SOUL.md size, its skills and its standing rules, then every finding (issue #791)
 	python3 scripts/check_agent_profiles.py report
+
+.PHONY: check-tick-prompt
+check-tick-prompt: ## Fail when the live orchestrator tick prompt (cron/jobs.json, job cc5d2bd4083a) diverges from the committed copy agents/llgenie-planner/cron/llgenie-orchestrator-tick.md, naming both byte counts — host-only: a CI runner has no planner profile or live jobs.json, so this is the drift caller where they exist (issues #2136, #2159)
+	@python3 scripts/check_tick_prompt.py check
 
 
 # ---- a leg refuses to start on a missing key (issue #363) --------------------

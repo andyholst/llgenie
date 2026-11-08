@@ -466,6 +466,7 @@ make profile-drift-alarm                                             # the SCHED
 make tester-fold-live PROFILE=llgenie-tester                         # host-only: fold live→tree for a lane (or --check only) (#1079)
 make skill-parity                                                     # host-only, READ-ONLY: report live↔tree skill drift (#1924)
 make check-skill-code-parity                                          # CI (ci-unit): every skill reference cites a real, suite-ran test and repo-owned symbol
+make check-tick-prompt                                               # host-only: live orchestrator tick prompt (cron/jobs.json) vs the committed copy (#2136, #2159)
 ```
 
 `make sync-agent-profile` (`scripts/agent_profile_sync.py`, stdlib only) writes each file the tree
