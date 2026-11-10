@@ -182,6 +182,11 @@
    "reason": "scripts/proc.py is the ONE subprocess policy seam (issue #797); every module that runs a subprocess imports it by design."
   },
   {
+   "from": "ci_unit",
+   "to": "proc",
+   "reason": "scripts/proc.py is the ONE subprocess policy seam (issue #797); the ci-unit battery runs a subprocess per gate by design."
+  },
+  {
    "from": "agent_profile_sync",
    "to": "check_agent_profiles",
    "reason": "the sync writes a profile tree the validator defines: it reuses that module's reader/writer rather than restating the shape."
